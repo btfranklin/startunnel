@@ -1,0 +1,112 @@
+:root {
+  --color-paper: oklch(98.5% 0.004 250);
+  --color-paper-2: oklch(96% 0.006 250);
+  --color-paper-3: oklch(92% 0.008 250);
+  --color-paper-raised: oklch(99% 0.003 250);
+  --color-ink: oklch(24% 0.02 258);
+  --color-ink-2: oklch(34% 0.018 257);
+  --color-muted: oklch(44% 0.014 256);
+  --color-rule: oklch(83% 0.01 252);
+  --color-rule-2: oklch(70% 0.014 254);
+  --color-accent: oklch(48% 0.2 256);
+  --color-accent-hover: oklch(42% 0.19 256);
+  --color-accent-active: oklch(37% 0.17 256);
+  --color-accent-ink: oklch(98.5% 0.004 250);
+  --color-focus: oklch(20% 0.04 258);
+  --color-graphite: oklch(20% 0.016 260);
+  --color-graphite-2: oklch(27% 0.018 260);
+  --color-code: oklch(92% 0.009 250);
+  --color-code-muted: oklch(72% 0.012 252);
+  --color-error: oklch(40% 0.14 25);
+  --color-error-surface: oklch(95% 0.025 25);
+  --color-success-surface: oklch(94% 0.022 256);
+  --color-overlay: oklch(15% 0.01 256 / 0.58);
+  --color-shadow: oklch(20% 0.01 258 / 0.06);
+  --color-transparent: oklch(98.5% 0.004 250 / 0);
+
+  --font-display: "Space Grotesk", "Avenir Next", ui-sans-serif, sans-serif;
+  --font-body: "Inter", "Avenir Next", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  --font-glyph: "Noto Sans Symbols", "Apple Symbols", sans-serif;
+
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+  --space-4xl: 9rem;
+
+  --text-xs: 0.72rem;
+  --text-sm: 0.82rem;
+  --text-base: 1rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.56rem;
+  --text-xl: 1.95rem;
+  --text-2xl: 2.44rem;
+  --text-3xl: 3.05rem;
+  --text-4xl: 3.81rem;
+  --text-display: clamp(2.75rem, 5vw + 1rem, 5.25rem);
+  --text-display-small: clamp(2.35rem, 3.5vw + 1rem, 4rem);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
+  --dur-reduced: 0.01ms;
+
+  --rule-hair: 1px;
+  --radius-control: 6px;
+  --radius-surface: 10px;
+  --radius-round: 999px;
+
+  --page-gutter: clamp(1rem, 4vw, 4rem);
+  --page-max: 90rem;
+  --measure: 65ch;
+  --control-height: 2.75rem;
+
+  --z-base: 1;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+}
+
+body.landing-page {
+  --color-paper: oklch(11% 0.009 256);
+  --color-paper-2: oklch(15% 0.014 256);
+  --color-paper-3: oklch(19% 0.016 256);
+  --color-paper-raised: oklch(16% 0.015 256);
+  --color-ink: oklch(98% 0.005 254);
+  --color-ink-2: oklch(89% 0.01 254);
+  --color-muted: oklch(73% 0.012 254);
+  --color-rule: oklch(31% 0.014 255);
+  --color-rule-2: oklch(42% 0.017 255);
+  --color-accent: oklch(56% 0.23 259);
+  --color-accent-hover: oklch(53% 0.23 259);
+  --color-accent-active: oklch(50% 0.21 259);
+  --color-accent-ink: oklch(99% 0.003 254);
+  --color-focus: oklch(77% 0.15 254);
+  --color-graphite: oklch(13% 0.011 257);
+  --color-graphite-2: oklch(20% 0.015 257);
+  --color-code: oklch(90% 0.01 254);
+  --color-code-muted: oklch(72% 0.013 254);
+  --color-error: oklch(74% 0.13 25);
+  --color-error-surface: oklch(21% 0.045 25);
+  --color-success-surface: oklch(23% 0.07 255);
+  --color-overlay: oklch(5% 0.008 256 / 0.8);
+  --color-shadow: oklch(3% 0.005 256 / 0.28);
+  --color-transparent: oklch(11% 0.009 256 / 0);
+  --color-gate-metal-dark: oklch(9% 0.01 257);
+  --color-gate-edge: oklch(52% 0.075 249);
+  --color-gate-blue: oklch(60% 0.25 253);
+  --color-gate-blue-light: oklch(83% 0.12 234);
+  --color-gate-copper: oklch(78% 0.085 59);
+}

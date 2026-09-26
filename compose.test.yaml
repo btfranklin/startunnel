@@ -1,0 +1,245 @@
+x-test-environment: &test-environment
+  DJANGO_SETTINGS_MODULE: startunnel.settings.test
+  STARTUNNEL_ENV: test
+  STARTUNNEL_SECRET_KEY: ${STARTUNNEL_SECRET_KEY:-test-secret-key-not-for-production-000000000000000000000000000}
+  STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-test-api-key-pepper-000000000000000000000000000000000}
+  STARTUNNEL_ADDRESS_SECRET: ${STARTUNNEL_ADDRESS_SECRET:-test-address-secret-000000000000000000000000000000000}
+  STARTUNNEL_ADDRESS_DERIVATION_SECRET: ${STARTUNNEL_ADDRESS_DERIVATION_SECRET:-test-address-derivation-secret-000000000000000000000000}
+  STARTUNNEL_IDEMPOTENCY_SECRET: ${STARTUNNEL_IDEMPOTENCY_SECRET:-test-idempotency-secret-00000000000000000000000000000}
+  STARTUNNEL_ALLOWED_HOSTS: localhost,127.0.0.1,web
+  STARTUNNEL_BASE_URL: http://web:8000
+  STARTUNNEL_LOG_LEVEL: INFO
+  STARTUNNEL_METRICS_TOKEN: ${STARTUNNEL_METRICS_TOKEN:-test-metrics-token}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://startunnel:startunnel@postgres:5432/startunnel}
+  DATABASE_ADMIN_URL: ${DATABASE_ADMIN_URL:-postgresql://startunnel_admin:startunnel_admin@postgres:5432/startunnel}
+  TEST_DATABASE_URL: ${TEST_DATABASE_URL:-postgresql://startunnel_admin:startunnel_admin@postgres:5432/startunnel}
+
+x-test-logging: &test-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "7"
+    compress: "true"
+
+x-test-build-labels: &test-build-labels
+  net.startunnel.disposable-build: "true"
+
+x-test-service: &test-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+    labels: *test-build-labels
+    target: development
+    args:
+      PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d}
+      PDM_VERSION: ${PDM_VERSION:-2.28.0}
+      APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
+      APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
+  environment: *test-environment
+  networks:
+    - startunnel
+  tmpfs:
+    - /tmp:size=256m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *test-logging
+  depends_on:
+    web:
+      condition: service_healthy
+
+services:
+  tutorial:
+    build:
+      labels: *test-build-labels
+
+  migrate:
+    build:
+      labels: *test-build-labels
+
+  maintenance:
+    build:
+      labels: *test-build-labels
+
+  web:
+    image: startunnel-test-web:local
+    build:
+      labels: *test-build-labels
+      target: test-runtime
+    environment:
+      DJANGO_SETTINGS_MODULE: tests.browser_settings
+      STARTUNNEL_ALLOWED_HOSTS: localhost,127.0.0.1,web
+      STARTUNNEL_BASE_URL: http://web:8000
+
+  tests:
+    <<: *test-service
+    image: startunnel-tests:local
+    command:
+      - pdm
+      - run
+      - check
+
+  browser-tests:
+    <<: *test-service
+    profiles:
+      - browser
+    image: startunnel-browser-tests:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      labels: *test-build-labels
+      target: browser-tests
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d}
+        PDM_VERSION: ${PDM_VERSION:-2.28.0}
+        APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
+        APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
+    environment:
+      <<: *test-environment
+      STARTUNNEL_BROWSER_TESTS: "1"
+      STARTUNNEL_BROWSERS: ${STARTUNNEL_BROWSERS:-chromium,firefox,webkit}
+      STARTUNNEL_BROWSER_ARTIFACTS_DIR: /artifacts/browser
+    volumes:
+      - type: bind
+        source: ./artifacts
+        target: /artifacts
+    command:
+      - pdm
+      - run
+      - pytest
+      - -m
+      - browser
+    depends_on:
+      web:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    shm_size: 1gb
+
+  example-tests:
+    <<: *test-service
+    profiles:
+      - examples
+    image: startunnel-example-tests:local
+    environment:
+      <<: *test-environment
+      STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
+      STARTUNNEL_BASE_URL: http://web:8000
+      STARTUNNEL_LIVE_AGENT_TESTS: "1"
+      STARTUNNEL_STANDALONE_E2E: "1"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        credentials="/tmp/startunnel-example-credentials.env"
+        cleanup() {
+          DJANGO_SETTINGS_MODULE=startunnel.settings.development \
+            pdm run python manage.py shell -c \
+            'from accounts.models import User; from core.management.commands.provision_live_agent_proof import _PROOF_USERNAME, _clear_previous_proof_data; user=User.objects.filter(username=_PROOF_USERNAME).first(); user and _clear_previous_proof_data(user)' \
+            >/dev/null 2>&1 || true
+          rm -f "$${credentials}"
+        }
+        trap cleanup EXIT HUP INT TERM
+        DJANGO_SETTINGS_MODULE=startunnel.settings.development \
+          pdm run python manage.py provision_live_agent_proof --output "$${credentials}"
+        set -a
+        . "$${credentials}"
+        set +a
+        export STARTUNNEL_BASE_URL=http://web:8000
+        pdm run python scripts/run_example_catalog.py
+        pdm run python scripts/check_examples.py
+        pdm run pytest tests/docs/test_examples.py tests/docs/test_documentation.py tests/docs/test_agent_cli_live.py
+
+  agent-e2e:
+    <<: *test-service
+    profiles:
+      - agents
+    image: startunnel-agent-e2e:local
+    environment:
+      <<: *test-environment
+      STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
+      STARTUNNEL_EXTERNAL_E2E: "1"
+    command:
+      - pdm
+      - run
+      - pytest
+      - tests/e2e/test_agent_exchange.py
+      - tests/e2e/test_external_agent_exchange.py
+
+  live-agent-e2e:
+    <<: *test-service
+    profiles:
+      - live-agents
+    image: startunnel-live-agent-e2e:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      labels: *test-build-labels
+      target: agent-tests
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d}
+        PDM_VERSION: ${PDM_VERSION:-2.28.0}
+        APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
+        APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
+    environment:
+      <<: *test-environment
+      # The provisioner writes credentials into the development database. The
+      # public web process must use the same digest pepper to authenticate them.
+      STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
+      STARTUNNEL_LIVE_AGENT_TESTS: "1"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+    command:
+      - pdm
+      - run
+      - pytest
+      - tests/e2e/test_live_openai_agents.py
+      - -m
+      - live_agents
+
+  load-profile:
+    <<: *test-service
+    profiles:
+      - load
+    image: startunnel-load-tests:local
+    environment:
+      <<: *test-environment
+      # This isolated process owns fixture provisioning and cleanup. Public API
+      # traffic still reaches the web service through the restricted runtime role.
+      DATABASE_URL: ${DATABASE_ADMIN_URL:-postgresql://startunnel_admin:startunnel_admin@postgres:5432/startunnel}
+      DJANGO_SETTINGS_MODULE: startunnel.settings.development
+      STARTUNNEL_ENV: development
+      STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
+      STARTUNNEL_METRICS_TOKEN: ${STARTUNNEL_METRICS_TOKEN:-local-development-metrics-token}
+      STARTUNNEL_LOAD_TESTS: "1"
+      STARTUNNEL_HTTP_HOST: web
+      STARTUNNEL_LOAD_DOCKER_VERSION: ${STARTUNNEL_LOAD_DOCKER_VERSION:-}
+      STARTUNNEL_LOAD_IMAGE_DIGESTS: ${STARTUNNEL_LOAD_IMAGE_DIGESTS:-}
+      STARTUNNEL_LOAD_BUILD_MODE: ${STARTUNNEL_LOAD_BUILD_MODE:-}
+      STARTUNNEL_LOAD_SEED: ${STARTUNNEL_LOAD_SEED:-20260810}
+      STARTUNNEL_LOAD_DURATION_SECONDS: ${STARTUNNEL_LOAD_DURATION_SECONDS:-300}
+      STARTUNNEL_LOAD_SENDS_PER_SECOND: ${STARTUNNEL_LOAD_SENDS_PER_SECOND:-50}
+      STARTUNNEL_LOAD_ACTIVITY_READERS: ${STARTUNNEL_LOAD_ACTIVITY_READERS:-100}
+      STARTUNNEL_LOAD_DRAIN_SECONDS: ${STARTUNNEL_LOAD_DRAIN_SECONDS:-30}
+      STARTUNNEL_LOAD_USERS: ${STARTUNNEL_LOAD_USERS:-50}
+      STARTUNNEL_LOAD_CREDENTIALS: ${STARTUNNEL_LOAD_CREDENTIALS:-50}
+      STARTUNNEL_LOAD_WEB_WORKERS: ${STARTUNNEL_WEB_WORKERS:-4}
+      STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE:-18}
+    volumes:
+      - type: bind
+        source: ./artifacts
+        target: /artifacts
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        report="/artifacts/load-profile-$(date -u +%Y%m%dT%H%M%SZ).json"
+        exec pdm run python -m tests.load.run_profile \
+          --report "$${report}" \
+          --duration-seconds "$${STARTUNNEL_LOAD_DURATION_SECONDS}" \
+          --sends-per-second "$${STARTUNNEL_LOAD_SENDS_PER_SECOND}" \
+          --concurrent-activity-readers "$${STARTUNNEL_LOAD_ACTIVITY_READERS}" \
+          --drain-seconds "$${STARTUNNEL_LOAD_DRAIN_SECONDS}" \
+          --users "$${STARTUNNEL_LOAD_USERS}" \
+          --credentials "$${STARTUNNEL_LOAD_CREDENTIALS}"

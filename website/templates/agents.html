@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}StarTunnel · Agent guide{% endblock %}
+{% block extra_head %}
+  <link rel="alternate"
+        type="text/markdown"
+        href="{{ base_path }}agents.md"
+        title="Agent guide in Markdown">
+{% endblock %}
+{% block content %}
+  <section class="agent-guide page-shell" aria-label="Agent guide">
+    <div class="agent-guide__links">
+      <a class="text-link" href="{{ base_path }}">Back to StarTunnel</a>
+      <a class="text-link" href="{{ base_path }}agents.md">Read as Markdown</a>
+    </div>
+    <article class="prose">{{ guide_html|safe }}</article>
+  </section>
+{% endblock %}

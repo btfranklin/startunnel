@@ -1,0 +1,118 @@
+[project]
+name = "startunnel"
+description = "A stable message board for authenticated AI agents"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "B.T. Franklin" },
+]
+dynamic = ["version"]
+dependencies = ["Django>=6.0.8", "django-ninja>=1.6.2", "django-htmx>=1.29.0", "psycopg[binary,pool]>=3.3.4", "uvicorn[standard]>=0.52.1", "argon2-cffi>=25.1.0", "python-json-logger>=4.1.0", "prometheus-client>=0.26.0", "markdown-it-py>=4.2.0", "mdit-py-plugins>=0.6.1", "Pygments>=2.20.0", "dj-database-url>=3.1.2", "httpx>=0.28.1", "python-dotenv>=1.2.2", "cryptography>=50.0.1", "sqlparse>=0.6.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.13.0",
+    "pytest-cov>=7.1.0",
+    "pytest-asyncio>=1.4.0",
+    "hypothesis>=6.165.2",
+    "factory-boy>=3.3.3",
+    "time-machine>=3.3.1",
+    "ruff>=0.16.2",
+    "mypy>=2.3.0",
+    "django-stubs[compatible-mypy]>=6.0.9",
+    "djlint>=1.44.2",
+    "openapi-spec-validator>=0.9.0",
+    "jsonschema>=4.26.0",
+    "beautifulsoup4>=4.15.0",
+    "playwright>=1.62.0",
+    "bandit>=1.9.4",
+    "pip-audit>=2.10.1",
+    "cyclonedx-bom>=7.3.1",
+    "linkbust>=0.1.0",
+]
+live-agents = [
+    "openai-agents>=0.20.0",
+]
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "DJ", "RUF"]
+ignore = ["RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/*/migrations/*.py" = ["E501", "RUF012"]
+"tests/**/*.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "startunnel.settings.test"
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--strict-config --strict-markers --reuse-db"
+markers = [
+    "postgres: requires PostgreSQL",
+    "browser: requires a browser",
+    "live_agents: spends OpenAI API credits",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+omit = ["*/migrations/*", "*/settings/*", "*/asgi.py", "*/wsgi.py"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.14"
+mypy_path = "src"
+plugins = ["mypy_django_plugin.main"]
+strict = true
+exclude = ["src/.*/migrations/", "tests/fixtures/"]
+
+[tool.django-stubs]
+django_settings_module = "startunnel.settings.test"
+
+[[tool.mypy.overrides]]
+module = ["pygments.*"]
+ignore_missing_imports = true
+
+[tool.djlint]
+profile = "django"
+indent = 2
+max_line_length = 100
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.version]
+source = "scm"
+
+[tool.pdm.scripts]
+manage = "python manage.py"
+dev = "python scripts/start_development.py"
+test = "pytest"
+check = "python scripts/check.py"
+mypy = { cmd = "mypy", env = { PYTHONPATH = "src" } }
+openapi = "python manage.py export_openapi --output generated/openapi.json"
+inspect = "python manage.py inspect_runtime"
+load-profile = "python scripts/run_full_load_profile.py"
+production-up = "python scripts/start_production.py"
+postgres-credentials = "python scripts/rotate_postgres_passwords.py"
+security-release = "python scripts/run_security_release.py"

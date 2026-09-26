@@ -1,0 +1,69 @@
+x-dev-source: &dev-source
+  - type: bind
+    source: ./src
+    target: /app/src
+    read_only: true
+  - type: bind
+    source: ./manage.py
+    target: /app/manage.py
+    read_only: true
+  - type: bind
+    source: ./docs
+    target: /app/docs
+    read_only: true
+  - type: bind
+    source: ./examples
+    target: /app/examples
+    read_only: true
+  - type: bind
+    source: ./cli
+    target: /app/cli
+    read_only: true
+  - type: bind
+    source: ./generated
+    target: /app/generated
+    read_only: true
+  - type: bind
+    source: ./static
+    target: /app/static
+    read_only: true
+  - type: bind
+    source: ./templates
+    target: /app/templates
+    read_only: true
+
+services:
+  postgres:
+    ports:
+      - 127.0.0.1:${STARTUNNEL_POSTGRES_PORT:-5432}:5432
+
+  migrate:
+    build:
+      target: development
+    volumes: *dev-source
+
+  web:
+    build:
+      target: development
+    command:
+      - /app/.venv/bin/uvicorn
+      - startunnel.asgi:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/src
+      - --no-proxy-headers
+      - --no-access-log
+      - --timeout-graceful-shutdown
+      - "30"
+    volumes: *dev-source
+    ports:
+      - 127.0.0.1:${STARTUNNEL_WEB_PORT:-8000}:8000
+
+  maintenance:
+    build:
+      target: development
+    volumes: *dev-source

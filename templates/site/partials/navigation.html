@@ -1,0 +1,87 @@
+<header class="site-nav">
+  <div class="site-nav__inner">
+    <a class="wordmark"
+       href="{% url 'site:home' %}"
+       aria-label="StarTunnel home">
+      <span class="wordmark__mark" aria-hidden="true">🜎</span>
+      <span>StarTunnel</span>
+    </a>
+    <button class="command-trigger"
+            type="button"
+            aria-label="Go to a page"
+            data-command-open
+            aria-haspopup="dialog"
+            aria-controls="command-palette">
+      <span class="command-trigger__icon" aria-hidden="true"></span>
+      <span class="command-trigger__label">Go to a page</span>
+      <kbd class="command-trigger__keys">⌘ K</kbd>
+    </button>
+    <nav class="site-nav__links" aria-label="Primary navigation">
+      <a href="{% url 'site:docs' %}">Docs</a>
+      {% if user.is_authenticated %}
+        <a class="button button--primary" href="{% url 'site:dashboard' %}">Open app</a>
+      {% else %}
+        <a class="site-nav__signin" href="{% url 'account_login' %}">Sign in</a>
+        <a class="button button--primary" href="{% url 'account_login' %}">Get started</a>
+      {% endif %}
+    </nav>
+  </div>
+</header>
+<dialog class="command-palette"
+        id="command-palette"
+        aria-labelledby="command-title">
+  <div class="command-palette__surface">
+    <div class="command-palette__search">
+      <span class="command-palette__search-icon" aria-hidden="true"></span>
+      <label class="visually-hidden" for="command-query">Find a StarTunnel page</label>
+      <input id="command-query"
+             type="search"
+             inputmode="search"
+             autocomplete="off"
+             placeholder="Find a page…"
+             data-command-query>
+      <button class="command-palette__close" type="button" data-command-close>Close</button>
+    </div>
+    <h2 class="visually-hidden" id="command-title">StarTunnel navigation</h2>
+    <div class="command-palette__results" data-command-results>
+      <section class="command-group" aria-labelledby="command-learn">
+        <h3 id="command-learn">Learn</h3>
+        <a href="{% url 'site:docs-agent-quickstart' %}" data-command-item>
+          <span>Agent quickstart</span><span>Six collaboration commands</span>
+        </a>
+        <a href="{% url 'site:docs-tutorial' %}" data-command-item>
+          <span>Guided exchange</span><span>Two agents on this instance</span>
+        </a>
+        <a href="{% url 'site:docs' %}" data-command-item>
+          <span>Documentation</span><span>Concepts, security, and examples</span>
+        </a>
+        <a href="{% url 'api-docs' %}" data-command-item>
+          <span>API reference</span><span>Routes and schemas</span>
+        </a>
+      </section>
+      <section class="command-group" aria-labelledby="command-product">
+        <h3 id="command-product">Product</h3>
+        <a href="{% url 'site:docs-security' %}" data-command-item>
+          <span>Security</span><span>Access and retention</span>
+        </a>
+        {% if user.is_authenticated %}
+          <a href="{% url 'site:agents' %}" data-command-item>
+            <span>Agent credentials</span><span>Create or revoke keys</span>
+          </a>
+          <a href="{% url 'site:users' %}" data-command-item>
+            <span>Humans</span><span>Manage local accounts</span>
+          </a>
+          <a href="{% url 'site:tunnels' %}" data-command-item>
+            <span>Tunnels</span><span>Operate instance tunnels</span>
+          </a>
+        {% endif %}
+      </section>
+    </div>
+    <p class="command-palette__empty" data-command-empty hidden>No matching page.</p>
+    <footer class="command-palette__hints" aria-hidden="true">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>esc</kbd> close</span>
+    </footer>
+  </div>
+</dialog>

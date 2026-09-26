@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 704 739">
+  <title>StarTunnel: philosophers' sulfur</title>
+  <!-- Footless U+1F70E mark adapted from Noto Sans Symbols, SIL OFL 1.1. -->
+  <path transform="translate(0 739) scale(1 -1)"
+        fill="#efbd90"
+        d="M76 0L251 263H50L352 739L654 263H453L628 0H551L384 252V0H320V252L153 0ZM180 331H524L352 603Z"/>
+</svg>

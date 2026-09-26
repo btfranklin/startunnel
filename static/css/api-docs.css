@@ -1,0 +1,139 @@
+.swagger-ui {
+  color: var(--color-ink-2);
+  font-family: var(--font-body);
+}
+
+.swagger-ui .topbar,
+.swagger-ui .information-container .link,
+.swagger-ui .models-control:focus::after {
+  display: none;
+}
+
+.swagger-ui .info,
+.swagger-ui .scheme-container {
+  margin: 0 0 var(--space-xl);
+}
+
+.swagger-ui .info .title,
+.swagger-ui .opblock-tag,
+.swagger-ui .model-title {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.swagger-ui .info .title {
+  font-size: var(--text-xl);
+}
+
+.swagger-ui .info p,
+.swagger-ui .info li,
+.swagger-ui .info table,
+.swagger-ui .opblock-description-wrapper p,
+.swagger-ui .response-col_description,
+.swagger-ui .parameter__name,
+.swagger-ui .model,
+.swagger-ui label {
+  color: var(--color-ink-2);
+  font-family: var(--font-body);
+}
+
+.swagger-ui .wrapper {
+  max-inline-size: none;
+  padding: 0;
+}
+
+.swagger-ui .scheme-container {
+  background: var(--color-paper-2);
+  border: var(--rule-hair) solid var(--color-rule);
+  border-radius: var(--radius-surface);
+  box-shadow: none;
+  padding: var(--space-lg);
+}
+
+.swagger-ui .opblock,
+.swagger-ui section.models {
+  background: var(--color-paper-raised);
+  border-color: var(--color-rule);
+  border-radius: var(--radius-surface);
+  box-shadow: none;
+}
+
+.swagger-ui .opblock .opblock-summary {
+  border-color: var(--color-rule);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.swagger-ui .opblock .opblock-summary-method,
+.swagger-ui .opblock .opblock-summary-path,
+.swagger-ui code,
+.swagger-ui pre,
+.swagger-ui textarea,
+.swagger-ui .parameter__type,
+.swagger-ui .response-col_status {
+  font-family: var(--font-mono);
+}
+
+.swagger-ui .opblock .opblock-summary-method {
+  border-radius: var(--radius-control);
+  min-inline-size: 5.75rem;
+  text-shadow: none;
+}
+
+.swagger-ui .btn,
+.swagger-ui select,
+.swagger-ui input[type="text"] {
+  min-block-size: var(--control-height);
+  border: var(--rule-hair) solid var(--color-rule-2);
+  border-radius: var(--radius-control);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
+.swagger-ui .btn {
+  background: var(--color-paper-raised);
+  box-shadow: none;
+  padding-inline: var(--space-md);
+}
+
+.swagger-ui .btn:hover {
+  background: var(--color-paper-2);
+}
+
+.swagger-ui .btn:focus-visible,
+.swagger-ui select:focus-visible,
+.swagger-ui input:focus-visible,
+.swagger-ui button:focus-visible,
+.swagger-ui a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--color-paper);
+}
+
+.swagger-ui .model-box,
+.swagger-ui .opblock-body pre.microlight {
+  background: var(--color-graphite);
+  color: var(--color-code);
+}
+
+.swagger-ui .model-box .model,
+.swagger-ui .opblock-body pre.microlight {
+  color: var(--color-code);
+}
+
+.swagger-ui .authorization__btn svg,
+.swagger-ui .expand-operation svg,
+.swagger-ui .models-control svg,
+.swagger-ui .model-toggle::after {
+  fill: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swagger-ui *,
+  .swagger-ui *::before,
+  .swagger-ui *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,29 @@
+{% extends "site/base.html" %}
+{% block title %}Sign in · StarTunnel{% endblock %}
+{% block content %}
+  <div class="auth-shell page-shell">
+    <section class="auth-panel">
+      <h1>Sign in</h1>
+      <p>Use the local account that an instance administrator created for you.</p>
+      <form method="post" action="{% url 'account_login' %}" data-loading-form>
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+        {{ form.non_field_errors }}
+        <label for="{{ form.username.id_for_label }}">Username</label>
+        {{ form.username }}
+        {{ form.username.errors }}
+        <label for="{{ form.password.id_for_label }}">Password</label>
+        {{ form.password }}
+        {{ form.password.errors }}
+        <button class="button button--primary"
+                type="submit"
+                data-loading-label="Signing in…">Sign in</button>
+      </form>
+    </section>
+    <aside class="auth-aside">
+      <h2>Need an account?</h2>
+      <p>Ask an existing administrator or the instance operator to create one.</p>
+      <a class="text-link" href="{% url 'site:docs-tutorial' %}">Read the tutorial</a>
+    </aside>
+  </div>
+{% endblock %}

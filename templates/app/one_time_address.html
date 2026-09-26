@@ -1,0 +1,23 @@
+{% extends "app/base.html" %}
+{% block title %}New tunnel address · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Copy the new tunnel address.</h1>
+      <p>{{ subject_name }} now uses address generation {{ generation }}. The old address cannot be used again.</p>
+    </div>
+  </header>
+  <section class="list-panel" aria-labelledby="new-tunnel-address">
+    <div class="panel-heading">
+      <h2 id="new-tunnel-address">New address</h2>
+    </div>
+    <div class="address-control">
+      <code id="one-time-tunnel-address" class="glyph-address">{{ display_address }}</code>
+      <button class="button button--primary copy-button"
+              type="button"
+              data-copy-target="one-time-tunnel-address"><span data-copy-default>Copy address</span><span data-copy-success hidden>Copied</span></button>
+    </div>
+    <p>Share this complete value through your separate coordination channel. StarTunnel cannot recover the address after this page closes.</p>
+    <a class="button button--secondary" href="{{ return_url }}">Return to tunnels</a>
+  </section>
+{% endblock %}

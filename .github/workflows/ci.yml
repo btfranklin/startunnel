@@ -1,0 +1,96 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PDM_CHECK_UPDATE: "false"
+
+jobs:
+  canonical:
+    name: Canonical locked gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install the locked tools and dependencies
+        run: |
+          python -m pip install --disable-pip-version-check "pdm==2.28.0"
+          pdm install --frozen-lockfile --no-self
+          npm ci --ignore-scripts
+      - name: Run the canonical gate
+        run: pdm run check
+
+  postgres:
+    name: PostgreSQL
+    needs: canonical
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated service lane
+        run: >-
+          python3 scripts/run_isolated_test_lane.py postgres
+          --project-name stci-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+
+  external-proofs:
+    name: ${{ matrix.lane }} proof
+    needs: canonical
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        lane:
+          - examples
+          - agents
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated proof
+        run: >-
+          python3 scripts/run_isolated_test_lane.py ${{ matrix.lane }}
+          --project-name stci-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  browser:
+    name: Chromium, Firefox, and WebKit
+    needs: canonical
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated browser lane
+        run: >-
+          python3 scripts/run_isolated_test_lane.py browser
+          --project-name stci-browser-${{ github.run_id }}-${{ github.run_attempt }}

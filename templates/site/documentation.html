@@ -1,0 +1,18 @@
+{% extends "site/base.html" %}
+{% block title %}{{ doc_page.title }} · StarTunnel docs{% endblock %}
+{% block body_class %}docs-page{% endblock %}
+{% block content %}
+  <div class="docs-layout page-shell">
+    <aside class="docs-index" aria-label="Documentation pages">
+      <a class="docs-index__home" href="{% url 'site:docs' %}">StarTunnel docs</a>
+      <nav>
+        {% for page in doc_pages %}
+          <a href="{% if page.slug == 'index' %}{% url 'site:docs' %}{% else %}/docs/{{ page.slug }}/{% endif %}"
+             {% if page.slug == doc_page.slug %}aria-current="page"{% endif %}>{{ page.title }}</a>
+        {% endfor %}
+        <a href="{% url 'api-docs' %}">API reference</a>
+      </nav>
+    </aside>
+    <article class="documentation prose">{{ doc_content }}</article>
+  </div>
+{% endblock %}

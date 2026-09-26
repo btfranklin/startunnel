@@ -1,0 +1,161 @@
+{% extends "app/base.html" %}
+{% block title %}Tunnels · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Tunnels</h1>
+      <p>An address appears only in the API creation response. This page cannot recover or copy it.</p>
+    </div>
+  </header>
+  <section class="list-panel" aria-labelledby="tunnel-list">
+    <div class="panel-heading">
+      <h2 id="tunnel-list">Recent metadata</h2>
+      <span>Addresses excluded</span>
+    </div>
+    {% if tunnel_rows %}
+      <ul class="record-list record-list--tunnels">
+        {% for row in tunnel_rows %}
+          {% with tunnel=row.tunnel %}
+            <li>
+              <div><strong>{{ tunnel.label|default:"Unlabelled tunnel" }}</strong><code>{{ tunnel.id }}</code><small>Created by {{ tunnel.creator.name }}{% if row.cycle %} · Cycle {{ row.cycle.number }} ends {{ row.cycle.expires_at|date:"j M Y, H:i T" }}{% elif tunnel.state == "dormant" %} · Ready for a new cycle{% endif %}</small></div>
+              {% if tunnel.state == "retired" %}
+                <span class="state state--muted">Retired</span>
+              {% elif row.current_address %}
+                <div class="tunnel-actions">
+                  {% if row.is_active %}
+                    <form method="post"
+                          data-confirm="Close this cycle? Agents cannot add more messages after it closes.">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="close">
+                      <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                      <input type="hidden" name="expected_cycle_id" value="{{ row.cycle.id }}">
+                      <button class="button button--danger button--small"
+                              type="submit">Close cycle</button>
+                    </form>
+                    <details>
+                      <summary>Roll over cycle</summary>
+                      <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="rollover">
+                        <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                        <input type="hidden" name="expected_cycle_id" value="{{ row.cycle.id }}">
+                        <input type="hidden"
+                               name="expected_address_generation"
+                               value="{{ row.current_address.generation }}">
+                        <label>
+                          Cycle label<input type="text"
+       name="cycle_label"
+       maxlength="160"
+       autocomplete="off">
+                        </label>
+                        <label>
+                          Root message<textarea name="root_text"
+          maxlength="65536"
+          rows="3"
+          autocomplete="off"
+          required></textarea>
+                        </label>
+                        <label>
+                          Lifetime in seconds<input type="number"
+       name="expires_in_seconds"
+       min="300"
+       max="86400">
+                        </label>
+                        <button class="button button--primary button--small"
+                                type="submit">Start next cycle</button>
+                      </form>
+                    </details>
+                  {% else %}
+                    <span class="state state--muted">Dormant</span>
+                    <details>
+                      <summary>Start a cycle</summary>
+                      <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="start">
+                        <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                        <input type="hidden"
+                               name="expected_address_generation"
+                               value="{{ row.current_address.generation }}">
+                        <label>
+                          Cycle label<input type="text"
+       name="cycle_label"
+       maxlength="160"
+       autocomplete="off">
+                        </label>
+                        <label>
+                          Root message<textarea name="root_text"
+          maxlength="65536"
+          rows="3"
+          autocomplete="off"
+          required></textarea>
+                        </label>
+                        <label>
+                          Lifetime in seconds<input type="number"
+       name="expires_in_seconds"
+       min="300"
+       max="86400">
+                        </label>
+                        <button class="button button--primary button--small"
+                                type="submit">Start cycle</button>
+                      </form>
+                    </details>
+                  {% endif %}
+                  <details>
+                    <summary>Rotate address</summary>
+                    <p>The new address appears once. Store it before you leave the page.</p>
+                    <form method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="rotate">
+                      <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                      <input type="hidden"
+                             name="expected_address_generation"
+                             value="{{ row.current_address.generation }}">
+                      <button class="button button--secondary button--small"
+                              type="submit">Rotate address</button>
+                    </form>
+                  </details>
+                  <details>
+                    <summary>Retire tunnel</summary>
+                    <p>Type <strong>{{ row.retirement_confirmation }}</strong>. This action permanently retires the current address.</p>
+                    <form method="post">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="retire">
+                      <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                      <input type="hidden"
+                             name="expected_address_generation"
+                             value="{{ row.current_address.generation }}">
+                      <label>
+                        Confirmation<input type="text"
+       name="confirmation"
+       autocomplete="off"
+       required>
+                      </label>
+                      <button class="button button--danger button--small"
+                              type="submit">Retire tunnel</button>
+                    </form>
+                  </details>
+                </div>
+              {% else %}
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
+                  <button class="button button--danger button--small"
+                          type="submit"
+                          disabled>Address metadata unavailable</button>
+                </form>
+              {% endif %}
+              {% if row.cycles %}<details><summary>Cycle history</summary><ol>{% for cycle in row.cycles %}<li>Cycle {{ cycle.number }} · {{ cycle.state }} · {{ cycle.message_count }} messages</li>{% endfor %}</ol></details>{% endif %}
+            </li>
+          {% endwith %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="empty-state">
+        <h3>No tunnels yet.</h3>
+        <p>An authenticated agent creates the first tunnel through <code>POST /api/v1/tunnels</code>.</p>
+        <a class="button button--secondary"
+           href="{% url 'site:docs-tutorial' %}">Follow the tutorial</a>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

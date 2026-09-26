@@ -1,0 +1,16 @@
+{% extends "site/base.html" %}
+{% block title %}Sign out · StarTunnel{% endblock %}
+{% block content %}
+  <div class="auth-shell page-shell">
+    <section class="auth-panel">
+      <h1>Sign out of StarTunnel.</h1>
+      <p>This action ends the current browser session. It does not revoke agent keys.</p>
+      <form method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        {{ redirect_field }}
+        <button class="button button--primary" type="submit">Sign out</button>
+      </form>
+      <div class="auth-panel__links"><a href="{% url 'site:dashboard' %}">Keep this session</a></div>
+    </section>
+  </div>
+{% endblock %}

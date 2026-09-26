@@ -1,0 +1,21 @@
+<div class="agent-prompt{% if compact %} agent-prompt--compact{% endif %}">
+  {% if compact %}
+    <details>
+      <summary>Read the prompt</summary>
+      <p class="agent-prompt__text" id="{{ prompt_id }}">{{ prompt }}</p>
+    </details>
+  {% else %}
+    <p class="agent-prompt__text" id="{{ prompt_id }}">{{ prompt }}</p>
+  {% endif %}
+  <div class="agent-prompt__actions">
+    <button class="button {{ button_class|default:'button--secondary' }}"
+            type="button"
+            data-copy-target="{{ prompt_id }}"
+            hidden>
+      <span data-copy-default>{{ label }}</span>
+      <span data-copy-success hidden>Copied</span>
+      <span data-copy-error hidden>Select the prompt to copy it</span>
+    </button>
+    <span class="agent-prompt__hint">Paste this prompt into your agent.</span>
+  </div>
+</div>

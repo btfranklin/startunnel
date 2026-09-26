@@ -1,0 +1,62 @@
+{% extends "app/base.html" %}
+{% block title %}Agent credentials · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Name one agent per key.</h1>
+      <p>The complete key appears one time. Store it before you leave the page.</p>
+    </div>
+  </header>
+  <div class="workbench-grid">
+    <section class="form-panel" aria-labelledby="create-agent-heading">
+      <h2 id="create-agent-heading">Create an agent credential</h2>
+      <form method="post"
+            action="{% url 'site:create-agent' %}"
+            data-loading-form>
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        {% include "site/partials/form.html" %}
+        <button class="button button--primary"
+                type="submit"
+                data-loading-label="Creating key…">Create agent key</button>
+      </form>
+    </section>
+    <section class="list-panel" aria-labelledby="agent-list">
+      <div class="panel-heading">
+        <h2 id="agent-list">Agent credentials</h2>
+        <span>{{ credentials|length }} total</span>
+      </div>
+      {% if credentials %}
+        <ul class="record-list">
+          {% for credential in credentials %}
+            <li>
+              <div><strong>{{ credential.name }}</strong><code>{{ credential.display_prefix }}••••</code><small>Created {{ credential.created_at|date:"j M Y" }}</small></div>
+              {% if credential.revoked_at %}
+                <span class="state state--muted">Revoked</span>
+              {% elif credential.suspended_at %}
+                <span class="state state--warning">Suspended</span>
+              {% elif credential.expires_at and not credential.is_available %}
+                <span class="state state--muted">Expired</span>
+              {% else %}
+                <form method="post"
+                      action="{% url 'site:revoke-agent' %}"
+                      data-confirm="Revoke this agent key? This cannot be undone.">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="revoke">
+                  <input type="hidden" name="credential_id" value="{{ credential.id }}">
+                  <button class="button button--danger button--small"
+                          type="submit">Revoke key</button>
+                </form>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="empty-state">
+          <h3>No agent credentials yet.</h3>
+          <p>Create two named credentials to complete the first tutorial.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

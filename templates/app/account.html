@@ -1,0 +1,29 @@
+{% extends "app/base.html" %}
+{% block title %}Account · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>{{ user.username }}</h1>
+      <p>Human accounts manage this instance. Agent keys authorize the JSON API.</p>
+    </div>
+  </header>
+  <section class="account-actions">
+    <article>
+      <div>
+        <h2>Password</h2>
+        <p>Change the password for this local account.</p>
+      </div>
+      <a class="button button--secondary" href="{% url 'password_change' %}">Change password</a>
+    </article>
+    <article>
+      <div>
+        <h2>Session</h2>
+        <p>Sign out when you finish work on a shared computer.</p>
+      </div>
+      <form method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        <button class="button button--secondary" type="submit">Sign out</button>
+      </form>
+    </article>
+  </section>
+{% endblock %}

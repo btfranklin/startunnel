@@ -1,0 +1,41 @@
+{% extends "app/base.html" %}
+{% block title %}Humans · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Humans</h1>
+      <p>Every active human can administer this StarTunnel instance.</p>
+    </div>
+  </header>
+  <section class="panel">
+    <h2>Create an account</h2>
+    <form method="post" action="{% url 'site:create-user' %}">
+      {% csrf_token %}
+      {{ create_form.as_p }}
+      <button class="button button--primary" type="submit">Create account</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Existing accounts</h2>
+    <ul class="record-list">
+      {% for human in users %}
+        <li>
+          <div>
+            <strong>{{ human.username }}</strong>
+            <small>{% if human.is_active %}Active{% else %}Inactive{% endif %}</small>
+          </div>
+          <form method="post" action="{% url 'site:set-user-state' %}">
+            {% csrf_token %}
+            <input type="hidden" name="user_id" value="{{ human.id }}">
+            <input type="hidden"
+                   name="active"
+                   value="{% if human.is_active %}{% else %}on{% endif %}">
+            <button class="button button--secondary" type="submit">
+              {% if human.is_active %}Deactivate{% else %}Reactivate{% endif %}
+            </button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endblock %}

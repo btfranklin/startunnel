@@ -1,0 +1,10 @@
+{% extends "site/base.html" %}
+{% block body_class %}app-page{% endblock %}
+{% block content %}
+  <div class="app-shell page-shell">
+    {% include "app/partials/app_nav.html" %}
+    <div class="app-content">
+      {% block app_content %}{% endblock %}
+    </div>
+  </div>
+{% endblock %}

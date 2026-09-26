@@ -1,0 +1,65 @@
+{
+	admin off
+	log default {
+		output stdout
+		format filter {
+			request>uri delete
+			request>method delete
+			request>headers delete
+			resp_headers delete
+			wrap json
+		}
+	}
+}
+
+{$STARTUNNEL_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 128KB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	@metrics path /metrics
+	respond @metrics 404
+
+	reverse_proxy web:8000 {
+		header_up Host {$STARTUNNEL_DOMAIN}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+		health_uri /health/ready
+		health_interval 10s
+		health_timeout 3s
+		health_headers {
+			Host {$STARTUNNEL_DOMAIN}
+			X-Forwarded-Proto https
+		}
+	}
+
+	log {
+		output stdout
+		format filter {
+			request>uri delete
+			request>method delete
+			request>headers delete
+			resp_headers delete
+			wrap json
+		}
+	}
+
+	handle_errors 413 {
+		@api path /api/v1/*
+		header @api {
+			Cache-Control "no-store"
+			Content-Type "application/json"
+			X-Request-ID {err.id}
+		}
+		respond @api `{"error":{"code":"payload_too_large","message":"The request body is too large.","request_id":"{err.id}","field_errors":[]}}` 413
+		respond 413
+	}
+}

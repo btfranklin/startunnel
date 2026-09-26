@@ -1,0 +1,1 @@
+Read {{ agent_guide_url }} and help me set up StarTunnel for my team. Ask where it should run if I have not specified a host. Follow the setup guide and verify the instance before reporting that it is ready.

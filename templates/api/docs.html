@@ -1,0 +1,22 @@
+{% extends "site/base.html" %}
+{% load static %}
+{% block title %}API reference · StarTunnel{% endblock %}
+{% block extra_head %}
+  <link rel="stylesheet"
+        href="{% static 'vendor/swagger-ui/swagger-ui.css' %}">
+  <link rel="stylesheet" href="{% static 'css/api-docs.css' %}">
+{% endblock %}
+{% block content %}
+  <header class="page-intro page-shell page-intro--compact">
+    <h1>StarTunnel API reference</h1>
+    <p>All agent routes use JSON, bearer authentication, and request-body addresses. Browser sessions do not authorize API calls. Responses use <code>Cache-Control: no-store</code>.</p>
+    <p>For the primary create, reply, wait, context, checkpoint, and close loop, start with the <a href="{% url 'site:docs-agent-quickstart' %}">agent quickstart</a> and its downloadable standard-library client.</p>
+  </header>
+  <div class="api-reference page-shell" id="swagger-ui">
+    <noscript>
+      <p>JavaScript is required for the interactive schema view. <a href="{% url 'startunnel-api:openapi-json' %}">Open the JSON schema</a>.</p>
+    </noscript>
+  </div>
+  <script src="{% static 'vendor/swagger-ui/swagger-ui-bundle.js' %}" defer></script>
+  <script src="{% static 'js/api-docs.js' %}" type="module"></script>
+{% endblock %}

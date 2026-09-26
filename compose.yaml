@@ -1,0 +1,207 @@
+name: startunnel
+
+x-app-environment: &app-environment
+  DJANGO_SETTINGS_MODULE: startunnel.settings.development
+  STARTUNNEL_ENV: ${STARTUNNEL_ENV:-development}
+  STARTUNNEL_SECRET_KEY: ${STARTUNNEL_SECRET_KEY:-local-development-secret-key-not-for-production-000000000000000000000000}
+  STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
+  STARTUNNEL_ADDRESS_SECRET: ${STARTUNNEL_ADDRESS_SECRET:-local-development-address-secret-000000000000000000000}
+  STARTUNNEL_ADDRESS_DERIVATION_SECRET: ${STARTUNNEL_ADDRESS_DERIVATION_SECRET:-local-development-address-derivation-secret-000000000000}
+  STARTUNNEL_IDEMPOTENCY_SECRET: ${STARTUNNEL_IDEMPOTENCY_SECRET:-local-development-idempotency-secret-00000000000000}
+  STARTUNNEL_ALLOWED_HOSTS: ${STARTUNNEL_ALLOWED_HOSTS:-localhost,127.0.0.1}
+  STARTUNNEL_BASE_URL: ${STARTUNNEL_BASE_URL:-http://localhost:8000}
+  STARTUNNEL_TRUSTED_PROXY_CIDRS: ${STARTUNNEL_TRUSTED_PROXY_CIDRS:-127.0.0.0/8,172.16.0.0/12}
+  STARTUNNEL_MAX_REQUEST_BODY_BYTES: ${STARTUNNEL_MAX_REQUEST_BODY_BYTES:-131072}
+  STARTUNNEL_HISTORY_RETENTION_SECONDS: ${STARTUNNEL_HISTORY_RETENTION_SECONDS:-2592000}
+  STARTUNNEL_LOG_LEVEL: ${STARTUNNEL_LOG_LEVEL:-INFO}
+  STARTUNNEL_METRICS_TOKEN: ${STARTUNNEL_METRICS_TOKEN:-local-development-metrics-token}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://startunnel:startunnel@postgres:5432/startunnel}
+  DATABASE_ADMIN_URL: ${DATABASE_ADMIN_URL:-postgresql://startunnel_admin:startunnel_admin@postgres:5432/startunnel}
+  STARTUNNEL_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_DATABASE_POOL_MAX_SIZE:-40}
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+  target: runtime
+  args:
+    PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d}
+    PDM_VERSION: ${PDM_VERSION:-2.28.0}
+    APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
+    APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
+
+x-bounded-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "7"
+    compress: "true"
+
+x-app-service: &app-service
+  build: *app-build
+  image: ${STARTUNNEL_APP_IMAGE:-startunnel-app:local}
+  environment: *app-environment
+  networks:
+    - startunnel
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging: *bounded-logging
+  stop_grace_period: 30s
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18.4-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382}
+    entrypoint:
+      - /usr/local/bin/startunnel-postgres-entrypoint
+    command:
+      - postgres
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - log_connections=off
+      - -c
+      - log_disconnections=off
+      - -c
+      - log_error_verbosity=terse
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_parameter_max_length_on_error=0
+    environment:
+      POSTGRES_DB: startunnel
+      POSTGRES_USER: startunnel_admin
+      POSTGRES_PASSWORD: ${STARTUNNEL_DB_ADMIN_PASSWORD:-startunnel_admin}
+      STARTUNNEL_DB_RUNTIME_PASSWORD: ${STARTUNNEL_DB_RUNTIME_PASSWORD:-startunnel}
+      POSTGRES_INITDB_ARGS: --data-checksums --auth-host=scram-sha-256 --auth-local=trust
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./docker/postgres/entrypoint.sh:/usr/local/bin/startunnel-postgres-entrypoint:ro
+      - ./docker/postgres/init/10-runtime-role.sh:/docker-entrypoint-initdb.d/10-runtime-role.sh:ro
+      - ./docker/postgres/runtime-grants.sql:/usr/local/share/startunnel/runtime-grants.sql:ro
+    shm_size: 256mb
+    networks:
+      - startunnel
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --quiet --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}"
+      interval: 60s
+      start_interval: 2s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *bounded-logging
+
+  migrate:
+    <<: *app-service
+    environment:
+      <<: *app-environment
+      STARTUNNEL_DATABASE_ROLE: admin
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        /app/.venv/bin/python manage.py check &&
+        /app/.venv/bin/python manage.py migrate --noinput &&
+        /app/.venv/bin/python manage.py migrate --check
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    <<: *app-service
+    environment:
+      <<: *app-environment
+      STARTUNNEL_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE:-18}
+    command:
+      - /app/.venv/bin/uvicorn
+      - startunnel.asgi:application
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - ${STARTUNNEL_WEB_WORKERS:-1}
+      - --no-proxy-headers
+      - --no-access-log
+      - --timeout-graceful-shutdown
+      - "30"
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      maintenance:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - import os, urllib.request; host = os.environ['STARTUNNEL_ALLOWED_HOSTS'].split(',')[0].strip(); request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3).read()
+      interval: 60s
+      start_interval: 2s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  maintenance:
+    <<: *app-service
+    environment:
+      <<: *app-environment
+      STARTUNNEL_DATABASE_ROLE: admin
+      STARTUNNEL_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE:-4}
+    command:
+      - /app/.venv/bin/python
+      - manage.py
+      - maintenance_loop
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/startunnel-maintenance-healthcheck
+      interval: 60s
+      start_interval: 2s
+      timeout: 1s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  tutorial:
+    <<: *app-service
+    profiles:
+      - tutorial
+    environment:
+      <<: *app-environment
+      STARTUNNEL_BASE_URL: ${STARTUNNEL_TUTORIAL_BASE_URL:-http://web:8000}
+      STARTUNNEL_SENDER_KEY: ${STARTUNNEL_SENDER_KEY:-}
+      STARTUNNEL_RECEIVER_KEY: ${STARTUNNEL_RECEIVER_KEY:-}
+      STARTUNNEL_TUTORIAL_PRIORITY: ${STARTUNNEL_TUTORIAL_PRIORITY:-2}
+    command:
+      - /app/.venv/bin/python
+      - examples/python/tutorial_exchange.py
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: "no"
+
+networks:
+  startunnel:
+    driver: bridge
+
+volumes:
+  postgres_data:

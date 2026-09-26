@@ -1,0 +1,79 @@
+<div class="signal-gate" data-signal-gate data-gate-state="static">
+  <div class="signal-gate__stage">
+    <svg class="signal-gate__structure"
+         viewBox="0 0 800 800"
+         aria-hidden="true"
+         focusable="false">
+      <defs>
+      <radialGradient id="gate-water">
+      <stop offset="0" class="gate-water-dark" />
+      <stop offset=".75" class="gate-water-blue" />
+      <stop offset="1" class="gate-water-light" />
+      </radialGradient>
+      </defs>
+      <g data-gate-fallback>
+      <circle cx="400" cy="400" r="225" fill="url(#gate-water)" />
+      <g class="gate-water-lines" fill="none">
+      <path d="M235 287 Q318 335 301 242 M301 242 Q365 301 389 190 M389 190 Q437 284 501 238 M501 238 Q469 306 575 286 M575 286 Q497 363 615 383 M615 383 Q517 423 578 516 M578 516 Q475 479 481 598 M481 598 Q409 512 360 619 M360 619 Q348 508 248 565 M248 565 Q287 464 186 452 M186 452 Q286 403 205 337 M205 337 Q290 367 235 287" />
+      <path d="M301 242 Q319 316 363 332 Q409 302 437 284 M363 332 Q336 375 292 392 Q286 403 287 464 M292 392 Q330 441 369 460 Q348 508 360 619 M369 460 Q420 432 471 465 Q475 479 481 598 M471 465 Q477 415 517 423 M517 423 Q494 365 453 352 Q469 306 501 238 M453 352 Q413 380 363 332 M413 380 Q425 420 420 432" />
+      <circle cx="400" cy="400" r="215" />
+      <circle cx="400" cy="400" r="174" />
+      </g>
+      </g>
+      <g data-gate-ring>
+      <image class="gate-ring-image"
+             href="{{ asset_url }}img/signal-gate-ring.png"
+             x="0"
+             y="0"
+             width="800"
+             height="800"
+             preserveAspectRatio="xMidYMid meet" />
+      {% for glyph in gate_glyphs %}
+        <g class="gate-glyph" data-gate-glyph="{{ glyph.id }}" data-codepoint="{{ glyph.codepoint }}">
+        {% if glyph.id == "philosophers-sulfur" %}
+          <image href="{{ asset_url }}favicon.svg"
+                 x="{{ glyph.x|add:'-14' }}"
+                 y="{{ glyph.y|add:'-17' }}"
+                 width="28"
+                 height="34"
+                 transform="rotate({{ glyph.angle }} {{ glyph.x }} {{ glyph.y }})" />
+        {% else %}
+          <text x="{{ glyph.x }}" y="{{ glyph.y }}" transform="rotate({{ glyph.angle }} {{ glyph.x }} {{ glyph.y }})" text-anchor="middle" dominant-baseline="central">{{ glyph.character }}</text>
+        {% endif %}
+        </g>
+      {% endfor %}
+      </g>
+      <g data-gate-counter-ring>
+      <circle class="gate-inner-track" cx="400" cy="400" r="246" />
+      <path class="gate-index" d="M400 165v-12 M566 234l9-9 M635 400h12 M566 566l9 9 M400 635v12 M234 566l-9 9 M165 400h-12 M234 234l-9-9" />
+      </g>
+    </svg>
+    <canvas class="signal-gate__canvas"
+            data-gate-canvas
+            data-vertex-shader="{{ asset_url }}shaders/signal-gate.vert"
+            data-fragment-shader="{{ asset_url }}shaders/signal-gate.frag"
+            width="448"
+            height="448"
+            aria-hidden="true"
+            hidden></canvas>
+  </div>
+  <button class="signal-gate__toggle"
+          type="button"
+          data-gate-toggle
+          aria-pressed="false"
+          hidden>
+    <svg class="signal-gate__pause-icon"
+         viewBox="0 0 24 24"
+         aria-hidden="true"
+         focusable="false">
+      <path d="M8 5v14M16 5v14" />
+    </svg>
+    <svg class="signal-gate__play-icon"
+         viewBox="0 0 24 24"
+         aria-hidden="true"
+         focusable="false">
+      <path d="m9 5 10 7-10 7Z" />
+    </svg>
+    <span class="visually-hidden" data-gate-toggle-label>Pause animation</span>
+  </button>
+</div>

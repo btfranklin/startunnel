@@ -1,0 +1,142 @@
+name: Release validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_agents:
+        description: Spend provider credit on the bounded live-agent proof.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation
+  cancel-in-progress: false
+
+env:
+  PDM_CHECK_UPDATE: "false"
+
+jobs:
+  security:
+    name: Security and supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out all candidate history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Set up Go for the pinned secret scanner
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+          cache: false
+      - name: Install locked project dependencies
+        run: |
+          python -m pip install --disable-pip-version-check "pdm==2.28.0"
+          pdm install --frozen-lockfile --no-self
+          npm ci --ignore-scripts
+      - name: Install release scanners
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr
+          go install github.com/gitleaks/gitleaks/v8@v8.28.0
+          sudo install -m 0755 "$(go env GOPATH)/bin/gitleaks" /usr/local/bin/gitleaks
+          curl -fsSL \
+            https://raw.githubusercontent.com/docker/scout-cli/v1.21.0/install.sh \
+            -o "${RUNNER_TEMP}/install-docker-scout.sh"
+          sh "${RUNNER_TEMP}/install-docker-scout.sh" \
+            -b "${HOME}/.docker/cli-plugins" v1.21.0
+          gitleaks version
+          tesseract --version
+          docker scout version
+      - name: Run the fail-closed security lane
+        run: pdm run security-release
+      - name: Upload validated security reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/security/
+          if-no-files-found: error
+          retention-days: 14
+
+  system:
+    name: Isolated clean-stack system proof
+    needs: security
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated system proof
+        run: >-
+          python3 scripts/run_isolated_test_lane.py system
+          --project-name strelease-system-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload the safe system report
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/system-proof-*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  full-load:
+    name: Isolated fixed load proof
+    needs:
+      - security
+      - system
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated load proof
+        run: >-
+          python3 scripts/run_full_load_profile.py
+          --project-name strelease-load-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload the safe load report
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/load-profile-*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  live-agents:
+    name: Opt-in live-agent proof
+    if: ${{ inputs.run_live_agents }}
+    needs:
+      - security
+      - system
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run the isolated opt-in proof
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+        run: >-
+          python3 scripts/run_isolated_test_lane.py live-agents
+          --allow-openai-cost
+          --project-name strelease-live-${{ github.run_id }}-${{ github.run_attempt }}

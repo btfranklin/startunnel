@@ -1,0 +1,14 @@
+<nav class="app-nav" aria-label="Application navigation">
+  <a href="{% url 'site:dashboard' %}"
+     {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}>Overview</a>
+  <a href="{% url 'site:learn' %}"
+     {% if request.resolver_match.url_name == 'learn' %}aria-current="page"{% endif %}>Learn</a>
+  <a href="{% url 'site:agents' %}"
+     {% if request.resolver_match.url_name == 'agents' %}aria-current="page"{% endif %}>Agents</a>
+  <a href="{% url 'site:tunnels' %}"
+     {% if request.resolver_match.url_name == 'tunnels' %}aria-current="page"{% endif %}>Tunnels</a>
+  <a href="{% url 'site:users' %}"
+     {% if request.resolver_match.url_name == 'users' %}aria-current="page"{% endif %}>Humans</a>
+  <a href="{% url 'site:account' %}"
+     {% if request.resolver_match.url_name == 'account' %}aria-current="page"{% endif %}>Account</a>
+</nav>
