@@ -94,7 +94,8 @@ def test_agent_entry_points_share_sources_and_resolve_from_prompts(
     tmp_path: Path, base_path: str
 ) -> None:
     origin = "https://preview.example"
-    build(tmp_path, base_path=base_path, site_url=origin)
+    repository = "https://github.com/example/startunnel"
+    build(tmp_path, base_path=base_path, site_url=origin, repository_url=repository)
     soup = BeautifulSoup((tmp_path / "index.html").read_text(), "html.parser")
     buttons = soup.select("[data-copy-target]")
     assert len(buttons) == 3
@@ -103,6 +104,12 @@ def test_agent_entry_points_share_sources_and_resolve_from_prompts(
         assert target is not None
         assert not target.has_attr("hidden")
         assert origin + base_path + "agents.md" in target.get_text()
+    setup_index = repository + "/blob/main/docs/setup/README.md"
+    for prompt_id in ("start-prompt", "setup-prompt"):
+        prompt = soup.find(id=prompt_id)
+        assert prompt is not None
+        assert setup_index in prompt.get_text()
+    assert soup.select_one(f'a[href="{setup_index}"]') is not None
     guide = (tmp_path / "agents.md").read_bytes()
     assert guide == (ROOT / "skills/startunnel/SKILL.md").read_bytes()
     assert (tmp_path / "openapi.json").read_bytes() == (
@@ -111,6 +118,7 @@ def test_agent_entry_points_share_sources_and_resolve_from_prompts(
     index = (tmp_path / "llms.txt").read_text()
     assert origin + base_path + "agents.md" in index
     assert origin + base_path + "openapi.json" in index
+    assert setup_index in index
     assert "{{" not in index
     assert "brew install" not in soup.get_text()
 

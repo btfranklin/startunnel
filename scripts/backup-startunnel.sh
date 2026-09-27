@@ -20,7 +20,7 @@ if [ ! -d "$destination_parent" ]; then
     echo "The backup parent directory does not exist." >&2
     exit 2
 fi
-parent_mode="$(stat -f '%Lp' "$destination_parent" 2>/dev/null || stat -c '%a' "$destination_parent")"
+parent_mode="$(stat -c '%a' "$destination_parent" 2>/dev/null || stat -f '%Lp' "$destination_parent")"
 if [ "$parent_mode" != "700" ]; then
     echo "The backup parent directory must have mode 0700." >&2
     exit 2
@@ -75,7 +75,11 @@ docker compose exec -T postgres \
 
 (
     cd "$temporary"
-    shasum -a 256 postgres.dump > manifest.sha256
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum postgres.dump > manifest.sha256
+    else
+        shasum -a 256 postgres.dump > manifest.sha256
+    fi
 )
 mv -- "$temporary" "$destination"
 trap - EXIT HUP INT TERM

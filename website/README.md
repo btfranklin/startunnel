@@ -21,6 +21,11 @@ For a project site, use `--site-url https://btfranklin.github.io` with
 ## Agent entry points
 
 The homepage offers a general prompt and separate setup and connection prompts.
+The general and setup prompts link to the [team setup index](../docs/setup/README.md).
+The setup card, agent guide, and `llms.txt` also link to that index. It owns
+configuration selection and the complete EC2, Lightsail, DigitalOcean, and
+existing-server paths. These Markdown guides are read from the source repository;
+they are not copied into the static website artifact.
 Their authored text lives in `website/prompts/`. The static build renders each
 prompt once into visible, selectable text. The shared copy control reads that
 text. Without JavaScript, visitors can select the prompt or follow the guide link.
@@ -41,8 +46,9 @@ Python client from the user's instance and the existing deployment commands.
 The website does not issue keys or host a shared application instance.
 
 Publishing the site does not publish that repository, an application image,
-or a standalone CLI package. Production setup still requires the image and
-infrastructure inputs documented in [operations](../docs/operations.md).
+or a standalone CLI package. The [image guide](../docs/setup/image.md) explains
+how to build and publish the team's image. Production setup still requires
+the team's provider access, DNS, registry, and backup choices.
 
 The resource index follows the [llms.txt proposal](https://llmstxt.org/), checked
 on September 25, 2026. It gives agents a useful entry point; it does not control

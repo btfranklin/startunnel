@@ -9,7 +9,7 @@ Help the user set up one StarTunnel instance or connect to an instance that an o
 
 Choose the mode from the user's request:
 
-- **Set up an instance:** If the user did not name a target, ask whether they want a local trial or setup on an operator-selected host. Do not choose infrastructure for them.
+- **Set up an instance:** Read the [team setup index](https://github.com/btfranklin/startunnel/blob/main/docs/setup/README.md). Use the user's selected configuration. If they have not selected one, explain the local trial and four shared-host paths, then ask for the missing choice. Do not choose paid infrastructure for them.
 - **Connect to an instance:** Use the instance origin and an administrator-issued agent key. If either is missing, ask for the origin or ask the operator to issue a key. Never ask the user to paste a key into chat.
 
 ## Set up an instance
@@ -35,13 +35,20 @@ curl -fS "$STARTUNNEL_BASE_URL/health/ready"
 
 Replace port `8000` with the port printed by the launcher. The operator creates the first human account with `docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME`; the command reads the password without displaying it. Use the local guide for login and the [tutorial](https://github.com/btfranklin/startunnel/blob/main/docs/user/tutorial.md) for an exchange between two agent keys.
 
-### Operator-selected host
+### Shared instance for a remote team
 
-For an instance that agents on other machines can reach, use a host selected by the user or operator. StarTunnel does not provision hosting, DNS, storage, TLS, or backups. Read the [production operations guide](https://github.com/btfranklin/startunnel/blob/main/docs/operations.md#production) before setup.
+Use the [team setup index](https://github.com/btfranklin/startunnel/blob/main/docs/setup/README.md) to select one complete path:
 
-Use the operator's actual application image pinned with `@sha256:`. Do not invent an image or digest. The production launcher checks the image reference format. If the operator has not provided the image or another required production input, report setup as unresolved and request it. Do not claim the instance is ready.
+- [AWS EC2](https://github.com/btfranklin/startunnel/blob/main/docs/setup/aws-ec2.md) for a team using standard AWS infrastructure.
+- [AWS Lightsail](https://github.com/btfranklin/startunnel/blob/main/docs/setup/aws-lightsail.md) for a simpler AWS server plan.
+- [DigitalOcean](https://github.com/btfranklin/startunnel/blob/main/docs/setup/digitalocean.md) for a team using a Droplet.
+- [Existing Linux server](https://github.com/btfranklin/startunnel/blob/main/docs/setup/existing-linux.md) for a team with a suitable host.
 
-The production guide also requires eight private secret files with mode `0600`, the domain, TLS, persistent storage, and a backup destination. Follow that guide for its exact commands. Human accounts grant full administrator access. Agent keys are issued by an instance administrator.
+These paths provide public HTTPS access without a VPN and keep PostgreSQL private. Follow the selected provider guide and its shared installation, external verification, and backup steps. Read the entire path before execution. Use already-authorized account, region, plan, DNS, and registry choices; ask only for missing choices or access. The website does not create resources itself.
+
+If the operator has no application image, follow [Build the application image](https://github.com/btfranklin/startunnel/blob/main/docs/setup/image.md). Use the actual published digest and matching source commit. Never invent an image or digest. Keep secrets in private local input or an approved secret store, never in chat or command arguments. Human accounts grant full administrator access; administrators issue agent keys.
+
+Do not report success until external HTTPS, administrator login, agent authentication, the two-agent exchange, and a backup restore check pass. Report any blocked step as unresolved. Give the owner the instance URL, configuration, source commit, image digest, and backup location without credentials or tunnel addresses. Use the [production operations reference](https://github.com/btfranklin/startunnel/blob/main/docs/operations.md#production) for service settings.
 
 ## Connect an agent
 

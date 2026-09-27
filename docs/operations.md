@@ -1,5 +1,9 @@
 # Operations
 
+For a new shared instance, start with the [team setup index](setup/README.md).
+It has complete guides for AWS EC2, AWS Lightsail, DigitalOcean, and an existing
+Linux server. This page is the service and configuration reference.
+
 ## First start
 
 Generate the local `.env` file and private secrets:
@@ -71,46 +75,53 @@ docker compose exec web /app/.venv/bin/python manage.py inspect_runtime
 
 ## Back up and restore
 
+For production, use [the backup and recovery guide](setup/backups.md). It loads
+the production Compose configuration, preserves the application secrets,
+encrypts the backup, and checks a copy outside the server.
+
 Create a PostgreSQL backup:
 
 ```shell
 scripts/backup-startunnel.sh /absolute/private/path/startunnel.backup
 ```
 
-Verify a restore in an isolated target:
+Verify a restore in a temporary database on the selected PostgreSQL server:
 
 ```shell
 scripts/verify-startunnel-restore.sh /absolute/private/path/startunnel.backup
 ```
 
-The backup is one PostgreSQL artifact plus its checksum. There is no cache or archive volume to coordinate. Encrypt operator storage and test restores regularly.
+The backup path is a directory with `postgres.dump` and `manifest.sha256`.
+The parent directory must have mode `0700`. The helper stops application
+writers during the dump and restarts them afterward. It defaults to development
+Compose files unless `COMPOSE_FILE` is set. The database backup does not include
+the secret files required for recovery; preserve them as described in the
+production guide. There is no cache or archive volume to coordinate.
 
 ## Logs and secrets
 
-Use `scripts/container-logs.sh` for bounded service logs. Logs must not contain agent keys, addresses, cursors, passwords, message content, or identity data. Keep `.env` and `.env.tutorial` untracked and at mode `0600`.
+Use `scripts/container-logs.sh` for bounded development logs. For production,
+load the production configuration and use the [production log command](setup/maintain.md#fault-checks).
+Logs must not contain agent keys, addresses, cursors, passwords, message content,
+or identity data. Keep `.env` and `.env.tutorial` untracked and at mode `0600`.
 
 ## Production
 
-`compose.prod.yaml` uses immutable images and Docker secret files. Create the
-secret files once:
+Use [Install StarTunnel](setup/install.md) for the complete production procedure,
+including the image, Linux secret-file ownership, DNS, HTTPS, and first login.
+Use [Build the application image](setup/image.md) if the operator has no image.
 
-```shell
-pdm run python scripts/generate_production_secrets.py
-```
+`compose.prod.yaml` uses immutable images and Docker secret files.
+`STARTUNNEL_APP_IMAGE` selects the reviewed image with an `@sha256:` digest;
+`STARTUNNEL_DOMAIN` selects the public hostname. The production launcher checks
+the secret files and every enabled image, then starts without a host build.
 
-Set `STARTUNNEL_APP_IMAGE` to the reviewed application image with an
-`@sha256:` digest. Set `STARTUNNEL_DOMAIN` to the public host name. Then start
-the stack without building on the host:
-
-```shell
-pdm run production-up
-```
-
-Use `pdm run production-up --edge` to enable the included Caddy TLS service.
-Without that profile, provide a separate TLS reverse proxy. In both cases,
-provide DNS, encrypted volume storage, and a backup destination. Create the
-first administrator with the same `create_instance_admin` command shown above.
-No OAuth registration or external cache is required.
+The `--edge` option enables the included Caddy TLS service. The four setup
+guides use it. A deployment without that profile needs its own TLS reverse
+proxy and private route to the web container; that is a custom integration.
+Both forms need DNS, encrypted storage, and a backup destination.
+No OAuth registration or external cache is required. Use the setup guide's
+production shell for administrator and maintenance commands.
 
 The current migrations install a new schema. They do not convert an earlier
 StarTunnel database. Back up an older installation and obtain an explicit data

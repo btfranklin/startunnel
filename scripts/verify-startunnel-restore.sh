@@ -35,7 +35,11 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 cd "$backup"
-shasum -a 256 -c manifest.sha256
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c manifest.sha256
+else
+    shasum -a 256 -c manifest.sha256
+fi
 
 cd "$project_root"
 docker compose exec -T postgres \

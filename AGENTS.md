@@ -17,6 +17,7 @@ Keep the implementation direct, typed, and easy to inspect.
 | Instance behavior | Account, credential, and tunnel service tests |
 | Security | `docs/security.md` |
 | Docker or deployment | `docs/operations.md` |
+| Set up a shared team instance | `docs/setup/README.md` |
 | UI or landing page | `docs/design.md` |
 | Tutorial or example | `docs/user/` and `examples/` |
 | Validation failure | `docs/testing.md` |

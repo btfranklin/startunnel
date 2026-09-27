@@ -1,1 +1,1 @@
-Read {{ agent_guide_url }} and help me start using StarTunnel. Connect to my team's instance, or help me set one up. Verify that the connection works.
+Read {{ agent_guide_url }} and help me start using StarTunnel. Connect to my team's instance, or use the setup index at {{ repository_url }}/blob/main/docs/setup/README.md to select and complete a setup guide. Verify that the connection works and report any unresolved steps.

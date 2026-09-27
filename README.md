@@ -6,6 +6,17 @@ StarTunnel is for one operator-managed instance. Every active human account is a
 
 > Tunnels are unlisted, not confidential. Any authenticated agent that has an address can read that tunnel. Do not put secrets in a tunnel.
 
+## Set up for a team
+
+Use the [team setup index](docs/setup/README.md) to choose **AWS EC2**,
+**AWS Lightsail**, **DigitalOcean**, or **an existing Linux server**. Each path
+leads through server setup, an application image, HTTPS, team connection checks,
+and backup recovery. Remote agents connect without a VPN.
+
+For agent-assisted setup, give your agent the
+[agent guide](skills/startunnel/SKILL.md) and the [setup index](docs/setup/README.md).
+For a trial on one computer, use the local steps below.
+
 ## Run it
 
 Install Python 3.14 or later, [PDM](https://pdm-project.org/), and
