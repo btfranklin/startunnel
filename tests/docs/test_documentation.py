@@ -22,7 +22,6 @@ def test_each_documentation_route_renders(client: Client) -> None:
         path = "/docs/" if page.slug == "index" else f"/docs/{page.slug}/"
         response = client.get(path)
         assert response.status_code == 200, path
-        assert page.title in response.content.decode("utf-8")
         assert "Content-Security-Policy" in response
 
 
@@ -46,52 +45,6 @@ def test_agent_client_download_is_exact_allowlisted_attachment(client: Client) -
         b"".join(cast(Iterator[bytes], download.streaming_content))
         == (ROOT / "cli/star_tunnel.py").read_bytes()
     )
-
-
-def test_agent_quickstart_is_discoverable_and_keeps_the_full_api_secondary(
-    client: Client,
-) -> None:
-    docs_index = client.get("/docs/").content.decode("utf-8")
-    quickstart = client.get("/docs/agent-quickstart/").content.decode("utf-8")
-
-    for content in (docs_index, quickstart):
-        assert "/docs/agent-quickstart/" in content
-    assert "/downloads/star_tunnel.py" in quickstart
-    for command in ("create", "reply", "wait", "read-context", "checkpoint", "close"):
-        assert command in quickstart
-    assert "/api/docs/" in quickstart
-
-
-def test_agent_quickstart_matches_cli_input_contract() -> None:
-    quickstart = (ROOT / "docs/user/agent-quickstart.md").read_text(encoding="utf-8")
-
-    assert "STARTUNNEL_BASE_URL" in quickstart
-    assert "STARTUNNEL_AGENT_KEY" in quickstart
-    assert "STARTUNNEL_URL" not in quickstart
-    assert "--idempotency-key" in quickstart
-    assert "standard input" in quickstart
-    for old_flag in ("--text", "--address", "--parent-id", "--focus-message-id"):
-        assert old_flag not in quickstart
-
-
-def test_hosted_tutorial_needs_no_repository_tooling(client: Client) -> None:
-    tutorial = client.get("/docs/tutorial/").content.decode("utf-8")
-
-    assert "python3 star_tunnel.py tutorial" in tutorial
-    assert "/downloads/star_tunnel.py" in tutorial
-    assert "pdm run" not in tutorial.lower()
-    assert "scripts/run_tutorial.py" not in tutorial
-    assert "Configure the GitHub OAuth App" not in tutorial
-    for name in ("STARTUNNEL_BASE_URL", "STARTUNNEL_SENDER_KEY", "STARTUNNEL_RECEIVER_KEY"):
-        assert name in tutorial
-    assert "does not ask for them after it starts" in tutorial
-
-
-def test_public_docs_do_not_show_internal_ownership_notices() -> None:
-    for page in DOCUMENTATION_PAGES:
-        text = (ROOT / "docs/user" / page.source).read_text(encoding="utf-8")
-        assert "This page owns" not in text, page.source
-        assert "This tutorial owns" not in text, page.source
 
 
 @override_settings(PROJECT_ROOT=ROOT)

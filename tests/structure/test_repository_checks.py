@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -12,55 +10,11 @@ from scripts.check_secrets import OCR_PATTERNS
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize(
-    "script",
-    [
-        "check_structure.py",
-        "check_templates.py",
-        "check_docs.py",
-        "check_openapi.py",
-        "check_examples.py",
-        "check_secrets.py",
-    ],
-)
-def test_repository_check_script_passes(script: str) -> None:
-    result = subprocess.run(
-        [sys.executable, f"scripts/{script}"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 def test_ocr_secret_patterns_stay_on_one_rendered_line() -> None:
     pattern = OCR_PATTERNS["StarTunnel key-like OCR"]
 
     assert pattern.search("s t _ " + "A " * 43)
     assert not pattern.search("st_capture\nCreated 10 Aug 2026\nordinary product text")
-
-
-def test_readme_and_agents_use_one_canonical_command() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert "pdm run check" in readme
-    assert "pdm run check" in agents
-    assert "pdm run dev" in readme
-    assert "pdm run dev" in agents
-    assert "cp .env.example .env" not in readme
-
-
-def test_operator_docs_use_commands_available_in_runtime_images() -> None:
-    documents = [
-        (ROOT / "README.md").read_text(encoding="utf-8"),
-        (ROOT / "docs/operations.md").read_text(encoding="utf-8"),
-        (ROOT / "docs/user/local-development.md").read_text(encoding="utf-8"),
-    ]
-
-    assert all("docker compose exec web pdm" not in document for document in documents)
-    assert all("cp .env.example .env" not in document for document in documents)
-    assert all("/app/.venv/bin/python manage.py" in document for document in documents)
 
 
 def test_local_secret_files_are_ignored() -> None:

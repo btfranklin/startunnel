@@ -207,6 +207,14 @@ def _validate_label(value: str, *, field: str) -> str:
     return normalized
 
 
+def _normalize_correlation_id(value: str | None) -> str:
+    correlation = (value or "").strip()
+    validate_storable_text(correlation, field="correlation_id")
+    if len(correlation) > 128:
+        raise InvalidRequest("correlation_id can contain at most 128 characters.")
+    return correlation
+
+
 def _content_digest(payload: ValidatedPayload) -> bytes:
     body = payload.text if payload.payload_type == Message.PayloadType.TEXT else payload.json_text
     assert body is not None
@@ -345,10 +353,7 @@ def create_tunnel(
     normalized_cycle_label = _validate_label(cycle_label, field="A cycle label")
     limits = limits_for(credential)
     root_payload = validate_content(root_content, maximum_bytes=limits.bytes_per_message)
-    correlation = (root_correlation_id or "").strip()
-    validate_storable_text(correlation, field="correlation_id")
-    if len(correlation) > 128:
-        raise InvalidRequest("correlation_id can contain at most 128 characters.")
+    correlation = _normalize_correlation_id(root_correlation_id)
     mention_ids = root_mentions or []
     request_data = {
         "label": tunnel_label,
@@ -533,10 +538,7 @@ def post_reply(
 ) -> PostedReply:
     limits = limits_for(credential)
     payload = validate_content(content, maximum_bytes=limits.bytes_per_message)
-    correlation = (correlation_id or "").strip()
-    validate_storable_text(correlation, field="correlation_id")
-    if len(correlation) > 128:
-        raise InvalidRequest("correlation_id can contain at most 128 characters.")
+    correlation = _normalize_correlation_id(correlation_id)
     token = parse_address(address)
     mention_ids = mentions or []
     request_data = {
@@ -1131,10 +1133,7 @@ def _prepare_cycle_root(
     seconds = _cycle_lifetime(expires_in_seconds)
     label = _validate_label(cycle_label, field="A cycle label")
     payload = validate_content(root_content, maximum_bytes=limits.bytes_per_message)
-    correlation = (root_correlation_id or "").strip()
-    validate_storable_text(correlation, field="correlation_id")
-    if len(correlation) > 128:
-        raise InvalidRequest("correlation_id can contain at most 128 characters.")
+    correlation = _normalize_correlation_id(root_correlation_id)
     mention_ids = root_mentions or []
     _validate_mention_ids(mention_ids, maximum=limits.mentions_per_message)
     return seconds, label, payload, correlation, mention_ids

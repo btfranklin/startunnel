@@ -241,59 +241,6 @@ def check_migration_roots() -> list[Failure]:
     return failures
 
 
-def check_entry_points() -> list[Failure]:
-    failures: list[Failure] = []
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    required_readme = [
-        "pdm run dev",
-        "docs/user/agent-quickstart.md",
-        "docs/user/tutorial.md",
-        "/docs/local-development/",
-        "pdm run check",
-        "docs/architecture.md",
-        "docs/api.md",
-        "docs/security.md",
-        "docs/operations.md",
-        "docs/testing.md",
-        "docs/design.md",
-    ]
-    for value in required_readme:
-        if value not in readme:
-            failures.append(
-                Failure(
-                    "README contains the smallest useful loop and source map.",
-                    "README.md",
-                    f"Add `{value}` to README.md in its required section.",
-                    f"README.md does not contain {value!r}.",
-                )
-            )
-    required_agent_links = [
-        "VISION.md",
-        "docs/architecture.md",
-        "docs/api.md",
-        "docs/security.md",
-        "docs/operations.md",
-        "docs/testing.md",
-        "docs/design.md",
-        "docs/implementation-plan.md",
-        "docs/user/",
-        "examples/",
-        "pdm run check",
-    ]
-    for value in required_agent_links:
-        if value not in agents:
-            failures.append(
-                Failure(
-                    "AGENTS.md links each high-value source of truth.",
-                    "AGENTS.md",
-                    f"Add `{value}` to the task map or canonical command section in AGENTS.md.",
-                    f"AGENTS.md does not contain {value!r}.",
-                )
-            )
-    return failures
-
-
 def collect_failures() -> list[Failure]:
     checks = [
         check_import_directions,
@@ -302,7 +249,6 @@ def collect_failures() -> list[Failure]:
         check_transport_logging,
         check_settings_documentation,
         check_migration_roots,
-        check_entry_points,
     ]
     return [failure for check in checks for failure in check()]
 

@@ -42,6 +42,7 @@ CRITICAL_TARGETS = (
     CriticalTarget(
         "src/tunnels/services.py",
         (
+            "_normalize_correlation_id",
             "create_tunnel",
             "post_reply",
             "read_tree",

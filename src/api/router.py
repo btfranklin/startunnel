@@ -15,7 +15,7 @@ from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from agents.models import AgentCredential
-from core.limits import Limits, provider
+from core.limits import provider
 from core.security import client_ip
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.codec import InvalidAddress, address_transcription
@@ -211,12 +211,8 @@ def _credential(request: HttpRequest) -> AgentCredential:
     return request.auth  # type: ignore[no-any-return,attr-defined]
 
 
-def _limits(credential: AgentCredential) -> Limits:
-    return provider.for_instance()
-
-
 def _record_miss(request: HttpRequest, credential: AgentCredential) -> None:
-    consume_address_miss(credential, _limits(credential), source_ip=client_ip(request))
+    consume_address_miss(credential, provider.for_instance(), source_ip=client_ip(request))
 
 
 def _activity_cursor(tunnel: Tunnel, position: int, *, issued_at: int | None = None) -> str:
@@ -413,7 +409,7 @@ def _cycle_directory_item(cycle: Cycle) -> dict[str, Any]:
 )
 def me(request: HttpRequest) -> dict[str, Any]:
     credential = _credential(request)
-    limits = _limits(credential)
+    limits = provider.for_instance()
     status = agent_tunnel_status(credential=credential)
     return {
         "agent": {
@@ -456,7 +452,7 @@ def _create(
         root_content=root.content.model_dump(mode="json"),
         root_mentions=root.mentions,
         root_correlation_id=root.correlation_id,
-        new_request_gate=lambda: consume_tunnel_creation(credential, _limits(credential)),
+        new_request_gate=lambda: consume_tunnel_creation(credential, provider.for_instance()),
     )
     return _created_tunnel_response(created)
 

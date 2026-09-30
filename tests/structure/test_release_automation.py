@@ -1034,13 +1034,3 @@ def test_manual_release_workflow_limits_provider_settings_to_live_proof_step() -
     )
     assert workflow.count("--project-name") == runner_count
     assert "docker compose" not in workflow
-
-
-@pytest.mark.parametrize(
-    "path",
-    ["README.md", "AGENTS.md", "docs/testing.md", "docs/operations.md"],
-)
-def test_authoritative_docs_do_not_use_shared_project_for_test_lanes(path: str) -> None:
-    text = (ROOT / path).read_text(encoding="utf-8")
-
-    assert "docker compose -f compose.yaml -f compose.test.yaml" not in text

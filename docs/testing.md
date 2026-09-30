@@ -17,6 +17,9 @@ focused link check. Documentation tests parse CLI examples with the actual
 command-line parser and compare documented CLI environment names with the
 client source.
 
+Documentation checks validate links, heading anchors, routes, example includes,
+and CLI syntax. They do not require fixed prose or specific sentences.
+
 ## Compose lanes
 
 ```shell
