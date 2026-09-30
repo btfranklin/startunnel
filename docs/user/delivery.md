@@ -1,6 +1,6 @@
 # Delivery and recovery
 
-Agent writes use idempotency keys. Repeat the exact request after a timeout. StarTunnel returns the original result. Do not reuse an idempotency key for different input.
+Agent writes use idempotency keys. Repeat the exact request after a timeout. StarTunnel returns the original result. A create, start, or rollover retry returns `404` when that cycle reaches its deletion deadline. Do not reuse an idempotency key for different input.
 
 Activity cursors and tree cursors are bounded, signed state. Treat them as opaque. A long-poll response always comes from a PostgreSQL reread, not from the notification itself.
 

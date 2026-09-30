@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
 import pytest
+import time_machine
 from django.utils import timezone
 
+from tunnels import services
 from tunnels.access import cycle_is_readable
+from tunnels.errors import CycleUnavailable
 from tunnels.models import Cycle, IdempotencyRecord, Message, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
 from tunnels.services import close_cycle, create_tunnel, post_reply, read_tree
@@ -160,3 +164,153 @@ def test_expired_history_is_not_materialized_by_reads(credential_factory: Any) -
             address=created.address,
             cycle_id=created.cycle.id,
         )
+
+
+@pytest.mark.parametrize("operation", ["create", "start", "rollover"])
+def test_cycle_creation_replay_stops_at_history_deadline(
+    credential_factory: Any, settings: Any, operation: str
+) -> None:
+    settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 1
+    credential, _ = credential_factory()
+
+    def create() -> Any:
+        return create_tunnel(
+            credential=credential,
+            idempotency_key="retention-retry-create",
+            cycle_label="Temporary cycle",
+            root_content={"type": "text", "text": "Root content."},
+        )
+
+    first = create()
+    retry: Callable[[], Any] = create
+    if operation == "start":
+        close_cycle(
+            credential=credential,
+            idempotency_key="retention-retry-close-first",
+            address=first.address,
+            expected_cycle_id=first.cycle.id,
+        )
+
+        def start() -> Any:
+            return services.start_cycle(
+                credential=credential,
+                idempotency_key="retention-retry-start",
+                address=first.address,
+                expected_address_generation=1,
+                cycle_label="Temporary cycle",
+                root_content={"type": "text", "text": "Next root content."},
+            )
+
+        retry = start
+    elif operation == "rollover":
+
+        def rollover() -> Any:
+            return services.rollover_cycle(
+                credential=credential,
+                idempotency_key="retention-retry-rollover",
+                address=first.address,
+                expected_cycle_id=first.cycle.id,
+                expected_address_generation=1,
+                cycle_label="Temporary cycle",
+                root_content={"type": "text", "text": "Next root content."},
+            )
+
+        retry = rollover
+    created = first if operation == "create" else retry()
+    close_cycle(
+        credential=credential,
+        idempotency_key="retention-retry-close-result",
+        address=first.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    created.cycle.refresh_from_db()
+    deadline = created.cycle.delete_after
+    assert deadline is not None
+    count = Cycle.objects.count()
+    with time_machine.travel(deadline - timedelta(microseconds=1), tick=False):
+        replay = retry()
+        assert replay.replay
+        assert replay.cycle.id == created.cycle.id
+        assert replay.cycle.label == "Temporary cycle"
+        assert replay.message_count == 1
+    with time_machine.travel(deadline, tick=False), pytest.raises(CycleUnavailable):
+        retry()
+    assert Cycle.objects.count() == count
+
+
+def test_branch_assembly_handles_history_deleted_after_focus_read(
+    credential_factory: Any,
+) -> None:
+    created, reply = _conversation(credential_factory, "read-deletion")
+    credential = created.tunnel.creator
+    close_cycle(
+        credential=credential,
+        idempotency_key="close-read-deletion",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    focus = services.get_message(
+        credential=credential,
+        address=created.address,
+        message_id=reply.message.id,
+        cycle_id=created.cycle.id,
+    )
+    created.cycle.refresh_from_db()
+    deadline = created.cycle.delete_after
+    assert deadline is not None
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
+    with pytest.raises(CycleUnavailable):
+        services.load_branch(focus)
+
+
+def test_subtree_hydration_rejects_missing_selected_messages(credential_factory: Any) -> None:
+    created, reply = _conversation(credential_factory, "subtree-deletion")
+    selected_ids = [created.root.id, reply.message.id]
+    close_cycle(
+        credential=created.tunnel.creator,
+        idempotency_key="close-subtree-deletion",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    created.cycle.refresh_from_db()
+    deadline = created.cycle.delete_after
+    assert deadline is not None
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
+    with pytest.raises(CycleUnavailable):
+        services._messages_by_id_in_order(selected_ids)
+
+
+def test_message_hydration_does_not_return_a_partial_page(credential_factory: Any) -> None:
+    created, _ = _conversation(credential_factory, "partial-page")
+    with pytest.raises(CycleUnavailable):
+        services._messages_by_id_in_order([created.root.id, uuid4()])
+
+
+def test_branch_assembly_handles_a_deleted_uncached_ancestor(credential_factory: Any) -> None:
+    created, reply = _conversation(credential_factory, "uncached-ancestor")
+    credential = created.tunnel.creator
+    descendant = post_reply(
+        credential=credential,
+        idempotency_key="descendant-uncached-ancestor",
+        address=created.address,
+        parent_id=reply.message.id,
+        content={"type": "text", "text": "Descendant content."},
+    )
+    focus = services.get_message(
+        credential=credential,
+        address=created.address,
+        message_id=descendant.message.id,
+        cycle_id=created.cycle.id,
+    )
+    close_cycle(
+        credential=credential,
+        idempotency_key="close-uncached-ancestor",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    created.cycle.refresh_from_db()
+    deadline = created.cycle.delete_after
+    assert deadline is not None
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
+    with pytest.raises(CycleUnavailable):
+        services.load_branch(focus)

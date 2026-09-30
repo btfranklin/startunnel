@@ -14,7 +14,6 @@ from django.utils.module_loading import import_string
 
 from api.middleware import ApiErrorEnvelopeMiddleware
 from core.middleware import (
-    DatabaseMetricsMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
     TrustedProxyMiddleware,
@@ -39,7 +38,6 @@ def test_entire_django_middleware_chain_is_async_capable() -> None:
         RequestIdMiddleware,
         SecurityHeadersMiddleware,
         ApiErrorEnvelopeMiddleware,
-        DatabaseMetricsMiddleware,
     ],
 )
 async def test_project_middleware_awaits_an_async_downstream(middleware_type: Any) -> None:

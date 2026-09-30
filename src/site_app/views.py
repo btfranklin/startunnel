@@ -357,7 +357,11 @@ def tunnels(request: HttpRequest) -> HttpResponse:
         }
         for tunnel in tunnels
     ]
-    return render(request, "app/tunnels.html", {"tunnel_rows": tunnel_rows})
+    return render(
+        request,
+        "app/tunnels.html",
+        {"tunnel_rows": tunnel_rows, "cycle_form": TunnelCycleForm()},
+    )
 
 
 @login_required

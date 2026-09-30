@@ -12,14 +12,12 @@ from typing import Any, cast
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.conf import settings
-from django.db import connection
 from django.http import HttpRequest, HttpResponse
 
 from .logging import request_id_var
-from .metrics import API_REQUEST_SECONDS, API_REQUESTS, DB_OPERATION_SECONDS
+from .metrics import API_REQUEST_SECONDS, API_REQUESTS
 from .security import CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY
 
-DATABASE_OPERATIONS = {"delete", "insert", "select", "update"}
 SAFE_HTTP_METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
 logger = logging.getLogger("startunnel.request")
 
@@ -95,19 +93,6 @@ class TrustedProxyMiddleware(_DualModeMiddleware):
         return await self._async_response(request)
 
 
-def _measure_database(
-    execute: Callable[..., Any],
-    sql: str,
-    params: object,
-    many: bool,
-    context: object,
-) -> Any:
-    first_word = sql.lstrip().split(None, 1)[0].lower() if sql.strip() else "other"
-    operation = first_word if first_word in DATABASE_OPERATIONS else "other"
-    with DB_OPERATION_SECONDS.labels(operation=operation).time():
-        return execute(sql, params, many, context)
-
-
 class RequestIdMiddleware(_DualModeMiddleware):
     @staticmethod
     def _begin(request: HttpRequest) -> tuple[Token[str], float]:
@@ -155,18 +140,6 @@ class RequestIdMiddleware(_DualModeMiddleware):
             return self._complete(request, await self._async_response(request), started_at)
         finally:
             request_id_var.reset(token)
-
-
-class DatabaseMetricsMiddleware(_DualModeMiddleware):
-    def __call__(self, request: HttpRequest) -> Any:
-        if self.async_mode:
-            return self.__acall__(request)
-        with connection.execute_wrapper(_measure_database):
-            return self._sync_response(request)
-
-    async def __acall__(self, request: HttpRequest) -> HttpResponse:
-        with connection.execute_wrapper(_measure_database):
-            return await self._async_response(request)
 
 
 class SecurityHeadersMiddleware(_DualModeMiddleware):

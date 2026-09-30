@@ -453,3 +453,38 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
     first.root.refresh_from_db()
     assert first.root.sender_name == first_creator.name
     assert Message.objects.filter(cycle=second.cycle).count() == 1
+
+
+@pytest.mark.parametrize("after_sequence", [0, 1])
+def test_subtree_rejects_root_deleted_before_recursive_read(
+    credential_factory: Any, after_sequence: int
+) -> None:
+    from tunnels.errors import CycleUnavailable
+    from tunnels.retention import delete_due_cycle_content
+    from tunnels.services import _postgresql_subtree_page
+
+    credential, _ = credential_factory()
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="pg-subtree-deleted-root",
+        root_content={"type": "text", "text": "Temporary root."},
+    )
+    close_cycle(
+        credential=credential,
+        idempotency_key="pg-subtree-close-deleted-root",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    created.cycle.refresh_from_db()
+    deadline = created.cycle.delete_after
+    assert deadline is not None
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
+    with pytest.raises(CycleUnavailable):
+        _postgresql_subtree_page(
+            cycle=created.cycle,
+            root=created.root,
+            max_depth=8,
+            limit=100,
+            after_sequence=after_sequence,
+            high_water=1,
+        )

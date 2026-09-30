@@ -63,6 +63,12 @@ Use a PostgreSQL URL for `DATABASE_URL` and `DATABASE_ADMIN_URL`. Production set
 
 Maintenance records the last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL. An idle worker wakes at most once per minute to refresh its local heartbeat and reconcile persisted deadlines. It does not scan every few seconds.
 
+Database query timing applies to each Django connection in its process. It
+includes queries from synchronous views, asynchronous adapters, commands, and
+maintenance work. The `/metrics` endpoint publishes web-process query metrics;
+it does not combine query metrics from other containers. Query labels contain
+only the SQL operation type.
+
 ## Maintenance recovery
 
 The worker holds a PostgreSQL advisory lock. A second worker waits without doing cleanup. If the active worker stops, another worker can acquire the lock and process overdue work. On startup it registers `LISTEN` before it reads deadlines, which closes the check-then-sleep race.

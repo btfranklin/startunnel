@@ -58,8 +58,8 @@
                         <label>
                           Lifetime in seconds<input type="number"
        name="expires_in_seconds"
-       min="300"
-       max="86400">
+       min="{{ cycle_form.expires_in_seconds.field.min_value }}"
+       max="{{ cycle_form.expires_in_seconds.field.max_value }}">
                         </label>
                         <button class="button button--primary button--small"
                                 type="submit">Start next cycle</button>
@@ -92,8 +92,8 @@
                         <label>
                           Lifetime in seconds<input type="number"
        name="expires_in_seconds"
-       min="300"
-       max="86400">
+       min="{{ cycle_form.expires_in_seconds.field.min_value }}"
+       max="{{ cycle_form.expires_in_seconds.field.max_value }}">
                         </label>
                         <button class="button button--primary button--small"
                                 type="submit">Start cycle</button>

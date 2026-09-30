@@ -177,3 +177,36 @@ def test_user_create_page_returns_form_errors(client: Client, user_factory: Any)
     )
     assert response.status_code == 400
     assert not User.objects.filter(username="new").exists()
+
+
+@pytest.mark.parametrize("login_path", ["/accounts/login/", "/admin/login/"])
+def test_each_login_path_rejects_valid_credentials_after_the_limit(
+    client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch, login_path: str
+) -> None:
+    from tunnels.errors import RateLimited
+
+    user = user_factory(username="limited-admin")
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
+
+    def limited(**kwargs: Any) -> None:
+        raise RateLimited()
+
+    monkeypatch.setattr("api.rate_limits.consume_login_attempt", limited)
+    response = client.post(login_path, {"username": user.username, "password": "test-password-42"})
+    assert response.status_code == 200
+    assert "_auth_user_id" not in client.session
+
+
+@pytest.mark.parametrize("is_staff", [False, True])
+def test_admin_login_keeps_the_staff_requirement(
+    client: Client, user_factory: Any, is_staff: bool
+) -> None:
+    user = user_factory(username="staff-check")
+    user.is_staff = is_staff
+    user.save(update_fields=["is_staff"])
+    response = client.post(
+        "/admin/login/", {"username": user.username, "password": "test-password-42"}
+    )
+    assert response.status_code == (302 if is_staff else 200)
+    assert ("_auth_user_id" in client.session) is is_staff

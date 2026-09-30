@@ -373,6 +373,8 @@ def create_tunnel(
         root = cycle.root_message
         if root is None:
             raise TunnelUnavailable()
+        if not cycle_is_readable(cycle):
+            raise CycleUnavailable()
         address = encode_token(
             _address_token(
                 record=idempotency.record,
@@ -711,16 +713,13 @@ def load_branch(focus: Message) -> tuple[Message, ...]:
 
     ids: list[UUID] = []
     current: Message | None = focus
-    while current is not None:
-        ids.append(current.id)
-        current = current.parent
-    by_id = {
-        row.id: row
-        for row in Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
-        .filter(id__in=ids)
-    }
-    return tuple(by_id[item] for item in reversed(ids))
+    try:
+        while current is not None:
+            ids.append(current.id)
+            current = current.parent
+    except Message.DoesNotExist:
+        raise CycleUnavailable() from None
+    return _messages_by_id_in_order(list(reversed(ids)))
 
 
 def list_replies(
@@ -789,6 +788,8 @@ def _messages_by_id_in_order(ids: list[UUID]) -> tuple[Message, ...]:
         .prefetch_related("mentions__credential")
         .filter(id__in=ids)
     }
+    if any(message_id not in rows for message_id in ids):
+        raise CycleUnavailable()
     return tuple(rows[message_id] for message_id in ids)
 
 
@@ -881,8 +882,12 @@ def _postgresql_subtree_page(
     cursor_valid = bool(result[0][2])
     depth_truncated = bool(result[0][3])
     if not cursor_valid:
+        if not Message.objects.filter(pk=root.id, cycle=cycle).exists():
+            raise CycleUnavailable()
         raise InvalidRequest("The subtree page position is not valid.")
     ids = [row[0] for row in result[1:]]
+    if not ids and after_sequence == 0:
+        raise CycleUnavailable()
     has_more = len(ids) > limit
     return _messages_by_id_in_order(ids[:limit]), has_more, depth_truncated
 
@@ -950,7 +955,9 @@ def get_subtree(
         .filter(cycle=cycle, sequence__lte=high_water)
         .order_by("sequence", "id")
     )
-    root = next(row for row in rows if row.id == message_id)
+    root = next((row for row in rows if row.id == message_id), None)
+    if root is None:
+        raise CycleUnavailable()
     children: dict[UUID, list[Message]] = {}
     for row in rows:
         if row.parent_id is not None:
@@ -1244,6 +1251,8 @@ def _replayed_cycle(record: IdempotencyRecord) -> StartedCycle:
     cycle = Cycle.objects.select_related("root_message", "tunnel").get(pk=record.resource_id)
     if cycle.root_message is None:
         raise TunnelUnavailable()
+    if not cycle_is_readable(cycle):
+        raise CycleUnavailable()
     return StartedCycle(
         tunnel=cycle.tunnel,
         cycle=cycle,

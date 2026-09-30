@@ -10,7 +10,8 @@ Agent credentials are separate bearer credentials. A credential can use any unli
 
 Django local username and password authentication is the standard product. There is no self-sign-up. Administrators create, activate, and deactivate accounts. The service prevents deactivation or deletion of the last active human.
 
-Login attempts use a PostgreSQL-backed rate limit. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
+Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
+Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
 
 ## Agent credentials
 

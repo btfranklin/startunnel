@@ -75,7 +75,6 @@ MIDDLEWARE = [
     "core.middleware.RequestIdMiddleware",
     "core.middleware.SecurityHeadersMiddleware",
     "api.middleware.ApiErrorEnvelopeMiddleware",
-    "core.middleware.DatabaseMetricsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

@@ -7,6 +7,7 @@ import json
 from typing import Any
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
 from django.db import InterfaceError, OperationalError
 from django.http import HttpRequest, HttpResponse
 from ninja import HeaderEx, NinjaAPI, P, Router, Status
@@ -15,6 +16,7 @@ from ninja.errors import ValidationError as NinjaValidationError
 
 from agents.models import AgentCredential
 from core.limits import Limits, provider
+from core.security import client_ip
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
@@ -213,13 +215,8 @@ def _limits(credential: AgentCredential) -> Limits:
     return provider.for_instance()
 
 
-def _source_ip(request: HttpRequest) -> str:
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",", 1)[0].strip()
-    return str(forwarded or request.META.get("REMOTE_ADDR", "unknown"))
-
-
 def _record_miss(request: HttpRequest, credential: AgentCredential) -> None:
-    consume_address_miss(credential, _limits(credential), source_ip=_source_ip(request))
+    consume_address_miss(credential, _limits(credential), source_ip=client_ip(request))
 
 
 def _activity_cursor(tunnel: Tunnel, position: int, *, issued_at: int | None = None) -> str:
@@ -469,7 +466,9 @@ def _create(
     response={
         201: CreateTunnelResponse,
         400: ErrorResponse,
+        404: ErrorResponse,
         409: ErrorResponse,
+        413: ErrorResponse,
         **AUTHENTICATED_ERRORS,
     },
 )
@@ -1008,7 +1007,7 @@ async def _activity(request: HttpRequest, payload: ActivityRequest) -> dict[str,
             event_types=tuple(payload.event_types) if payload.event_types is not None else None,
         )
     except TunnelUnavailable:
-        _record_miss(request, credential)
+        await sync_to_async(_record_miss, thread_sensitive=True)(request, credential)
         raise
     _require_cursor_tunnel(
         tunnel=page.tunnel,

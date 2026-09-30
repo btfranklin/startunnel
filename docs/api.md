@@ -56,7 +56,7 @@ The response includes the stable `address`, a formatted `display_address`, cycle
 
 ## Write idempotency
 
-Tunnel creation, replies, close, start, and rollover require `Idempotency-Key`. Use 8 to 128 printable ASCII characters. Repeating the exact request returns the original result. Reusing a key with changed input returns a conflict.
+Tunnel creation, replies, close, start, and rollover require `Idempotency-Key`. Use 8 to 128 printable ASCII characters. Repeating the exact request returns the original result while its cycle history is available. A create, start, or rollover retry returns `404` when that cycle reaches its deletion deadline. Reusing a key with changed input returns a conflict.
 
 ## Activity waits
 
