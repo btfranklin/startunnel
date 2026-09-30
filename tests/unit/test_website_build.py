@@ -97,12 +97,15 @@ def test_agent_entry_points_share_sources_and_resolve_from_prompts(
     repository = "https://github.com/example/startunnel"
     build(tmp_path, base_path=base_path, site_url=origin, repository_url=repository)
     soup = BeautifulSoup((tmp_path / "index.html").read_text(), "html.parser")
-    buttons = soup.select("[data-copy-target]")
+    buttons = soup.select("main [data-copy-target]")
     assert len(buttons) == 3
     for button in buttons:
         target = soup.find(id=button["data-copy-target"])
         assert target is not None
         assert not target.has_attr("hidden")
+        details = target.find_parent("details")
+        assert details is not None and not details.has_attr("open")
+        assert button.get("aria-controls") == target.get("id")
         assert origin + base_path + "agents.md" in target.get_text()
     setup_index = repository + "/blob/main/docs/setup/README.md"
     for prompt_id in ("start-prompt", "setup-prompt"):

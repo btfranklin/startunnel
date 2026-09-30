@@ -13,6 +13,6 @@
   },
   "scripts": {
     "vendor": "node scripts/vendor-assets.mjs",
-    "check": "node --check static/js/site.js && node --check website/assets/js/signal-gate.js && node --check scripts/vendor-assets.mjs"
+    "check": "node --check static/js/site.js && node --check website/assets/js/signal-gate.js && node --check website/assets/js/prompt-navigation.js && node --check scripts/vendor-assets.mjs"
   }
 }

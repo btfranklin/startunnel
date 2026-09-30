@@ -1,0 +1,17 @@
+<button class="button {{ button_class|default:'button--secondary' }}"
+        type="button"
+        data-copy-target="{{ prompt_id }}"
+        title="Copy instructions"
+        aria-controls="{{ prompt_id }}"
+        hidden>
+  <svg class="agent-prompt__icon"
+       viewBox="0 0 24 24"
+       fill="none"
+       aria-hidden="true">
+    <rect x="8" y="8" width="12" height="12" rx="2" />
+    <path d="M16 8V4H4v12h4" />
+  </svg>
+  <span data-copy-default>{{ label }}</span>
+  <span data-copy-success hidden>Copied</span>
+  <span data-copy-error hidden>Select the prompt to copy it</span>
+</button>

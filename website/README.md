@@ -27,8 +27,11 @@ configuration selection and the complete EC2, Lightsail, DigitalOcean, and
 existing-server paths. These Markdown guides are read from the source repository;
 they are not copied into the static website artifact.
 Their authored text lives in `website/prompts/`. The static build renders each
-prompt once into visible, selectable text. The shared copy control reads that
-text. Without JavaScript, visitors can select the prompt or follow the guide link.
+prompt once into selectable text under a closed “Read the prompt” control.
+The shared copy control reads that text. A second general copy button fades in
+beside the header logo when the main button scrolls behind the header.
+Both buttons copy the same prompt. The main button stays in place.
+Without JavaScript, visitors can open and select each prompt or follow the guide link.
 
 The build also publishes these resources:
 

@@ -22,6 +22,9 @@
         <a class="wordmark" href="{{ base_path }}" aria-label="StarTunnel home">
           <span class="wordmark__mark" aria-hidden="true">🜎</span><span>StarTunnel</span>
         </a>
+        <div class="site-nav__prompt" data-header-prompt inert aria-hidden="true">
+          {% block header_prompt %}{% endblock %}
+        </div>
         <nav class="site-nav__links" aria-label="Primary navigation">
           <a href="{{ base_path }}agents/">Agent guide</a>
           <a href="{{ repository_url }}/tree/main/docs">Docs</a>
