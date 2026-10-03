@@ -1589,3 +1589,135 @@ th {
     transition-duration: var(--dur-reduced) !important;
   }
 }
+
+/* Humans use the shared form and list styles with space for password help. */
+html:has(.human-admin-page) {
+  scroll-behavior: auto;
+}
+
+.human-admin-grid {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.human-admin-grid h2 {
+  font-size: var(--text-lg);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.human-admin-grid .form-panel form {
+  gap: var(--space-lg);
+}
+
+.human-admin-grid .form-panel button {
+  justify-self: start;
+}
+
+.human-admin-grid .field,
+.human-admin-grid .field input {
+  min-inline-size: 0;
+}
+
+.human-admin-grid .field__support {
+  display: grid;
+  gap: var(--space-xs);
+  overflow-wrap: anywhere;
+}
+
+.human-admin-grid .field--error .field__support {
+  color: var(--color-muted);
+}
+
+.human-admin-grid .field__support [role="alert"] {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.human-admin-grid .field__support ul {
+  display: grid;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-inline-start: var(--space-md);
+}
+
+.human-admin-grid .panel-heading {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.human-record-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  padding-block: var(--space-lg);
+}
+
+.human-record-list li:last-child {
+  border-block-end: 0;
+}
+
+.human-record-list li > div:first-child {
+  min-inline-size: 0;
+  justify-items: start;
+  gap: var(--space-xs);
+}
+
+.human-record__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-inline-size: 0;
+}
+
+.human-record__name strong {
+  min-inline-size: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.human-record__current,
+.human-admin-note {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 39.999rem) {
+  .human-admin-page .app-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .human-admin-page .app-nav a {
+    justify-content: center;
+    padding-inline: var(--space-xs);
+  }
+}
+
+.human-record-list form {
+  justify-self: start;
+}
+
+.human-admin-note {
+  padding-block-start: var(--space-md);
+  border-block-start: var(--rule-hair) solid var(--color-rule);
+}
+
+@media (min-width: 40rem) {
+  .human-record-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-lg);
+  }
+
+  .human-record-list form {
+    justify-self: end;
+  }
+}
+
+@media (min-width: 75rem) {
+  .human-admin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

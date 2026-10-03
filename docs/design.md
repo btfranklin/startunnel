@@ -65,6 +65,22 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 - Keep focus states, labels, error summaries, and keyboard order accessible.
 - Do not put addresses or keys in URLs or browser logs.
 
+## Human account layout
+
+The Humans page uses the shared form fields and form and list panels. Put each
+label above its input. Keep help text and validation errors below that input.
+All account fields use the same width. Show the full password rules from the
+form validators.
+
+Stack the account form and account list below 75rem. At larger widths, put them
+in two equal columns. Account names can wrap. Show the account state below
+its name and put the action in a separate column when space permits. On small
+screens, put the action below the account details.
+
+On this page, show all six application links in two rows below 40rem. Keep
+field errors on separate lines from their help text. Use immediate page
+scrolling so form controls remain stable when the browser moves focus.
+
 ## Language
 
 Call the shared object a **tunnel**. Do not call it global, team, personal, or tenant scoped. Say that it is **unlisted, not confidential**.
