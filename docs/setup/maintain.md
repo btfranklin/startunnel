@@ -45,24 +45,67 @@ start services after a server reboot; verify their health after every reboot.
 
 ## Update the application
 
-1. Read the selected release's notes and database compatibility requirements.
-   The current initial schema does not convert old StarTunnel databases.
-2. Make and copy a [verified backup](backups.md) outside the server. Record the
-   current commit and image digest. Plan a short maintenance window.
-3. Use [the image guide](image.md) to build the selected new commit. Keep both
-   the previous and new images available.
-4. On the server, run `git status --short`. Resolve tracked changes before
-   changing commits. Run `umask 022`, fetch the source, then check out the new
-   image's exact commit with `git checkout --detach COMMIT`. Run `umask 077`
-   afterward. Mounted source files must remain readable by the containers.
-5. Edit only `STARTUNNEL_APP_IMAGE` in `/opt/startunnel/production.env` to the
-   new digest. Load the file again as shown above. Log in to the registry with
-   a read token if needed, then run `docker pull "$STARTUNNEL_APP_IMAGE"`.
-6. Stop the application writers with `docker compose stop web maintenance`.
-   Run `python3 scripts/start_production.py --edge`, then
-   `docker compose up -d --no-build --wait --wait-timeout 180`.
-7. Repeat [external verification](verify.md) and make a new backup. Log out of
-   the registry if its token is no longer needed.
+1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
+   Read its notes, configuration changes, database compatibility, and rollback
+   instructions. Download its attached `release.json` outside the checkout.
+   Keep the source commit and immutable image digest together.
+2. Make a fresh [verified backup](backups.md), test its restore, and copy the
+   backup and recovery secrets outside the server. Record the installed image
+   digest and its source revision label. Keep the old image available and plan
+   a short maintenance window.
+3. Run `git status --short` and resolve tracked changes. Run `umask 022`,
+   `git fetch --tags origin`, and `git checkout --detach COMMIT`, replacing
+   `COMMIT` with the full source commit from the release record. Run `umask 077`
+   afterward. The checkout must match the new image; mounted files must remain
+   readable by containers. Reload `production.env` as shown above.
+4. Preview the upgrade from that matching checkout:
+
+   ```shell
+   python3 scripts/upgrade_production.py /absolute/path/release.json
+   ```
+
+   The helper validates the record, clean checkout, production configuration,
+   secret files, and installed image's source/version labels. Versioned
+   installations must appear in the release's `supported_from` list.
+   Unversioned installations must have an ancestor source commit and exactly
+   matching migration files. A missing revision label requires recovering the
+   original build record and a separately reviewed manual upgrade; do not
+   guess a commit or bypass compatibility checks.
+5. Once the preview passes and the backup checks in step 2 are complete, apply:
+
+   ```shell
+   python3 scripts/upgrade_production.py /absolute/path/release.json --apply --backup-verified
+   set -a
+   . /opt/startunnel/production.env
+   set +a
+   ```
+
+   `--backup-verified` is the operator's attestation, not an automated restore
+   check. The helper pulls the official image and checks its revision before
+   stopping writers. It preserves a private copy of the old configuration,
+   changes only the application image reference, removes the completed old
+   migration container, and waits for the production stack. It never deletes
+   database volumes or regenerates secrets. There is no automatic rollback.
+   If a prior attempt left recovery files, inspect them and the actual stack
+   state before retrying; the helper refuses to overwrite them.
+6. Repeat [external verification](verify.md), including login and a two-agent
+   exchange, and make a new backup. A container health check alone does not
+   prove the complete deployment. Record the new version, commit, and digest.
+
+### Existing ManageAI and other pre-release installations
+
+The first release establishes a supported baseline; it does not convert the
+older migration graph. Use the installed image's source revision to determine
+eligibility with the preview above. Matching migration files permit existing
+accounts, agent keys, messages, and secrets to remain in place. If they differ,
+stop and arrange an explicit data conversion tested against a restored copy.
+The ManageAI installation's actual commit and database must be inspected before
+claiming its upgrade is compatible.
+
+For private/custom images, retain the [manual image build path](image.md#build-a-custom-image)
+and follow the same backup, compatibility, matching-checkout, migration, and
+verification requirements. The official helper deliberately accepts only the
+official image repository.
 
 If a migration fails, leave the application writers stopped and inspect the
 failure. An old image is not necessarily compatible with a new database.

@@ -17,6 +17,10 @@ For agent-assisted setup, give your agent the
 [agent guide](skills/startunnel/SKILL.md) and the [setup index](docs/setup/README.md).
 For a trial on one computer, use the local steps below.
 
+For production, use a published [versioned release](https://github.com/btfranklin/startunnel/releases)
+and its official image digest. See the [release policy](docs/releases.md) and
+[upgrade procedure](docs/setup/maintain.md#update-the-application).
+
 ## Run it
 
 Install Python 3.14 or later, [PDM](https://pdm-project.org/), and

@@ -20,6 +20,7 @@ a short coding-agent task map.
 | [Generated OpenAPI](../generated/openapi.json) | Authoritative request and response schema |
 | [Security](security.md) | Trust model, threat boundaries, secrets, retention, and instance rules |
 | [Operations](operations.md) | Docker, configuration, health, deployment, backup, and recovery |
+| [Release policy](releases.md) | Versioned images, publication, compatibility, and upgrades |
 | [Team setup index](setup/README.md) | Configuration selection and complete EC2, Lightsail, DigitalOcean, and existing-server setup paths |
 | [Testing](testing.md) | Test matrix, commands, fixtures, and acceptance gates |
 | [Design](design.md) | Brand, typography, navigation, and interface rules |

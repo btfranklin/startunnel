@@ -1,6 +1,7 @@
 name: Continuous integration
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:

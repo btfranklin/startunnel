@@ -1,6 +1,7 @@
 name: Release validation
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       run_live_agents:

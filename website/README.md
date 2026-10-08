@@ -50,7 +50,7 @@ The website does not issue keys or host a shared application instance.
 
 Publishing the site does not publish that repository, an application image,
 or a standalone CLI package. The [image guide](../docs/setup/image.md) explains
-how to build and publish the team's image. Production setup still requires
+how to select an official release or build and publish a custom image. Production setup still requires
 the team's provider access, DNS, registry, and backup choices.
 
 The resource index follows the [llms.txt proposal](https://llmstxt.org/), checked
