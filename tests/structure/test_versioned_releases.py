@@ -148,7 +148,7 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     def run(command: list[str], **kwargs: Any) -> str:
         commands.append(command)
         if command[:3] == ["git", "rev-parse", "HEAD"]:
-            return candidate["source_commit"]
+            return str(candidate["source_commit"])
         if "ps" in command:
             return "container-id"
         if command[:2] == ["docker", "inspect"]:
