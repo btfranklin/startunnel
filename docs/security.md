@@ -44,6 +44,14 @@ PostgreSQL is required. API operations that need it fail closed. Activity waits 
 
 Back up PostgreSQL with the supplied script. There is no separate cache or archive store to coordinate. Store backup files on encrypted operator-managed storage and test restoration regularly.
 
+## Dependency audit: 2026-10-08
+
+The release candidate audit on 2026-10-08 also found `CVE-2026-101918` and
+`CVE-2026-102275` in PyJWT 2.14.0, an optional live-agent dependency. The lockfile
+now selects the patched PyJWT 2.15.1 release. This dependency update does not
+resolve the separate image vulnerability below. Debian's tracker still listed
+that issue as unfixed when checked on 2026-10-08.
+
 ## Image vulnerability assessment: 2026-09-25
 
 The Python 3.14.7 image pin was updated to the official `slim-trixie` digest

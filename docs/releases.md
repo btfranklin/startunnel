@@ -59,12 +59,6 @@ remain opt-in and do not receive provider credentials during candidate validatio
 
 ## Tag and promote
 
-To test the repository secret and Release Notes Scribe before candidate validation
-is complete, manually run `release-draft-test.yml` on `main`. It creates an
-unpublished notes-only test draft using at most 20 commits, with no deployment
-record or image promotion. Its comparison tag is local to the runner; no Git tag
-is pushed. Delete the test draft after review and never publish it as a release.
-
 Check that the version tag is unused, then tag the exact successful commit:
 
 ```sh
