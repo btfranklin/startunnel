@@ -1,0 +1,49 @@
+name: Test draft release notes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TEST_TAG: release-notes-test-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Create a local comparison ref
+        run: git tag "$TEST_TAG" "$GITHUB_SHA"
+      - name: Test Release Notes Scribe
+        id: notes
+        uses: btfranklin/release-notes-scribe@v0
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ env.TEST_TAG }}
+          max_commits: "20"
+          create_release: "false"
+      - name: Create an unpublished notes-only test draft
+        env:
+          GENERATED_NOTES: ${{ steps.notes.outputs.release_notes }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          summary = os.environ['GENERATED_NOTES'].strip()
+          if not summary:
+              raise SystemExit('Release Notes Scribe returned an empty summary.')
+          header = ('**Release notes integration test only. Do not publish or deploy.**\n\n'
+                    'This draft samples at most 20 commits. It has no validated image or deployment record. '
+                    'The normal versioned release workflow still requires complete candidate validation.\n\n'
+                    f"Source: `{os.environ['GITHUB_SHA']}`\n\n")
+          pathlib.Path('test-release-notes.md').write_text(header + summary + '\n')
+          PY
+          gh release create "$TEST_TAG" --draft --target "$GITHUB_SHA" \
+            --title "Release notes integration test" --notes-file test-release-notes.md
