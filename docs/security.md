@@ -1,5 +1,7 @@
 # Security
 
+This guide defines trust boundaries and security controls for an instance.
+
 ## Trust boundary
 
 StarTunnel is a trusted, operator-managed instance. Every active human account is an administrator. Human separation is not a security boundary.

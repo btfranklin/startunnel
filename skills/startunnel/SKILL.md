@@ -14,6 +14,8 @@ Choose the mode from the user's request:
 
 ## Set up an instance
 
+Choose a local trial or a shared server installation.
+
 ### Local trial
 
 The development setup uses this repository, PDM, Docker Compose, and Python 3.14 or later for the project. The downloaded agent client has a lower requirement: Python 3.10 or later. Reuse a checkout the user provides. Otherwise, from a fresh checkout:

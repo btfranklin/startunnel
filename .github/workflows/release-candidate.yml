@@ -1,0 +1,97 @@
+name: Release candidate
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build:
+    name: Build one release image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.record.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Select release version
+        id: version
+        run: echo "version=$(python3 scripts/release_candidate.py --version)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/btfranklin/startunnel:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/btfranklin/startunnel
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+      - name: Record candidate digest
+        id: record
+        env:
+          CANDIDATE_IMAGE: ghcr.io/btfranklin/startunnel@${{ steps.build.outputs.digest }}
+        run: |
+          python3 scripts/release_candidate.py --record "$CANDIDATE_IMAGE"
+          echo "image=$CANDIDATE_IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candidate-image
+          path: artifacts/candidate-image.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+
+  validation:
+    needs: build
+    uses: ./.github/workflows/release-validation.yml
+    with:
+      candidate_image: ${{ needs.build.outputs.image }}
+
+  evidence:
+    name: Retain validated promotion record
+    needs: [build, validation]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: candidate-image
+          path: artifacts/promotion
+      - uses: actions/download-artifact@v8
+        with:
+          name: security-reports-${{ github.run_id }}
+          path: artifacts/promotion/security
+      - uses: actions/download-artifact@v8
+        with:
+          name: system-proof-${{ github.run_id }}
+          path: artifacts/promotion/system
+      - uses: actions/download-artifact@v8
+        with:
+          name: load-proof-${{ github.run_id }}
+          path: artifacts/promotion/load
+      - run: python3 scripts/release_candidate.py --verify artifacts/promotion
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate
+          path: artifacts/promotion
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14

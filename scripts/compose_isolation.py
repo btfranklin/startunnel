@@ -329,7 +329,14 @@ class IsolatedComposeProject:
         profiles: Sequence[str] = (),
         include_openai: bool = False,
         source_environment: Mapping[str, str] | None = None,
+        candidate_image: str | None = None,
     ) -> None:
+        if candidate_image and not re.fullmatch(
+            r"ghcr\.io/btfranklin/startunnel@sha256:[0-9a-f]{64}", candidate_image
+        ):
+            raise IsolationError("Candidate image must be an official immutable digest reference.")
+        self.candidate_image = candidate_image
+        self._candidate_overlay: Path | None = None
         self.project_name = validate_project_name(project_name)
         self.profiles = tuple(profiles)
         self.source_environment = dict(
@@ -352,6 +359,35 @@ class IsolatedComposeProject:
         self._env_file = Path(self._temporary.name) / "empty.env"
         self._env_file.write_text("# Intentionally empty.\n", encoding="utf-8")
         self._env_file.chmod(0o600)
+        if self.candidate_image:
+            # Bind-mounted proof reports must be writable by the helper process
+            # and readable by the host artifact uploader. The candidate runtime
+            # retains its image's original UID; only helper builds use this UID.
+            helper_uid = os.getuid() or 10001
+            helper_gid = os.getgid() or 10001
+            self.environment.update(
+                STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
+            )
+            artifacts = ROOT / "artifacts"
+            if artifacts.is_symlink():
+                raise IsolationError("The proof artifact directory must not be a symlink.")
+            artifacts.mkdir(mode=0o700, exist_ok=True)
+            if os.getuid() == 0:
+                os.chown(artifacts, helper_uid, helper_gid)
+            self._candidate_overlay = Path(self._temporary.name) / "candidate.yaml"
+            overlay = "services:\n"
+            for service in ("web", "migrate", "maintenance"):
+                overlay += (
+                    f"  {service}:\n    build: !reset null\n    image: {self.candidate_image}\n"
+                )
+                if service == "web":
+                    # browser_settings only imports these development settings.
+                    overlay += (
+                        "    environment:\n"
+                        "      DJANGO_SETTINGS_MODULE: startunnel.settings.development\n"
+                    )
+            self._candidate_overlay.write_text(overlay, encoding="utf-8")
+            self._candidate_overlay.chmod(0o600)
         self._owned = True
         return self
 
@@ -375,11 +411,17 @@ class IsolatedComposeProject:
             print(f"Cleanup also failed: {cleanup_error}", file=sys.stderr)
         return False
 
+    def compose_files(self) -> tuple[str, ...]:
+        files = tuple(COMPOSE_FILES)
+        if self._candidate_overlay is not None:
+            files += (str(self._candidate_overlay),)
+        return files
+
     def compose_command(self, *arguments: str) -> list[str]:
         if self._env_file is None:
             raise IsolationError("The isolated Compose project is not active.")
         command = ["docker", "compose", "--env-file", str(self._env_file)]
-        for compose_file in COMPOSE_FILES:
+        for compose_file in self.compose_files():
             command.extend(("-f", compose_file))
         command.extend(("--project-name", self.project_name))
         for profile in self.profiles:
@@ -419,6 +461,78 @@ class IsolatedComposeProject:
         if result.returncode:
             raise LaneError(step, f"Could not inspect {step}.")
         return result.stdout.strip()
+
+    def pull_candidate(self) -> None:
+        if not self.candidate_image:
+            raise IsolationError("No candidate image was selected.")
+        try:
+            pulled = _run_process(
+                ["docker", "pull", self.candidate_image],
+                environment=self.environment,
+                timeout_seconds=600,
+                capture_output=True,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise IsolationError("The candidate image pull failed or timed out.") from error
+        if pulled.returncode:
+            raise IsolationError("The candidate image pull failed; check registry access.")
+        revision = required_output(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
+                self.candidate_image,
+            ],
+            environment=self.environment,
+            label="the candidate source revision",
+        )
+        commit = required_output(
+            ["git", "rev-parse", "HEAD"],
+            environment=self.environment,
+            label="the current source commit",
+        )
+        if revision != commit:
+            raise IsolationError("Candidate image source revision differs from this checkout.")
+        version = required_output(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                '{{ index .Config.Labels "org.opencontainers.image.version" }}',
+                self.candidate_image,
+            ],
+            environment=self.environment,
+            label="the candidate version",
+        )
+        if version != "v" + (ROOT / "VERSION").read_text().strip():
+            raise IsolationError("Candidate image version differs from VERSION.")
+
+    def verify_candidate_services(self) -> None:
+        if not self.candidate_image:
+            raise IsolationError("No candidate image was selected.")
+        expected = required_output(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", self.candidate_image],
+            environment=self.environment,
+            label="the candidate image ID",
+        )
+        for service in ("web", "migrate", "maintenance"):
+            images = self.capture(
+                "candidate service image", "images", "--quiet", service
+            ).splitlines()
+            if len(images) != 1:
+                raise LaneError("candidate image proof", f"Expected one image for {service}.")
+            actual = required_output(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", images[0]],
+                environment=self.environment,
+                label=f"the {service} image ID",
+            )
+            if actual != expected:
+                raise LaneError(
+                    "candidate image proof", f"{service} did not run the candidate image."
+                )
 
     def cleanup(self) -> None:
         print("[Remove disposable containers and volumes]", flush=True)

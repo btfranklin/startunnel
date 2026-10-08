@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING or __package__:
@@ -38,6 +39,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Use an unused disposable project name with an approved test prefix.",
     )
     parser.add_argument("--seed", type=int, default=20260810)
+    parser.add_argument("--candidate-image", help="Load-test the immutable release image.")
     parser.add_argument(
         "--reuse-current-images",
         action="store_true",
@@ -112,10 +114,21 @@ def _assert_reusable_images(stack: IsolatedComposeProject) -> None:
 def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     arguments = _parser().parse_args(argv)
+    if arguments.candidate_image and arguments.reuse_current_images:
+        print("Candidate proof cannot use --reuse-current-images.", file=sys.stderr)
+        return 2
     project_name = arguments.project_name or generated_project_name("load")
     try:
         with (
-            IsolatedComposeProject(project_name, profiles=("load",)) as stack,
+            IsolatedComposeProject(
+                project_name,
+                profiles=("load",),
+                **(
+                    {"candidate_image": arguments.candidate_image}
+                    if arguments.candidate_image
+                    else {}
+                ),
+            ) as stack,
             termination_signals(),
         ):
             # Record the fixed capacity explicitly so the report proves the
@@ -136,7 +149,10 @@ def main(argv: list[str] | None = None) -> int:
                     "Docker version inspection",
                     "Docker returned an invalid server version value.",
                 )
-            if arguments.reuse_current_images:
+            if arguments.candidate_image:
+                stack.pull_candidate()
+                stack.run("Build load helper", "build", "load-profile", timeout_seconds=2_400)
+            elif arguments.reuse_current_images:
                 _assert_reusable_images(stack)
             else:
                 stack.run(
@@ -169,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
                     "STARTUNNEL_LOAD_DOCKER_VERSION": docker_version,
                     "STARTUNNEL_LOAD_IMAGE_DIGESTS": image_ids,
                     "STARTUNNEL_LOAD_BUILD_MODE": (
-                        "reused-current-images"
+                        "immutable-candidate"
+                        if arguments.candidate_image
+                        else "reused-current-images"
                         if arguments.reuse_current_images
                         else "built-current-run"
                     ),
@@ -185,6 +203,22 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=2_400,
                 environment=load_environment,
             )
+            if arguments.candidate_image:
+                stack.verify_candidate_services()
+                evidence = (
+                    Path(__file__).resolve().parents[1] / "artifacts" / "validated-load-image.json"
+                )
+                evidence.write_text(
+                    json.dumps(
+                        {
+                            "status": "passed",
+                            "image": arguments.candidate_image,
+                            "project": project_name,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
     except (InterruptedError, IsolationError, LaneError) as error:
         print(f"Isolated load proof failed: {error}", file=sys.stderr)
         return 1

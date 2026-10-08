@@ -447,6 +447,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Security release gate failed: {error}")
         return 1
 
+    (report_directory / "validated-image.json").write_text(
+        json.dumps({"status": "passed", "image": arguments.image}) + "\n", encoding="utf-8"
+    )
     print(f"Security release gate passed. Reports: {report_directory}")
     return 0
 

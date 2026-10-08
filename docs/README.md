@@ -1,5 +1,7 @@
 # StarTunnel Documentation
 
+Use this index to find the document that owns each project topic.
+
 ## Document ownership
 
 This document owns the documentation index and the source-of-truth map.

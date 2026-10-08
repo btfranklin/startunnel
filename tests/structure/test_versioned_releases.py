@@ -101,16 +101,20 @@ def test_wrong_checkout_never_mutates_services_or_configuration(
     assert commands == [["git", "rev-parse", "HEAD"]]
 
 
-def test_release_workflow_gates_publication_and_does_not_inherit_provider_secrets() -> None:
+def test_release_workflow_promotes_evidence_without_rebuilding() -> None:
     workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
-    assert "needs: validation" in workflow
-    assert "needs: ci" in workflow
-    assert "--draft" in workflow
-    assert "--notes-file release-notes.md" in workflow
-    assert "--verify-tag" in workflow
-    assert "secrets: inherit" not in workflow
-    assert "OPENAI" not in workflow
-    assert "latest" not in workflow.replace("ubuntu-latest", "")
+    candidate = (release_record.ROOT / ".github/workflows/release-candidate.yml").read_text()
+    assert "--find-run" in workflow
+    assert "--prefer-index=false" in workflow
+    assert "--check-digest" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "docker/build-push-action" not in workflow
+    assert "run_isolated_test_lane.py" not in workflow
+    assert "btfranklin/release-notes-scribe@v0" in workflow
+    assert 'create_release: "false"' in workflow
+    assert "secrets: inherit" not in workflow + candidate
+    assert "OPENAI" not in candidate
+    assert candidate.count("docker/build-push-action") == 1
 
 
 def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:

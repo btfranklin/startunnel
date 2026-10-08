@@ -20,6 +20,24 @@ client source.
 Documentation checks validate links, heading anchors, routes, example includes,
 and CLI syntax. They do not require fixed prose or specific sentences.
 
+## Documentation structure
+
+Install the published [Perfect Doc native executable](https://github.com/btfranklin/perfect-doc/releases/tag/v0.1.0)
+and verify it against that release's `SHA256SUMS`, or use its Homebrew tap.
+Run this separate gate when changing Markdown documentation:
+
+```shell
+pdm run docs-structure
+```
+
+CI installs the checksummed Linux executable before running this gate.
+The tool is not added to the application image or installed inside a test run.
+The repository's `perfect-doc.toml` checks Markdown headings, fences, tables,
+references, and file names. Its virtual `/source/` namespace maps served
+application URLs to their source documents for the scan. The existing
+`scripts/check_docs.py` gate separately checks application route ownership.
+Django templates continue through djLint and browser checks.
+
 ## Compose lanes
 
 ```shell
@@ -78,3 +96,22 @@ Acceptance targets:
 Record the machine, Docker version, commit, duration, sample interval, and exact commands with each result.
 The lane does not infer physical host wakeups, energy use, or watts from CPU or
 probe counts.
+
+## Candidate image evidence
+
+The main-branch CI candidate uses the release image's immutable digest:
+
+```shell
+pdm run python scripts/run_isolated_test_lane.py system --candidate-image IMAGE_DIGEST
+pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST
+pdm run security-release --skip-build --image IMAGE_DIGEST
+```
+
+Replace `IMAGE_DIGEST` with the actual official digest reference. The isolated
+runners pull and inspect the image revision and version before use, build only
+proof helpers, and verify application service image IDs. The system proof covers
+health, agent exchanges, browser flows, runtime database privileges, backup,
+restore, database loss, and restarts. It tests the exact runtime image in an
+isolated development configuration; it does not prove a particular public
+server's TLS or secret-file configuration. Perform the external production
+checks before publishing the reviewed draft. See [release policy](releases.md).

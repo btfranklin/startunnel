@@ -38,15 +38,26 @@ def specification(version: str) -> dict[str, Any]:
     return data
 
 
+def candidate_version() -> str:
+    version = "v" + (ROOT / "VERSION").read_text().strip()
+    specification(version)
+    return version
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--check", metavar="VERSION")
     action.add_argument("--write", nargs=2, metavar=("VERSION", "IMAGE"))
+    parser.add_argument(
+        "--validation-run", type=int, help="Successful CI run that validated this image"
+    )
     args = parser.parse_args()
     try:
         version = args.check or args.write[0]
         data = specification(version)
+        if version != candidate_version():
+            raise ValueError("Release tag must match VERSION.")
         if args.write:
             image = args.write[1]
             if not IMAGE.fullmatch(image):
@@ -55,6 +66,10 @@ def main() -> int:
                 ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
             ).strip()
             data.update(schema=1, source_commit=commit, image=image, platform="linux/amd64")
+            if args.validation_run is not None:
+                if args.validation_run <= 0:
+                    raise ValueError("Validation run ID must be positive.")
+                data["validation_run_id"] = args.validation_run
             Path("release.json").write_text(json.dumps(data, indent=2) + "\n")
             notes = (ROOT / "releases" / f"{version}.md").read_text()
             notes += f"\n## Deployment record\n\nSource commit: `{commit}`\n\nImage: `{image}`\n"

@@ -105,6 +105,7 @@ distribution = false
 source = "scm"
 
 [tool.pdm.scripts]
+docs-structure = "perfect-doc check . --offline --no-banner"
 manage = "python manage.py"
 dev = "python scripts/start_development.py"
 test = "pytest"

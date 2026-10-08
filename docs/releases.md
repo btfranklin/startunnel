@@ -1,7 +1,7 @@
 # Release policy
 
 StarTunnel ships versioned GitHub releases and official container images.
-`main` contains development work. A merge does not update any installation.
+`main` contains development work. A source push does not update any installation.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
@@ -19,8 +19,8 @@ ancestor and their migration files match exactly. Inspect ManageAI's actual
 installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 
-For each subsequent release, commit `releases/VERSION.json` and
-`releases/VERSION.md`. The specification names every supported predecessor in
+The root `VERSION` file owns the next release version. For each subsequent
+release, update it and commit `releases/VERSION.json` and `releases/VERSION.md`. The specification names every supported predecessor in
 `supported_from`, configuration changes, database requirements, and rollback
 steps. Preserve applied migration files; add forward migrations. Before listing
 a predecessor, test upgrading a restored database from that exact version,
@@ -28,36 +28,88 @@ including account login, existing agent authentication, retained messages,
 new writes, maintenance, and recovery. Fresh-install proof alone is insufficient.
 If there are no tested predecessors, leave the list empty and document why.
 
-## Publish a release
+## Prepare and validate on main
 
-1. Review and merge the candidate, including its specification and release notes.
-   Run the repository gates. Record upgrade and recovery evidence for each
-   supported predecessor in the notes. Do not invent successful deployment proof.
-2. Create the matching tag on that reviewed commit, for example
-   `git tag -a v0.1.0 -m 'StarTunnel v0.1.0'`, then push it with
-   `git push origin v0.1.0`. Tag creation is an intentional publication action.
-3. The publication workflow validates the version, notes, and ancestry to `main`,
-   runs the reusable CI gates, then security, system, and fixed-load validation.
-   Provider-credit live-agent checks stay opt-in and are not needed to publish.
-   Publication jobs have no provider credentials.
-4. Only after those gates pass, the workflow builds and pushes the Linux amd64
-   `runtime` image to `ghcr.io/btfranklin/startunnel:VERSION`, with source revision
-   and version labels. It writes `release.json` containing the exact source
-   commit, digest, platform, and compatibility specification, and creates a
-   **draft** GitHub release with that record and the authored notes.
-5. Review the draft, inspect the image labels and deployment record, and perform
-   an installation/upgrade smoke check using that digest. Publish the draft when
-   those results are satisfactory. The first GHCR package must be made **public**
-   in package settings; verify an anonymous digest pull before publishing the
-   first release. GitHub creates packages private by default, and the workflow
-   does not silently change account/package visibility.
+1. Work directly on `main`. Update `VERSION`, the release specification, and
+   the reviewed deployment notes. Record actual upgrade and recovery evidence
+   for every supported predecessor; do not infer database compatibility from
+   fresh-install tests.
+2. Run the repository gates and `pdm run docs-structure`, then commit and push.
+   CI checks Markdown structure with the checksummed Perfect Doc native release.
+   The existing route, example, template, and browser checks remain in place.
+   Perfect Doc does not grade prose or execute documented commands.
+3. Wait for the complete `ci.yml` push run on that exact commit. After the normal
+   CI jobs pass, it builds one Linux amd64 `runtime` image and stores it under a
+   unique candidate tag in `ghcr.io/btfranklin/startunnel`. Its source revision
+   and planned version labels are set at this build.
+4. The candidate digest passes security scanning, the isolated clean-stack
+   system proof, and fixed-load testing. Application services run the candidate
+   image with development settings and isolated test data. Test-helper images
+   are separate builds; they are not the release artifact. The runners verify
+   that web, migration, and maintenance services used the candidate image.
+5. CI retains `release-candidate` for 14 days. This artifact contains the image
+   digest, exact source commit, planned version, safe validation reports, and
+   evidence checksums. Only a complete successful push run on `main` is eligible
+   for promotion. A candidate from a failed or incomplete run is not a release.
 
-Repository Actions must allow `GITHUB_TOKEN` to write packages and releases.
-The workflow grants those permissions only to its publication job. No personal
-access token is needed. No mutable `latest` tag is used for production. Keep
-previous images and records available for recovery. A failed run may leave a
-version-tagged image without a published release; inspect it before retrying.
-Existing releases are never edited by the workflow.
+Candidate validation also runs through the manual release-validation workflow.
+Without a candidate argument, that manual workflow builds its own diagnostic
+images; those results do not produce a promotable CI artifact. Live-agent checks
+remain opt-in and do not receive provider credentials during candidate validation.
+
+## Tag and promote
+
+Check that the version tag is unused, then tag the exact successful commit:
+
+```sh
+git tag -a v0.1.0 TESTED_COMMIT -m "StarTunnel v0.1.0"
+git push origin v0.1.0
+```
+
+Replace `TESTED_COMMIT` with its full SHA. The release workflow checks the tag
+against `VERSION`, finds a completed successful `ci.yml` push run on `main` for
+that exact source commit, and downloads its retained `release-candidate`.
+It checks report status, candidate identity, runtime image IDs, cleanup, and
+retained evidence checksums before promotion.
+
+The workflow assigns the version tag to the tested registry digest without
+building or testing another image. It checks that the new registry tag resolves
+to exactly the same digest. Production continues to use the digest reference.
+There is no mutable `latest` tag.
+
+[Release Notes Scribe](https://github.com/btfranklin/release-notes-scribe) generates
+the change summary from source history. Set the repository Actions secret
+`OPENAI_API_KEY`; it is passed only to that action step. For the first version,
+the action compares with the empty tree. Reviewed configuration, database, and
+rollback instructions from `releases/VERSION.md` remain in the notes, followed
+by the exact source, image digest, and validation run link. Generated summaries
+do not establish migration compatibility.
+
+The workflow creates a **draft** GitHub release with `release.json`. Use manual
+dispatch with the existing tag to retry or recover a draft. Recovery uses the
+retained exact-commit CI evidence and does not rebuild. An existing draft must
+keep the same source commit and image digest. Published releases are never
+modified. If the retained CI artifact has expired, promotion fails; prepare
+new successful evidence for that commit before retrying. Keep candidate images
+in the registry until promotion completes.
+
+## Publish and verify
+
+Review the draft notes, candidate evidence, image labels, and deployment record.
+Perform an installation/upgrade smoke check using the exact digest. Publish the
+draft after those checks pass, then verify pulling the public image and repeat
+external deployment verification. Record the version, source, digest, and results.
+
+The first GHCR package must be made **public** in package settings. Verify an
+anonymous digest pull before publishing the first release. GitHub creates
+packages private by default; the workflows do not change package visibility.
+
+Repository Actions must allow package and release writes. `GITHUB_TOKEN`
+provides registry access; no personal token is needed. Package-write permission
+is limited to the candidate build and promotion jobs. Provider credentials
+never enter the image or validation jobs. Keep old images and deployment records
+available for recovery. A failed draft run may leave a version tag in the registry;
+inspect its digest and retry the draft rather than rebuilding an image.
 
 ## Install, upgrade, and recover
 

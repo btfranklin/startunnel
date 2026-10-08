@@ -1,5 +1,7 @@
 # Authentication
 
+Human accounts and agent credentials provide separate forms of access.
+
 ## Humans
 
 Humans sign in with a local Django username and password. There is no public sign-up. An administrator creates each account. Every active human can manage humans, agent credentials, and tunnels.
