@@ -25,7 +25,7 @@ def _create(credential: Any) -> Any:
     )
 
 
-def test_any_active_human_can_rotate_an_address(credential_factory: Any, user_factory: Any) -> None:
+def test_any_active_admin_can_rotate_an_address(credential_factory: Any, user_factory: Any) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
     administrator = user_factory()
@@ -50,7 +50,7 @@ def test_any_active_human_can_rotate_an_address(credential_factory: Any, user_fa
     assert AuditEvent.objects.get(action="tunnel.address_rotated").metadata == {"generation": 2}
 
 
-def test_rotation_rejects_stale_generation_and_inactive_human(
+def test_rotation_rejects_stale_generation_and_inactive_admin(
     credential_factory: Any, user_factory: Any
 ) -> None:
     creator, _ = credential_factory()

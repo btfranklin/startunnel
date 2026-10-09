@@ -1,1 +1,1 @@
-"""Human site, documentation, and dashboard transport."""
+"""Admin site, documentation, and dashboard transport."""

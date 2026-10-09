@@ -1,4 +1,4 @@
-"""Human pages expose one equal instance-administrator interface."""
+"""Admin pages expose one equal instance-administrator interface."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def test_authenticated_user_requires_custom_user() -> None:
         _authenticated_user(request)
 
 
-def test_human_pages_require_login_and_render(client: Client, user_factory: Any) -> None:
+def test_admin_pages_require_login_and_render(client: Client, user_factory: Any) -> None:
     for path in ["/app/", "/app/learn/", "/app/agents/", "/app/tunnels/", "/app/account/"]:
         assert client.get(path).status_code == 302
     user = user_factory()

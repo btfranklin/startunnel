@@ -1,4 +1,4 @@
-"""Create local human accounts."""
+"""Create local admin accounts."""
 
 from __future__ import annotations
 

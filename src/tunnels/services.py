@@ -1631,7 +1631,7 @@ def _locked_operator_tunnel(*, actor: User, tunnel_id: UUID) -> Tunnel:
     return tunnel
 
 
-def _start_cycle_as_human_locked(
+def _start_cycle_as_admin_locked(
     *,
     tunnel: Tunnel,
     actor: User,
@@ -1691,7 +1691,7 @@ def start_cycle_as_operator(
     expires_in_seconds: int | None = None,
 ) -> StartedCycle:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
-    return _start_cycle_as_human_locked(
+    return _start_cycle_as_admin_locked(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,
@@ -1714,7 +1714,7 @@ def rollover_cycle_as_operator(
     expires_in_seconds: int | None = None,
 ) -> StartedCycle:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
-    return _start_cycle_as_human_locked(
+    return _start_cycle_as_admin_locked(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,
@@ -1830,7 +1830,7 @@ def _retire_locked_tunnel(
     )
 
 
-def _retire_as_human_locked(
+def _retire_as_admin_locked(
     *,
     tunnel: Tunnel,
     actor: User,
@@ -1854,7 +1854,7 @@ def retire_tunnel_as_operator(
     confirmation: str,
 ) -> None:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
-    _retire_as_human_locked(
+    _retire_as_admin_locked(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,

@@ -146,19 +146,19 @@ def test_public_routes_fit_required_widths(browser: Browser, base_url: str) -> N
         context.close()
 
 
-def test_local_login_human_admin_and_password_change(
+def test_local_login_admin_and_password_change(
     browser: Browser, base_url: str, account: BrowserAccount
 ) -> None:
     context = _authenticated_context(browser, account)
     page = context.new_page()
-    second_username = f"human_{uuid4().hex[:16]}"
+    second_username = f"admin_{uuid4().hex[:16]}"
     second_password = f"Second-{uuid4().hex}-Pass9!"
     try:
-        page.goto(f"{base_url}/app/users/")
+        page.goto(f"{base_url}/app/admins/")
         page.get_by_label("Username").fill(second_username)
         page.locator('input[name="password1"]').fill(second_password)
         page.locator('input[name="password2"]').fill(second_password)
-        page.get_by_role("button", name="Create account").click()
+        page.get_by_role("button", name="Create admin account").click()
         expect(page.get_by_text(second_username, exact=True)).to_be_visible()
 
         row = page.locator("li").filter(has_text=second_username)
@@ -240,11 +240,11 @@ def test_no_javascript_admin_forms_work(
     username = f"nojs_{uuid4().hex[:16]}"
     password = f"Nojs-{uuid4().hex}-Pass9!"
     try:
-        page.goto(f"{base_url}/app/users/")
+        page.goto(f"{base_url}/app/admins/")
         page.get_by_label("Username").fill(username)
         page.locator('input[name="password1"]').fill(password)
         page.locator('input[name="password2"]').fill(password)
-        page.get_by_role("button", name="Create account").click()
+        page.get_by_role("button", name="Create admin account").click()
         expect(page.get_by_text(username, exact=True)).to_be_visible()
     finally:
         page.close()
@@ -265,7 +265,7 @@ def test_application_routes_fit_required_widths(
             (
                 "/app/",
                 "/app/learn/",
-                "/app/users/",
+                "/app/admins/",
                 "/app/agents/",
                 "/app/tunnels/",
                 "/app/account/",

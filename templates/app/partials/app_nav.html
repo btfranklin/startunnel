@@ -7,8 +7,8 @@
      {% if request.resolver_match.url_name == 'agents' %}aria-current="page"{% endif %}>Agents</a>
   <a href="{% url 'site:tunnels' %}"
      {% if request.resolver_match.url_name == 'tunnels' %}aria-current="page"{% endif %}>Tunnels</a>
-  <a href="{% url 'site:users' %}"
-     {% if request.resolver_match.url_name == 'users' or request.resolver_match.url_name == 'create-user' %}aria-current="page"{% endif %}>Humans</a>
+  <a href="{% url 'site:admins' %}"
+     {% if request.resolver_match.url_name == 'admins' or request.resolver_match.url_name == 'create-admin' %}aria-current="page"{% endif %}>Admins</a>
   <a href="{% url 'site:account' %}"
      {% if request.resolver_match.url_name == 'account' %}aria-current="page"{% endif %}>Account</a>
 </nav>

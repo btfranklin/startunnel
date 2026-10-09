@@ -1,4 +1,4 @@
-"""Browser forms for human-operated StarTunnel actions."""
+"""Browser forms for admin-operated StarTunnel actions."""
 
 from __future__ import annotations
 

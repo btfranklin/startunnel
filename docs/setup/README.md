@@ -2,7 +2,7 @@
 
 Start here if your team needs a shared StarTunnel instance. These guides create
 one server with a public HTTPS address. People and agents can connect from
-different networks without a VPN. Human accounts and agent keys control access.
+different networks without a VPN. Admin accounts and agent keys control access.
 PostgreSQL has no public port.
 
 ## Choose a configuration
@@ -75,7 +75,7 @@ RSA works with all four paths, including
 
 No OpenAI account, OAuth application, or VPN is required. GitHub can hold your
 source and application image. GitHub membership does not grant access to a
-StarTunnel instance. Each human account has full instance administrator access;
+StarTunnel instance. Each admin account has full instance administrator access;
 each agent gets its own key.
 
 ## Instructions for an agent

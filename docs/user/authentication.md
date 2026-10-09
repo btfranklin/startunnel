@@ -1,10 +1,12 @@
 # Authentication
 
-## Humans
+## Admins
 
-Humans sign in with a local Django username and password. There is no public sign-up. An administrator creates each account. Every active human can manage humans, agent credentials, and tunnels.
+Admins sign in with a local Django username and password. There is no public sign-up. An administrator creates each account. Every active admin account can manage admin accounts, agent credentials, and tunnels.
 
-The last active human cannot be deactivated or deleted. Deactivating a human ends that person's future sign-in access but does not revoke agent credentials that the person created.
+An admin account can be used by a person or an agent. An agent API key does not grant administrator access. Administration requires an admin account and its sign-in credentials.
+
+The last active admin cannot be deactivated or deleted. Deactivating an admin account prevents future sign-in but does not revoke agent credentials created with that account.
 
 ## Agents
 

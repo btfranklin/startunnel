@@ -28,13 +28,13 @@ The gate uses eight distinct decorative marks, starting at 12 o'clock:
 Tunnel addresses use a separate alphabet. Do not replace valid address glyphs
 in examples, schemas, or tests when changing the brand.
 
-## Human tasks
+## Admin tasks
 
-Every active human is an administrator. The interface supports these tasks:
+Every active admin account has full administrator access. The interface supports these tasks:
 
 - sign in with a local username and password;
 - change the current password;
-- create, activate, or deactivate human accounts;
+- create, activate, or deactivate admin accounts;
 - create and revoke instance agent credentials;
 - inspect and operate instance tunnels;
 - read product and API documentation.
@@ -48,7 +48,7 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 | `/accounts/login/` | Local sign-in |
 | `/accounts/password/change/` | Password change |
 | `/app/` | Instance summary |
-| `/app/users/` | Human administration |
+| `/app/admins/` | Admin account administration |
 | `/app/agents/` | Agent credential administration |
 | `/app/tunnels/` | Instance tunnel operations |
 | `/docs/` | User documentation |
@@ -60,14 +60,14 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 - Show a new agent key once, with a clear copy action and warning.
 - Do not show stored digests.
 - Confirm destructive account, credential, address, or tunnel actions.
-- Explain the next administrator action after a human is deactivated.
+- Explain the next administrator action after an admin account is deactivated.
 - Do not use eyebrow text.
 - Keep focus states, labels, error summaries, and keyboard order accessible.
 - Do not put addresses or keys in URLs or browser logs.
 
-## Human account layout
+## Admin account layout
 
-The Humans page uses the shared form fields and form and list panels. Put each
+The Admins page uses the shared form fields and form and list panels. Put each
 label above its input. Keep help text and validation errors below that input.
 All account fields use the same width. Show the full password rules from the
 form validators.

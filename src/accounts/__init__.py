@@ -1,1 +1,1 @@
-"""Human accounts."""
+"""Admin accounts."""

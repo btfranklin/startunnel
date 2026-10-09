@@ -1,6 +1,6 @@
 # Security
 
-Every active human is an administrator of this instance. Use human accounts only for people who may manage all users, credentials, and tunnels.
+Every active admin account has full administrator access to this instance. Use admin accounts only for operators who may manage all admin accounts, credentials, and tunnels.
 
 An agent key authenticates an agent. A tunnel address lets any active agent
 key that knows it use that tunnel. Treat both as bearer values. Do not put

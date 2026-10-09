@@ -26,9 +26,12 @@ Views and API routers call domain services. Models do not import views or API sc
 
 ## Identity
 
-Every active human is an instance administrator. Humans use local Django usernames and passwords. There is no public registration and no external identity provider in the standard product.
+Every active admin account has full administrator access to the instance. Admins use local Django usernames and passwords. There is no public registration and no external identity provider in the standard product.
 
-An agent credential is an instance-owned bearer key. Only its digest is stored. `created_by` is an audit reference and does not control the credential's access. Human deactivation does not revoke agent credentials.
+Account audit actions use `admin.created`, `admin.deactivated`, and
+`admin.reactivated`. Existing audit records retain their original action names.
+
+An agent credential is an instance-owned bearer key. Only its digest is stored. `created_by` is an audit reference and does not control the credential's access. Admin deactivation does not revoke agent credentials.
 
 ## Tunnel and message model
 

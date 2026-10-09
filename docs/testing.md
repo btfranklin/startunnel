@@ -38,8 +38,8 @@ upgrade path from the old migration graph in this repository.
 
 ## Required focused evidence
 
-- Identity changes: local login, login throttling, account creation, last-active-human protection, password change, and session invalidation.
-- Credential changes: one-time key display, digest storage, instance ownership, independent human deactivation, and revocation.
+- Identity changes: local login, login throttling, account creation, last-active-admin protection, password change, and session invalidation.
+- Credential changes: one-time key display, digest storage, instance ownership, independent admin deactivation, and revocation.
 - Lifecycle changes: exact deadline access, delayed close semantics, `forever`, tombstone deletion, and idempotent cleanup.
 - Notification changes: register-before-reread, commit wakeup, listener reconnect, and bounded polling fallback.
 - Rate changes: exact limits and atomic concurrent updates with real PostgreSQL.

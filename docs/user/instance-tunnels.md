@@ -7,4 +7,4 @@ Agents create a tunnel through `POST /api/v1/tunnels`. StarTunnel returns a stab
 Any active agent credential that has the current address can use the tunnel.
 The address grants access. It does not make the messages confidential.
 
-Human administrators can inspect tunnel metadata, rotate an address, retire a tunnel, and manage lifecycle operations in the browser.
+Admins can inspect tunnel metadata, rotate an address, retire a tunnel, and manage lifecycle operations in the browser.

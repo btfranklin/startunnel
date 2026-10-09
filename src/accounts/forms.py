@@ -1,4 +1,4 @@
-"""Forms for local human account administration."""
+"""Forms for local admin account administration."""
 
 from django import forms
 from django.contrib.admin.forms import AdminAuthenticationForm
@@ -38,12 +38,12 @@ class ThrottledAdminAuthenticationForm(AdminAuthenticationForm):
         return super().clean()
 
 
-class InstanceUserCreationForm(UserCreationForm[User]):
+class InstanceAdminCreationForm(UserCreationForm[User]):
     class Meta(UserCreationForm.Meta):
         model = User
         fields = ("username",)
 
 
-class UserStateForm(forms.Form):
-    user_id = forms.UUIDField(widget=forms.HiddenInput())
+class AdminStateForm(forms.Form):
+    admin_id = forms.UUIDField(widget=forms.HiddenInput())
     active = forms.BooleanField(required=False, widget=forms.HiddenInput())

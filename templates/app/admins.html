@@ -1,0 +1,60 @@
+{% extends "app/base.html" %}
+{% block title %}Admins · StarTunnel{% endblock %}
+{% block body_class %}app-page admin-page{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Admins</h1>
+      <p>Every active admin account has full administrator access to this StarTunnel instance.</p>
+    </div>
+  </header>
+  <div class="workbench-grid admin-grid">
+    <section class="form-panel" aria-labelledby="create-admin-heading">
+      <h2 id="create-admin-heading">Create an admin account</h2>
+      <form method="post" action="{% url 'site:create-admin' %}">
+        {% csrf_token %}
+        {% if create_form.errors %}
+          <div class="form-errors" role="alert">
+            <p>Admin account not created. Check the fields below.</p>
+          </div>
+        {% endif %}
+        {% include "site/partials/form.html" with form=create_form %}
+        <button class="button button--primary" type="submit">Create admin account</button>
+      </form>
+    </section>
+    <section class="list-panel" aria-labelledby="admin-list-heading">
+      <div class="panel-heading">
+        <h2 id="admin-list-heading">Existing admins</h2>
+        <span>{{ admins|length }} total</span>
+      </div>
+      <ul class="record-list admin-record-list">
+        {% for admin in admins %}
+          <li>
+            <div>
+              <div class="admin-record__name">
+                <strong>{{ admin.username }}</strong>
+                {% if admin.pk == request.user.pk %}<span class="admin-record__current">You</span>{% endif %}
+              </div>
+              <span class="state {% if admin.is_active %}state--success{% else %}state--muted{% endif %}">
+                {% if admin.is_active %}Active{% else %}Inactive{% endif %}
+              </span>
+            </div>
+            <form method="post" action="{% url 'site:set-admin-state' %}">
+              {% csrf_token %}
+              <input type="hidden" name="admin_id" value="{{ admin.id }}">
+              <input type="hidden"
+                     name="active"
+                     value="{% if admin.is_active %}{% else %}on{% endif %}">
+              <button class="button button--secondary"
+                      type="submit"
+                      aria-label="{% if admin.is_active %}Deactivate{% else %}Reactivate{% endif %} {{ admin.username }}">
+                {% if admin.is_active %}Deactivate{% else %}Reactivate{% endif %}
+              </button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="admin-note">Inactive admin accounts cannot sign in. Reactivate an account to restore access.</p>
+    </section>
+  </div>
+{% endblock %}

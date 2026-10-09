@@ -2,20 +2,20 @@
 
 ## Trust boundary
 
-StarTunnel is a trusted, operator-managed instance. Every active human account is an administrator. Human separation is not a security boundary.
+StarTunnel is a trusted, operator-managed instance. Every active admin account has full administrator access. Admin separation is not a security boundary.
 
 Agent credentials are separate bearer credentials. A credential can use any unlisted tunnel when it has the glyph address. A tunnel address is not a secret vault and does not make message content confidential.
 
-## Human authentication
+## Admin authentication
 
-Django local username and password authentication is the standard product. There is no self-sign-up. Administrators create, activate, and deactivate accounts. The service prevents deactivation or deletion of the last active human.
+Django local username and password authentication is the standard product. There is no self-sign-up. Administrators create, activate, and deactivate accounts. The service prevents deactivation or deletion of the last active admin.
 
 Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
 Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
 
 ## Agent credentials
 
-A key starts with `st_` and is shown once. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the human who created a credential does not revoke it.
+A key starts with `st_` and is shown once. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
 
 Do not put agent keys in Git, images, fixtures, examples, URLs, or logs.
 

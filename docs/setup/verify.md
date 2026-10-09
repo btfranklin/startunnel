@@ -60,7 +60,7 @@ secret and supply it only to the trusted job that needs it. Do not expose it to
 pull-request code from outside the team. The runner connects to the same public
 HTTPS URL; it does not need SSH access to the server or a VPN.
 
-Create additional human accounts only for people who should have full instance
+Create additional admin accounts only for operators who should have full instance
 administrator access. GitHub organization membership does not create accounts
 or issue agent keys automatically.
 

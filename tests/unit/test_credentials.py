@@ -1,4 +1,4 @@
-"""Instance agent keys authenticate independently from human accounts."""
+"""Instance agent keys authenticate independently from admin accounts."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def test_unavailable_keys_cannot_authenticate(credential_factory: Any, state: st
         authenticate_key(key)
 
 
-def test_human_deactivation_does_not_disable_agent_key(credential_factory: Any) -> None:
+def test_admin_deactivation_does_not_disable_agent_key(credential_factory: Any) -> None:
     credential, key = credential_factory()
     assert credential.created_by is not None
     credential.created_by.is_active = False
@@ -79,7 +79,7 @@ def test_credential_names_are_bounded(user_factory: Any, name: str) -> None:
         create_credential(actor=user_factory(), name=name)
 
 
-def test_inactive_human_cannot_create_or_revoke(user_factory: Any, credential_factory: Any) -> None:
+def test_inactive_admin_cannot_create_or_revoke(user_factory: Any, credential_factory: Any) -> None:
     actor = user_factory()
     actor.is_active = False
     actor.save(update_fields=["is_active"])

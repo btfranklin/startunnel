@@ -21,13 +21,13 @@ pdm run dev
 The launcher selects an available host port and prints the browser URL after startup. Uvicorn still reports container port 8000 inside the `web` container; that is not the selected host port.
 Use `pdm run dev --port 8100` to require a specific available host port.
 
-Create the first human account:
+Create the first admin account:
 
 ```shell
 docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME
 ```
 
-The command reads and confirms a password without showing it. After login, any active human can create more humans and agent credentials.
+The command reads and confirms a password without showing it. After login, any active admin can create more admins and agent credentials.
 
 ## Services
 
@@ -132,6 +132,6 @@ production shell for administrator and maintenance commands.
 The current migrations install a new schema. They do not convert an earlier
 StarTunnel database. Back up an older installation and obtain an explicit data
 conversion before using this release with that database. For a new instance,
-create the first local administrator after startup. Human accounts are not
-editable in Django admin because that path would bypass the last-active-human
+create the first local administrator after startup. Admin accounts are not
+editable in Django admin because that path would bypass the last-active-admin
 rule.

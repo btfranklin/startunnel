@@ -32,7 +32,7 @@ PUBLIC_ROUTES = {
     "/downloads/star_tunnel.py",
     "/app/",
     "/app/account/",
-    "/app/users/",
+    "/app/admins/",
     "/app/agents/",
     "/app/tunnels/",
 }

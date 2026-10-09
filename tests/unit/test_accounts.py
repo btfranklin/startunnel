@@ -11,7 +11,7 @@ from django.test import Client
 
 from accounts.forms import ThrottledAuthenticationForm
 from accounts.models import User
-from accounts.services import AccountError, create_human, require_active_human, set_human_active
+from accounts.services import AccountError, create_admin, require_active_admin, set_admin_active
 from tunnels.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
@@ -35,16 +35,16 @@ def test_user_manager_rejects_invalid_creation() -> None:
         User.objects.create_superuser(username="root", is_superuser=False)
 
 
-def test_humans_can_create_and_manage_other_humans(user_factory: Any) -> None:
+def test_admins_can_create_and_manage_other_admins(user_factory: Any) -> None:
     actor = user_factory(username="operator")
-    created = create_human(actor=actor, username="second", password="long-safe-password-42")
+    created = create_admin(actor=actor, username="second", password="long-safe-password-42")
     assert created.check_password("long-safe-password-42")
-    assert AuditEvent.objects.filter(action="human.created", target_id=created.id).exists()
+    assert AuditEvent.objects.filter(action="admin.created", target_id=created.id).exists()
 
-    assert set_human_active(actor=actor, user_id=created.id, active=False).is_active is False
-    assert AuditEvent.objects.filter(action="human.deactivated", target_id=created.id).exists()
-    assert set_human_active(actor=actor, user_id=created.id, active=True).is_active is True
-    assert AuditEvent.objects.filter(action="human.reactivated", target_id=created.id).exists()
+    assert set_admin_active(actor=actor, admin_id=created.id, active=False).is_active is False
+    assert AuditEvent.objects.filter(action="admin.deactivated", target_id=created.id).exists()
+    assert set_admin_active(actor=actor, admin_id=created.id, active=True).is_active is True
+    assert AuditEvent.objects.filter(action="admin.reactivated", target_id=created.id).exists()
 
 
 def test_account_services_reject_inactive_or_missing_accounts(user_factory: Any) -> None:
@@ -52,18 +52,18 @@ def test_account_services_reject_inactive_or_missing_accounts(user_factory: Any)
     actor.is_active = False
     actor.save(update_fields=["is_active"])
     with pytest.raises(AccountError, match="inactive"):
-        require_active_human(actor)
+        require_active_admin(actor)
     with pytest.raises(AccountError, match="inactive"):
-        create_human(actor=actor, username="new", password="long-safe-password-42")
+        create_admin(actor=actor, username="new", password="long-safe-password-42")
     with pytest.raises(AccountError, match="not available"):
-        set_human_active(actor=actor, user_id=actor.id, active=True)
+        set_admin_active(actor=actor, admin_id=actor.id, active=True)
 
 
-def test_last_active_human_cannot_be_deactivated(user_factory: Any) -> None:
+def test_last_active_admin_cannot_be_deactivated(user_factory: Any) -> None:
     actor = user_factory()
     with pytest.raises(AccountError, match="last active"):
-        set_human_active(actor=actor, user_id=actor.id, active=False)
-    assert set_human_active(actor=actor, user_id=actor.id, active=True) == actor
+        set_admin_active(actor=actor, admin_id=actor.id, active=False)
+    assert set_admin_active(actor=actor, admin_id=actor.id, active=True) == actor
 
 
 def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any) -> None:
@@ -147,12 +147,12 @@ def test_instance_admin_command_rejects_duplicate(
         call_command("create_instance_admin", "OPERATOR")
 
 
-def test_user_pages_create_and_change_accounts(client: Client, user_factory: Any) -> None:
+def test_admin_pages_create_and_change_accounts(client: Client, user_factory: Any) -> None:
     actor = user_factory(username="operator")
     client.force_login(actor)
-    assert client.get("/app/users/").status_code == 200
+    assert client.get("/app/admins/").status_code == 200
     created = client.post(
-        "/app/users/create/",
+        "/app/admins/create/",
         {
             "username": "colleague",
             "password1": "strong local password 42",
@@ -162,17 +162,18 @@ def test_user_pages_create_and_change_accounts(client: Client, user_factory: Any
     assert created.status_code == 302
     colleague = User.objects.get(username="colleague")
     assert (
-        client.post("/app/users/state/", {"user_id": colleague.id, "active": ""}).status_code == 302
+        client.post("/app/admins/state/", {"admin_id": colleague.id, "active": ""}).status_code
+        == 302
     )
     colleague.refresh_from_db()
     assert colleague.is_active is False
-    assert client.post("/app/users/state/", {"user_id": "bad"}).status_code == 404
+    assert client.post("/app/admins/state/", {"admin_id": "bad"}).status_code == 404
 
 
-def test_user_create_page_returns_form_errors(client: Client, user_factory: Any) -> None:
+def test_admin_create_page_returns_form_errors(client: Client, user_factory: Any) -> None:
     client.force_login(user_factory())
     response = client.post(
-        "/app/users/create/",
+        "/app/admins/create/",
         {"username": "new", "password1": "different", "password2": "values"},
     )
     assert response.status_code == 400

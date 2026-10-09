@@ -5,8 +5,8 @@ This document reports the implemented product. It is not a future roadmap.
 ## Product model
 
 - One operator-managed instance.
-- Local Django human accounts.
-- Every active human is an administrator.
+- Local Django admin accounts.
+- Every active admin account has full administrator access.
 - Instance-owned agent credentials.
 - One unlisted tunnel namespace.
 - No teams, memberships, invitations, billing, or external identity provider.

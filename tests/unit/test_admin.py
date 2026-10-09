@@ -1,4 +1,4 @@
-"""Human administration pages do not expose stored credential digests."""
+"""Admin administration pages do not expose stored credential digests."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from agents.models import AgentCredential
 pytestmark = pytest.mark.django_db
 
 
-def test_human_accounts_are_not_managed_through_django_admin() -> None:
+def test_admin_accounts_are_not_managed_through_django_admin() -> None:
     assert User not in admin.site._registry
 
 

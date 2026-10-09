@@ -8,7 +8,7 @@ from .forms import ThrottledAuthenticationForm
 
 
 def login(request: HttpRequest) -> HttpResponseBase:
-    """Authenticate one local human account without public registration."""
+    """Authenticate one local admin account without public registration."""
 
     return LoginView.as_view(
         template_name="account/login.html",

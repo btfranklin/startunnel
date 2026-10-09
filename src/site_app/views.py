@@ -15,9 +15,9 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
-from accounts.forms import InstanceUserCreationForm, UserStateForm
+from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
-from accounts.services import AccountError, create_human, set_human_active
+from accounts.services import AccountError, create_admin, set_admin_active
 from agents.models import AgentCredential
 from agents.services import (
     CredentialError,
@@ -108,25 +108,25 @@ def learn(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_safe
-def users(request: HttpRequest) -> HttpResponse:
+def admins(request: HttpRequest) -> HttpResponse:
     return render(
         request,
-        "app/users.html",
+        "app/admins.html",
         {
-            "create_form": InstanceUserCreationForm(),
-            "users": User.objects.order_by("username", "id"),
+            "create_form": InstanceAdminCreationForm(),
+            "admins": User.objects.order_by("username", "id"),
         },
     )
 
 
 @login_required
 @require_POST
-def create_user(request: HttpRequest) -> HttpResponse:
+def create_admin_account(request: HttpRequest) -> HttpResponse:
     actor = _authenticated_user(request)
-    form = InstanceUserCreationForm(request.POST)
+    form = InstanceAdminCreationForm(request.POST)
     if form.is_valid():
         try:
-            create_human(
+            create_admin(
                 actor=actor,
                 username=form.cleaned_data["username"],
                 password=form.cleaned_data["password1"],
@@ -134,34 +134,34 @@ def create_user(request: HttpRequest) -> HttpResponse:
         except AccountError as error:
             form.add_error(None, str(error))
         else:
-            messages.success(request, "The human account was created.")
-            return redirect("site:users")
+            messages.success(request, "The admin account was created.")
+            return redirect("site:admins")
     return render(
         request,
-        "app/users.html",
-        {"create_form": form, "users": User.objects.order_by("username", "id")},
+        "app/admins.html",
+        {"create_form": form, "admins": User.objects.order_by("username", "id")},
         status=400,
     )
 
 
 @login_required
 @require_POST
-def set_user_state(request: HttpRequest) -> HttpResponse:
+def set_admin_state(request: HttpRequest) -> HttpResponse:
     actor = _authenticated_user(request)
-    form = UserStateForm(request.POST)
+    form = AdminStateForm(request.POST)
     if not form.is_valid():
         raise Http404
     try:
-        set_human_active(
+        set_admin_active(
             actor=actor,
-            user_id=form.cleaned_data["user_id"],
+            admin_id=form.cleaned_data["admin_id"],
             active=form.cleaned_data["active"],
         )
     except AccountError as error:
         messages.error(request, str(error))
     else:
-        messages.success(request, "The human account state was updated.")
-    return redirect("site:users")
+        messages.success(request, "The admin account state was updated.")
+    return redirect("site:admins")
 
 
 def _one_time_key_response(

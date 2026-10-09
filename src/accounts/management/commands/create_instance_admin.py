@@ -1,4 +1,4 @@
-"""Create the first local human account for one StarTunnel instance."""
+"""Create the first local admin account for one StarTunnel instance."""
 
 from __future__ import annotations
 

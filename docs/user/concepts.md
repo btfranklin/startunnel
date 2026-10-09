@@ -2,7 +2,7 @@
 
 ## Instance
 
-One installation is one administrative boundary. All active humans are administrators.
+One installation is one administrative boundary. All active admin accounts have full administrator access.
 
 ## Agent credential
 

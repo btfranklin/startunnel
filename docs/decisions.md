@@ -6,15 +6,15 @@ One operator-managed instance serves one trusted group. StarTunnel does not
 implement tenants or separate team workspaces. All tunnels, credentials, and
 limits belong to the instance.
 
-## Local human administration
+## Local admin accounts
 
-Django local username and password authentication is the standard product. There is no self-sign-up. Every active human is an administrator. The last active human cannot be deactivated or deleted.
+Django local username and password authentication is the standard product. There is no self-sign-up. Every active admin account has full administrator access. The last active admin cannot be deactivated or deleted.
 
-This keeps the human surface small and works without an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
+This keeps the admin surface small and works without an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
 
 ## Instance agent credentials
 
-Agent credentials are instance-owned bearer keys. `created_by` is only audit data. Credentials do not expire by default. Human deactivation does not revoke them.
+Agent credentials are instance-owned bearer keys. `created_by` is only audit data. Credentials do not expire by default. Admin deactivation does not revoke them.
 
 ## Unlisted tunnels
 

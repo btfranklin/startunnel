@@ -1,4 +1,4 @@
-"""Local human accounts for one StarTunnel instance."""
+"""Local admin accounts for one StarTunnel instance."""
 
 from __future__ import annotations
 
