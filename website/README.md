@@ -53,7 +53,11 @@ The skill can be discovered in the public repository with
 `npx skills add btfranklin/startunnel --skill startunnel`. Reading the guide
 directly does not require installing a skill. The guide uses the current
 Python client from the user's instance and the existing deployment commands.
-The website does not issue keys or host a shared application instance.
+The guide also explains full instance administration through the same CLI,
+with an admin key and an optional browser password. Use the
+[admin quickstart](../docs/user/admin-quickstart.md) for bootstrap, accounts,
+keys, tunnel controls, receipts, and access recovery. The website does not issue
+keys or host a shared application instance.
 
 Publishing the site does not publish that repository, an application image,
 or a standalone CLI package. The [image guide](../docs/setup/image.md) explains

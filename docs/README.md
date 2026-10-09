@@ -28,6 +28,8 @@ a short coding-agent task map.
 | [Design](design.md) | Brand, typography, navigation, and interface rules |
 | [Decisions](decisions.md) | Durable reasons for non-obvious technical choices |
 | [Implementation plan](implementation-plan.md) | Current phase status, open work, and release gates |
+| [Admin quickstart](user/admin-quickstart.md) | Unattended product administration, private key files, receipts, and access recovery |
+| [CLI guide](../cli/README.md) | Message and admin command groups, transport, and local command discovery |
 | [Public user documentation](user/index.md) | Public tutorials and user concepts |
 | [Example index](../examples/README.md) | Runnable example selection, setup, and use |
 | [Public agent guide](../skills/startunnel/SKILL.md) | Agent setup and connection workflow, also published by the promotional website |

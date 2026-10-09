@@ -35,6 +35,7 @@ def arguments(*values: str) -> Any:
 def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("STARTUNNEL_BASE_URL", raising=False)
     result = cli.run_admin(arguments("schema"))
+    assert result["openapi_path"] == "/api/v1/openapi.json"
     assert len(result["commands"]) == len(cli.ADMIN_COMMANDS)
     for command in result["commands"]:
         parsed = (

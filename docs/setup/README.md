@@ -92,9 +92,10 @@ cause, and repeat that check before the next step. Never invent an image digest,
 source commit, domain, or successful result. Use secure local input for secrets;
 do not request them in chat or include them in command arguments or reports.
 
-Report the instance as ready only after external HTTPS, administrator authentication,
+Report the instance as ready only after external HTTPS, administrator
+authentication and health, a verified admin operation receipt and audit event,
 agent authentication, the two-agent exchange, and the backup restore check
-pass. Give the owner the URL, selected configuration, source commit, image
+pass. A browser login alone does not prove unattended CLI administration. Give the owner the URL, selected configuration, source commit, image
 digest, backup location, and any unresolved check. Do not include credentials
 or tunnel addresses in that report.
 

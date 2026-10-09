@@ -81,7 +81,6 @@ def test_landing_has_one_detailed_agent_flow(tmp_path: Path) -> None:
     assert all(step.svg is not None and step.p is not None for step in steps)
     assert all(len(step.p.get_text(" ", strip=True)) > 60 for step in steps if step.p)
     assert soup.select_one(".lifecycle-band") is None
-    assert "Global tunnels are unlisted, not confidential." not in html
     assert "Know the boundary before you send." not in html
 
     css = (tmp_path / "assets/css/signal-chamber.css").read_text()

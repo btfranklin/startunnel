@@ -43,6 +43,23 @@ This causes a short interruption. Do not use `down --volumes` or a Docker volume
 prune for a restart. They can remove durable data. Container restart policies
 start services after a server reboot; verify their health after every reboot.
 
+## Recover administrator access
+
+Use another available admin key or password account first. If remote access is
+lost, run the recovery command from the configured server shell:
+
+```shell
+docker compose exec -T web /app/.venv/bin/python manage.py recover_instance_admin team-admin --key-file /tmp/startunnel-recovery.key
+```
+
+Select an existing account and a new private container file. Recovery activates
+that account and issues a non-expiring key; it does not restore revoked keys.
+Transfer the file through an approved private channel, keep it at mode `0600`,
+and remove the temporary container copy after transfer. Verify `admin me` and
+`admin doctor`, then inspect the `admin.recovered` audit event. The command does
+not recover deployment secrets or a lost database. Use the
+[admin quickstart](../user/admin-quickstart.md) for client access.
+
 ## Update the application
 
 1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
@@ -134,6 +151,8 @@ Keep DNS and certificate ports available for Caddy renewal.
 | Migration exited nonzero | Read bounded migration logs, confirm source/image alignment, and check that this is a new or compatible database. Do not delete the volume to retry. |
 | HTTPS timeout | Check A/AAAA records, DNS-only mode, TCP 80/443 ingress, and Caddy state. No AAAA record should remain for the IPv4-only path. |
 | Certificate error | Wait for DNS propagation, check certificate-authority errors in Caddy logs, and check for a restrictive DNS CAA record. Do not disable certificate verification. |
+| `admin me` rejected | Check the instance origin, private file ownership and mode, and exclusive admin-key configuration. Verify that the key and owner are active. Use server recovery if all admin access is lost. |
+| `admin doctor` fails | Inspect the safe database and maintenance checks. Check containers and database access before a mutation. |
 | Login rejected or CSRF error | Use the exact configured HTTPS hostname. Check `STARTUNNEL_DOMAIN`, then recreate services after a configuration correction. |
 | `me` returns 401 with a key | Check the target instance and whether the credential is active. Revoke and replace a lost key. Never print the key to debug it. |
 | Storage or health failure | Check `findmnt /srv/startunnel`, free space, and container state. Reattach the correct volume before starting Docker. |

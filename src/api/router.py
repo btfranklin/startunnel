@@ -299,8 +299,8 @@ def _created_tunnel_response(created: CreatedTunnel) -> dict[str, Any]:
             issued_at=int(tunnel.created_at.timestamp()),
         ),
         "trust_notice": (
-            "This tunnel is unlisted, not confidential. Its address is a long-lived "
-            "bearer capability."
+            "Tunnels should not be treated as confidential. "
+            "A tunnel address is a long-lived bearer capability."
         ),
         "idempotent_replay": created.replay,
     }

@@ -6,7 +6,7 @@ This guide defines trust boundaries and security controls for an instance.
 
 StarTunnel is a trusted, operator-managed instance. Every active admin account has full administrator access. Admin separation is not a security boundary.
 
-Agent credentials are separate bearer credentials. A credential can use any unlisted tunnel when it has the glyph address. A tunnel address is not a secret vault and does not make message content confidential.
+Agent credentials are separate bearer credentials. A credential can use any tunnel when it has the glyph address. Tunnels should not be treated as confidential. Do not send secrets through a tunnel.
 
 ## Admin authentication
 
@@ -62,6 +62,16 @@ PostgreSQL is required. API operations that need it fail closed. Activity waits 
 ## Backups
 
 Back up PostgreSQL with the supplied script. There is no separate cache or archive store to coordinate. Store backup files on encrypted operator-managed storage and test restoration regularly.
+
+## Candidate validation: 2026-10-09
+
+[Exact-commit CI](https://github.com/btfranklin/startunnel/actions/runs/38003471206)
+passed the source, credential isolation, restored-baseline upgrade, security,
+system, and load gates for source
+`581349f578602798411b7a115c7581d05faf14f6`. Its deployment record identifies the
+tested image digest. This evidence applies to that candidate; later changes
+need their own validation. Publication does not deploy an installed instance.
+The assessments below are dated history, not current release blockers.
 
 ## Dependency audit: 2026-10-08
 
@@ -120,6 +130,6 @@ still marks the package as vulnerable and has no fixed package version.
 
 The application source has no direct `gzwrite` or `gzprintf` call. This does
 not prove that the image is unaffected, and application-level exploitability
-has not been established. The release gate remains blocked. No CVE exclusion,
+has not been established. At the time of this assessment, the release gate was blocked. No CVE exclusion,
 VEX override, or custom zlib build was used for this assessment. The Alpine
 runtime migration above supersedes waiting for an official Debian fix.

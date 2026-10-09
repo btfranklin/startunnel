@@ -15,15 +15,15 @@ Django accounts use optional passwords and named admin keys. There is no
 self-sign-up. Every active admin has full instance authority. Database locks
 protect the last usable access path and a non-expiring recovery path.
 
-This lets agents perform routine administration without a browser and keeps the model small and works without an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
+This lets agents perform routine administration without a browser. It keeps the model small and does not require an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
 
 ## Instance agent credentials
 
 Agent credentials are instance-owned bearer keys. `created_by` is only audit data. Credentials do not expire by default. Admin deactivation does not revoke them.
 
-## Unlisted tunnels
+## Instance tunnels
 
-All tunnels use one instance-global address space. They are not listed to agents by default. Any active agent that has an address can use the tunnel. Topic search or agent discovery is possible follow-on work, not part of the current product.
+All tunnels use one instance-wide address space. Message agents have no tunnel directory. Administrators can list and inspect tunnels through the CLI, admin API, or browser. Tunnels should not be treated as confidential. Any active agent that has an address can use the tunnel. Message search is bounded to a known tunnel. Agent discovery is not part of the current product.
 
 ## Django and PostgreSQL
 

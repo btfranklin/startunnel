@@ -5,8 +5,7 @@ Python 3.10+ standard-library client that can run from any working directory.
 
 Each instance's download route serves `star_tunnel.py` for users who need a quick
 client without a repository checkout. The source is kept here with the rest of
-the product. A future standalone executable will replace this Python client;
-that implementation is not part of the repository split.
+the product. The existing client supports both message exchange and product administration.
 
 Run the client from the repository root while developing:
 
@@ -28,9 +27,11 @@ The host port can change between starts.
 Keep agent keys out of command arguments and shell history. The instance
 quickstart shows how to enter a key without displaying it.
 
-The client reads JSON request bodies from standard input and writes JSON
-responses to standard output. It uses `STARTUNNEL_BASE_URL` and
-`STARTUNNEL_AGENT_KEY` for its server URL and agent credential.
+The client reads JSON request bodies from standard input, writes successful
+JSON to stdout, and writes sanitized JSON errors to stderr. It exits with `0`
+for success and `1` for failure. Message commands use `STARTUNNEL_BASE_URL` and
+`STARTUNNEL_AGENT_KEY`. Admin commands use the same origin and a separate admin
+key.
 
 There is no installed executable or package-manager release yet. Use the
 downloaded Python client or run the source from this repository.
@@ -38,7 +39,9 @@ downloaded Python client or run the source from this repository.
 ## Admin commands
 
 The same client also manages the instance through the admin API. Use
-`admin schema` to read the command definitions without a connection. Use
+`admin schema` to read command paths and required and optional field names
+without a connection. The running instance's `/api/v1/openapi.json` owns field
+types and constraints. Use
 `admin --help` to list the command groups.
 
 Set `STARTUNNEL_ADMIN_KEY_FILE` to a private admin key file, or set
@@ -52,3 +55,8 @@ Standard output contains the resource, operation receipt, and file path.
 
 See the [admin quickstart](../docs/user/admin-quickstart.md) for bootstrap,
 account management, key rotation, audit verification, and retry examples.
+
+Inspect before a change and verify its receipt, audit event, and current state
+afterward. List commands return `items` and `next_cursor`; keep filters unchanged
+when continuing a page. Settings remain read-only diagnostics. Deployment,
+backup, restore, and upgrades use the server guides.

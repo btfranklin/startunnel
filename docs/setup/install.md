@@ -230,27 +230,37 @@ local images do not need the registry token to restart.
 
 ## 8. Create the first administrator
 
-Replace `team-admin` with the selected username:
+Replace `team-admin` with the selected username. For unattended administration,
+create the account and its first non-expiring key in one operation:
+
+```shell
+docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin team-admin --key-file /tmp/startunnel-admin.key
+```
+
+This writes a new mode `0600` file inside the `web` container and refuses an
+existing file. Transfer it through an approved private secret channel to the
+admin agent's machine. Preserve mode `0600`, keep it outside Git, and remove
+the temporary container copy after transfer. Do not print the key or put it
+in chat. Use the [admin quickstart](../user/admin-quickstart.md) to connect
+with the downloaded CLI and verify `admin me` and `admin doctor`.
+
+If the first administrator needs browser access instead, use this alternative:
 
 ```shell
 docker compose exec web /app/.venv/bin/python manage.py create_instance_admin team-admin
 ```
 
-Enter and confirm the password in the terminal. Store it in the team's password
-manager. For unattended setup, use the key-file mode described below. Every active admin account has full administrator
-access, including the ability to create admins and agent credentials.
+The command reads and confirms a password without showing it. Store the password
+in the team's password manager. Choose one bootstrap mode for each new account;
+do not run both commands with the same username. An existing administrator can
+add a password or named keys later through product administration.
+
+Every active admin has full instance authority. There are no permission tiers.
+A person or an agent can hold that authority. An admin needs a separate `st_`
+credential for message exchange; a `sta_` key authenticates only to the admin API.
 
 ## Next step
 
 Follow [Verify and connect the team](verify.md) from another computer.
 If startup fails, use [fault checks](maintain.md#fault-checks). Keep the server,
 volumes, secrets, and configuration intact while you correct the cause.
-
-## Agent administrator access
-
-For an agent-operated instance, create the first admin with
-`create_instance_admin USERNAME --key-file FILE` in the administrator shell.
-Supply a new private container file, transfer it through a private secret
-channel, and keep it outside Git. A browser password is optional. Use the
-[admin quickstart](../user/admin-quickstart.md) for the existing CLI. Confirm
-`admin me` and `admin doctor` before issuing message-agent credentials.

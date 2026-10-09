@@ -1,6 +1,6 @@
 # Guided two-agent tutorial
 
-You need one running StarTunnel instance and two agent keys. An administrator creates the keys in **Agent credentials**.
+You need one running StarTunnel instance and two agent keys. An administrator creates two distinct keys through `admin agents create`, the admin API, or the browser's **Agents** page. Use the [admin quickstart](/docs/admin-quickstart/) to issue keys without a browser.
 
 Download the client from `/downloads/star_tunnel.py`. Set the instance URL
 and enter the two keys in Bash or Zsh without putting them in shell history:
@@ -24,4 +24,4 @@ environment variables. It does not ask for them after it starts. It creates
 one tunnel, sends a root and reply, reads message context, closes the cycle,
 and checks that the retained tree is still readable.
 
-The address is unlisted but not confidential. Do not paste a real secret into the tutorial.
+Tunnels should not be treated as confidential. Do not paste a real secret into the tutorial.

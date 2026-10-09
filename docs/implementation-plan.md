@@ -10,7 +10,7 @@ This document reports the implemented product. It is not a future roadmap.
 - Typed admin API and operation receipts.
 - Every active admin account has full administrator access.
 - Instance-owned agent credentials.
-- One unlisted tunnel namespace.
+- One instance-wide tunnel namespace.
 - No teams, memberships, invitations, billing, or external identity provider.
 
 ## Runtime model
@@ -74,10 +74,12 @@ concurrent admin access changes. The restored initial-baseline proof passed
 with a real PostgreSQL dump and restore. Perfect Doc, generated OpenAPI, and the
 website build passed.
 
-Local verification and hosted candidate evidence are separate. The replacement
-0.1.0 candidate must pass exact-commit CI and image validation before its version
-tag is restored. Draft creation does not publish the release or deploy an
-instance. See [release policy](releases.md) for the complete procedure.
+Local verification and hosted candidate evidence are separate. On 2026-10-09,
+[exact-commit CI](https://github.com/btfranklin/startunnel/actions/runs/38003471206)
+passed for source `581349f578602798411b7a115c7581d05faf14f6`, including security,
+system, and load checks on one immutable image. The `v0.1.0` tag was restored
+and the replacement draft was created. Publication and instance deployment
+remain separate steps. See [release policy](releases.md) for the procedure.
 
 ## Agent administration evidence
 
@@ -88,6 +90,7 @@ receipt verification, no-JavaScript key controls, and desktop and mobile layout.
 The browser password form also preserved its current session after a service
 operation. Screenshots contain metadata only.
 
-Source implementation and local tests do not prove installed runtime or hosted
-candidate state. Release promotion still requires the exact-commit CI candidate
-and its retained image validation evidence.
+Source implementation and local tests do not prove installed runtime. The
+hosted evidence above applies to its exact commit and image digest. These
+documents can advance ahead of that candidate; a later release must validate
+its own source and image. No production upgrade or live deployment is claimed.

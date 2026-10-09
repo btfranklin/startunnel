@@ -21,26 +21,34 @@ pdm run dev
 The launcher selects an available host port and prints the browser URL after startup. Uvicorn still reports container port 8000 inside the `web` container; that is not the selected host port.
 Use `pdm run dev --port 8100` to require a specific available host port.
 
-Create the first admin account:
+Create the first admin account and key without a browser:
+
+```shell
+docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin USERNAME --key-file /tmp/startunnel-admin.key
+```
+
+The new private file is inside the `web` container. Transfer it through the
+operator's approved private secret channel to the CLI machine. Preserve mode
+`0600`, then remove the temporary container copy. Do not print the key or put it
+in chat. The command refuses an existing account or file. Use the
+[admin quickstart](user/admin-quickstart.md) for CLI access and verification.
+
+For browser-password setup, use this interactive alternative without `-T`:
 
 ```shell
 docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME
 ```
 
-The command reads and confirms a password without showing it. For a key-only
-admin, use a private container file:
-
-```shell
-docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME --key-file /tmp/admin.key
-```
-
-Transfer that file through the operator's private secret channel to the agent's
-private key file. Do not print it or put it in chat. The command refuses an
-existing file. Use [the admin quickstart](user/admin-quickstart.md) for CLI access.
+The command reads and confirms the password without showing it.
+Choose one bootstrap mode for a new account. Existing accounts can add passwords
+or keys through the admin API, CLI, or browser.
 
 For lost remote access, run `recover_instance_admin USERNAME --key-file FILE`
-on the server. Keep the resulting file private. Recovery issues a replacement
-key and records the action; it has no unauthenticated remote endpoint.
+on the server. Recovery activates the named existing account, issues a new
+non-expiring key, and records the action. It does not restore old revoked keys
+and has no unauthenticated remote endpoint. Keep the new file private and verify
+its identity, health, and audit event. See
+[access recovery](setup/maintain.md#recover-administrator-access).
 
 ## Services
 
@@ -69,6 +77,13 @@ Important settings:
 Use a PostgreSQL URL for `DATABASE_URL` and `DATABASE_ADMIN_URL`. Production settings reject other engines.
 
 ## Health
+
+For authenticated product inspection, use `admin status` and `admin doctor`
+through the existing CLI. These commands report safe database and maintenance
+status, capacity, limits, and runtime information. `admin doctor` exits with
+failure when a required check fails. A healthy web process alone does not prove
+that maintenance is healthy. See the [admin quickstart](user/admin-quickstart.md).
+Settings are readable diagnostics; changes still use deployment configuration.
 
 - `/health/live` proves that the web process responds.
 - `/health/ready` proves that PostgreSQL is available.
@@ -121,13 +136,13 @@ production guide. There is no cache or archive volume to coordinate.
 
 Use `scripts/container-logs.sh` for bounded development logs. For production,
 load the production configuration and use the [production log command](setup/maintain.md#fault-checks).
-Logs must not contain agent keys, addresses, cursors, passwords, message content,
+Logs must not contain admin keys, agent keys, addresses, cursors, passwords, message content,
 or identity data. Keep `.env` and `.env.tutorial` untracked and at mode `0600`.
 
 ## Production
 
 Use [Install StarTunnel](setup/install.md) for the complete production procedure,
-including the image, Linux secret-file ownership, DNS, HTTPS, and first login.
+including the image, Linux secret-file ownership, DNS, HTTPS, and initial administrator access.
 Use [Get the application image](setup/image.md) to select an official release
 or build a custom image. See [Release policy](releases.md) for publication and compatibility.
 

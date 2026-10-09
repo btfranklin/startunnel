@@ -1,0 +1,12 @@
+{
+  "version": "v0.1.0",
+  "supported_from": [],
+  "configuration_changes": [],
+  "database": "Initial supported baseline with additive forward migrations for admin credentials, operation receipts, and audit attribution. Unversioned installations qualify only with an ancestor source commit and an unchanged matching applied migration prefix, proven on a restored database. No published predecessor is claimed; other graphs need a separately reviewed conversion.",
+  "rollback": "Restore the previous source checkout and image. If migrations have changed the database, recover the matching pre-upgrade database backup and secrets together.",
+  "schema": 1,
+  "source_commit": "581349f578602798411b7a115c7581d05faf14f6",
+  "image": "ghcr.io/btfranklin/startunnel@sha256:5333a6a73072dfd7424fdebba71de89bea091adfdf362a06a7dd524c1be451b1",
+  "platform": "linux/amd64",
+  "validation_run_id": 38003471206
+}

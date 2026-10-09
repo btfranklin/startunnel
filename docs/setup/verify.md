@@ -20,15 +20,27 @@ pass. Confirm in the provider firewall that 5432 and 8000 have no public rule.
 
 ## 2. Verify administration and create credentials
 
-1. Verify administrator access with `admin me` and `admin doctor` through the
-   existing CLI, or sign in at `https://tunnel.example.com/accounts/login/` with
-   the installed browser password. Use the
-   [admin quickstart](../user/admin-quickstart.md) for key-only accounts.
-2. Create two agent credentials named `setup-sender` and `setup-receiver`
-   through `admin agents create` or the browser's **Agents** page.
-3. Save each CLI output file or browser download immediately in a private secret
-   store. If a browser download is lost, revoke the key and create another.
-   Never send keys through chat or a GitHub issue.
+For unattended setup, download the client and use the private admin key file
+as described in the [admin quickstart](../user/admin-quickstart.md). Run
+`admin me`, `admin capabilities`, and `admin doctor`. Verify that the identity
+is the intended administrator and that required health checks pass.
+
+Create two agent credentials named `setup-sender` and `setup-receiver` through
+`admin agents create`, with distinct idempotency keys and private output files.
+For each change, inspect the returned resource ID, retrieve its operation receipt
+with `admin operations get ID`, and find its audit event with `admin audit list`.
+Confirm the actor, target, action, and result. This proves administration through
+the existing CLI without a browser login.
+
+For human access, also sign in at
+`https://tunnel.example.com/accounts/login/` with an account that has a browser
+password. Use the **Agents** page for manual key issue and revoke controls.
+Key-only accounts cannot use password login until an administrator sets a
+password. A browser login alone does not prove the admin CLI or API.
+
+Save each private output file or browser download in the approved secret store.
+If a browser download is lost, revoke the key and create another. Never send
+keys through chat or a GitHub issue.
 
 ## 3. Verify an agent and a complete exchange
 
@@ -74,7 +86,8 @@ record:
 
 - Instance URL, provider, region, server identifier, and responsible owner.
 - Source commit and immutable application image reference.
-- Date and result of external HTTPS, administrator authentication, `me`, and the two-agent exchange.
+- Date and result of external HTTPS, admin identity and health, agent `me`, and the two-agent exchange.
+- Verified operation receipt and audit-event IDs for setup credential issue and revocation.
 - Backup location, recovery-key custodian, backup schedule, and restore-check
   result. Record a location, never the recovery key itself.
 

@@ -1,7 +1,9 @@
 # Agent quickstart
 
 Use the full URL that the instance prints at startup. An administrator must
-create an agent key for you. Enter the key without putting it in shell history:
+create an agent key for you through the CLI, admin API, or browser. See the
+[admin quickstart](/docs/admin-quickstart/) if you have admin authority.
+Enter the key without putting it in shell history:
 
 ```shell
 printf 'Paste the StarTunnel URL: '
@@ -15,7 +17,17 @@ export STARTUNNEL_AGENT_KEY
 python3 star_tunnel.py me
 ```
 
-The hidden key input works in Bash and Zsh. Store the key outside source control.
+The hidden key input works in Bash and Zsh. If the administrator supplied a
+private key file, load it without displaying the key:
+
+```shell
+IFS= read -r STARTUNNEL_AGENT_KEY < /private/path/work-agent.key
+export STARTUNNEL_AGENT_KEY
+python3 star_tunnel.py me
+```
+
+The message commands use `STARTUNNEL_AGENT_KEY`; they do not read an admin key
+or an agent-key file variable. Store the key outside source control.
 The URL must include the scheme and the selected host port.
 
 The client reads one JSON request body from standard input for each operation
@@ -54,4 +66,4 @@ Use the [API reference](/api/docs/) for each JSON body. Use a new idempotency
 key for each new write. Reuse that key only when you retry the same request.
 
 Treat the address as a bearer capability. Do not put it in a URL or log.
-Tunnels are unlisted, not confidential.
+Tunnels should not be treated as confidential.

@@ -68,7 +68,8 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 - Do not put addresses or keys in URLs or browser logs.
 
 The CLI and API are the primary administration interfaces. The browser uses the
-same domain services and supports manual inspection and recovery. Forms must
+same domain services and supports manual administration and inspection.
+Recovery of lost administrator access remains a server command. Forms must
 work without JavaScript. Do not embed admin keys in page source or client storage.
 Show account state, browser-access status, and named admin-key metadata.
 
@@ -90,4 +91,4 @@ scrolling so form controls remain stable when the browser moves focus.
 
 ## Language
 
-Call the shared object a **tunnel**. Do not call it global, team, personal, or tenant scoped. Say that it is **unlisted, not confidential**.
+Call the shared object a **tunnel**. Do not call it global, team, personal, or tenant scoped. Say: **Tunnels should not be treated as confidential.**

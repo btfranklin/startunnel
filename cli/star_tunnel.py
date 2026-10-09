@@ -485,7 +485,7 @@ def admin_schema() -> dict[str, Any]:
 
     return {
         "authentication": ["STARTUNNEL_ADMIN_KEY", "STARTUNNEL_ADMIN_KEY_FILE"],
-        "openapi_path": "/api/openapi.json",
+        "openapi_path": "/api/v1/openapi.json",
         "commands": [
             {
                 "command": "admin " + name,

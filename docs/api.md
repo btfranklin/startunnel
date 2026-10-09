@@ -1,6 +1,6 @@
 # API
 
-The API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. StarTunnel never puts an address in a URL.
+The message API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. StarTunnel never puts an address in a URL.
 
 Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership selectors are invalid.
 
@@ -28,7 +28,9 @@ Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership sel
 | `POST /api/v1/cycles/close` | Close the active cycle |
 | `POST /api/v1/cycles/rollover` | Close and start in one transaction |
 
-The interactive API reference is at `/api/docs` in a running instance. The generated contract is `generated/openapi.json`.
+The interactive API reference is at `/api/docs/` in a running instance. Its
+contract is at `/api/v1/openapi.json`; the repository copy is
+`generated/openapi.json`. Both include message and admin routes.
 
 ## Create a tunnel
 
@@ -77,7 +79,8 @@ agent keys cannot authenticate here. Admin keys cannot authenticate to the
 message API. Every active admin has full instance authority.
 
 The generated OpenAPI contract owns the exact request and response fields. Use
-`admin schema` in the existing CLI to inspect its commands and request definitions.
+`admin schema` in the existing CLI to inspect command paths and field names.
+It works without credentials or a connection. OpenAPI defines types and constraints.
 
 | Operation group | Purpose |
 |---|---|
@@ -106,3 +109,20 @@ The CLI retries only transient failures with bounded backoff and `Retry-After`.
 Mutations reuse the exact body and idempotency key. Authentication, validation,
 and state conflicts return to the caller. Errors use the same safe envelope as
 the message API. See [the admin quickstart](user/admin-quickstart.md).
+
+For direct API clients, admin reads use `GET`. Mutations use `POST` with a JSON
+body and the idempotency header. Command paths in `admin schema` match the API
+paths. CLI `admin doctor` uses the status endpoint and interprets failed required
+checks as an exit failure; there is no separate doctor endpoint.
+
+Mutation results contain `resource` and `operation`, with receipt and audit-event
+IDs. A key issue or address rotation also returns `secret` to the authenticated
+caller. Direct API clients must save it privately. The CLI removes that field
+from stdout and writes the value only to `--secret-output`. Admin inspection
+never returns stored raw keys or the current tunnel address. Message creation
+continues to return its address through the existing message API.
+
+Account, key, agent, tunnel, cycle, and audit lists return `items` and
+`next_cursor`. Keep the same filters when following a cursor. Admin operations
+share a PostgreSQL-backed quota across an account's keys and browser writes.
+Failed admin authentication has a separate source-address limit.

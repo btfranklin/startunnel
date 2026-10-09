@@ -22,7 +22,7 @@ Expected final line:
 Your first StarTunnel exchange is complete.
 ```
 
-All tunnels are unlisted and instance-owned. Examples do not use a personal or team scope.
+All tunnels belong to the instance. Examples do not use a personal or team scope.
 
 ## Catalog
 

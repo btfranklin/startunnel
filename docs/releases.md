@@ -135,3 +135,9 @@ is retained for recovery. Its source is
 [37879301853](https://github.com/btfranklin/startunnel/actions/runs/37879301853).
 The original immutable image digest remains unchanged. This archive describes
 the retired candidate, not the replacement release's source or acceptance.
+
+The follow-up documentation and notice fixes reuse unpublished version 0.1.0.
+The prior admin candidate's
+[deployment record](../releases/archive/0.1.0-draft-408429589.json) preserves its
+source, image digest, and validation run for recovery. A replacement must pass
+new exact-commit CI and image validation before the registry version tag changes.
