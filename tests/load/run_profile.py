@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -149,6 +150,7 @@ def main(raw_arguments: list[str] | None = None) -> int:
         return 1
     if report is not None:
         outcome = "passed" if report["passed"] else "failed"
+        print("Safe load results: " + json.dumps(report["results"], sort_keys=True), flush=True)
         print(f"The load proof {outcome}. Safe report: {arguments.report}")
     elif not cleanup_complete and manifest_path.exists():
         print("Fixture cleanup failed. Inspect the service logs.", file=sys.stderr)

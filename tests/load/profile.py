@@ -150,9 +150,11 @@ async def run_load_profile(
         async def reader(reader_index: int) -> None:
             nonlocal reads
             tunnel = tunnels[reader_index % len(tunnels)]
-            credential = manifest.credentials[reader_index % len(manifest.credentials)]
             cursor = tunnel["cursor"]
+            request_index = reader_index
             while not stopped.is_set():
+                credential = manifest.credentials[request_index % len(manifest.credentials)]
+                request_index += config.concurrent_activity_readers
                 try:
                     response = await activity_client.post(
                         "/api/v1/activity",

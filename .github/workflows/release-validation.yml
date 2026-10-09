@@ -172,6 +172,7 @@ jobs:
           python3 scripts/run_full_load_profile.py "${args[@]}" \
             --project-name strelease-load-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload the safe load report
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: load-proof-${{ github.run_id }}

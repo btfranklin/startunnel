@@ -137,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "6",
                     "STARTUNNEL_WEB_WORKERS": "12",
+                    "STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT": "500",
                 }
             )
             docker_version = required_output(

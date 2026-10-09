@@ -9,13 +9,16 @@ from tests.load.profile import Credential, CredentialManifest, LoadConfig, run_l
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stall_sends", [False, True])
+@pytest.mark.parametrize(
+    "stall_sends,rotate_readers", [(False, False), (True, False), (False, True)]
+)
 async def test_load_keeps_its_deadline_and_separates_long_polls(
-    monkeypatch: pytest.MonkeyPatch, stall_sends: bool
+    monkeypatch: pytest.MonkeyPatch, stall_sends: bool, rotate_readers: bool
 ) -> None:
     clients: list[FakeClient] = []
     message_clients: set[int] = set()
     activity_clients: set[int] = set()
+    activity_credentials: set[str] = set()
 
     class FakeClient:
         def __init__(self, **kwargs: object) -> None:
@@ -40,6 +43,12 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
                 )
             if path == "/api/v1/activity":
                 activity_clients.add(id(self))
+                if rotate_readers:
+                    headers = kwargs["headers"]
+                    assert isinstance(headers, dict)
+                    activity_credentials.add(headers["Authorization"])
+                    await asyncio.sleep(0.01)
+                    return httpx.Response(200, json={"next_cursor": "cursor"})
                 await asyncio.Event().wait()
             if path == "/api/v1/messages":
                 message_clients.add(id(self))
@@ -57,11 +66,13 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
         base_url="http://fixture",
         host_header=None,
         metrics_token=None,
-        manifest=CredentialManifest("fixture", 1, (Credential("credential", "test-key"),)),
+        manifest=CredentialManifest(
+            "fixture", 10, tuple(Credential(str(index), f"test-key-{index}") for index in range(10))
+        ),
         config=LoadConfig(
             duration_seconds=1,
             sends_per_second=20,
-            concurrent_activity_readers=100,
+            concurrent_activity_readers=2 if rotate_readers else 100,
             drain_seconds=0.2,
         ),
     )
@@ -70,7 +81,9 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
     assert message_clients and activity_clients
     assert message_clients.isdisjoint(activity_clients)
     assert isinstance(clients[1].limits, httpx.Limits)
-    assert clients[1].limits.max_connections == 100
+    assert clients[1].limits.max_connections == (2 if rotate_readers else 100)
+    if rotate_readers:
+        assert activity_credentials == {f"Bearer test-key-{index}" for index in range(10)}
     assert report["passed"] is not stall_sends
     results = report["results"]
     assert isinstance(results, dict)
