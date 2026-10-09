@@ -67,6 +67,11 @@ glibc. Application services in those stacks run Alpine. Release readiness still
 requires the complete security, system, and load proof on the candidate digest;
 availability of patched packages alone does not establish that evidence.
 
+The current image gate uses checksummed Trivy 0.75.0 for CycloneDX inventory and
+SARIF vulnerability reports. It scans the exact candidate digest, blocks high and
+critical findings including unfixed vulnerabilities, and needs no Docker Hub
+account. The Docker Scout findings below remain historical evidence.
+
 ## Image vulnerability assessment: 2026-09-25
 
 The Python 3.14.7 image pin was updated to the official `slim-trixie` digest

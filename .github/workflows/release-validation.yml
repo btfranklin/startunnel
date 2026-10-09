@@ -66,14 +66,19 @@ jobs:
           sudo apt-get install --yes tesseract-ocr
           go install github.com/zricethezav/gitleaks/v8@v8.28.0
           sudo install -m 0755 "$(go env GOPATH)/bin/gitleaks" /usr/local/bin/gitleaks
-          curl -fsSL \
-            https://raw.githubusercontent.com/docker/scout-cli/v1.21.0/install.sh \
-            -o "${RUNNER_TEMP}/install-docker-scout.sh"
-          sh "${RUNNER_TEMP}/install-docker-scout.sh" \
-            -b "${HOME}/.docker/cli-plugins" v1.21.0
+          tool_dir="$RUNNER_TEMP/trivy"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=trivy_0.75.0_Linux-64bit.tar.gz
+          base=https://github.com/aquasecurity/trivy/releases/download/v0.75.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/trivy_0.75.0_checksums.txt" --output checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf "$archive" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
           gitleaks version
           tesseract --version
-          docker scout version
+          trivy --version
       - uses: docker/login-action@v3
         if: inputs.candidate_image != ''
         with:
