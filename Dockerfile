@@ -95,6 +95,7 @@ ARG APP_UID=10001
 ARG APP_GID=10001
 
 RUN apk add --no-cache ca-certificates tini \
+    && ln -s /sbin/tini /usr/bin/tini \
     && addgroup -g "${APP_GID}" startunnel \
     && adduser -D -u "${APP_UID}" -G startunnel -h /home/startunnel startunnel
 
