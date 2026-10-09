@@ -225,16 +225,27 @@ def main() -> int:
                 ("upgrade", "admin_upgrade_restored"),
             ):
                 if phase == "upgrade":
+                    dump_directory = stack.capture(
+                        "Create private container dump directory",
+                        "exec",
+                        "-T",
+                        "postgres",
+                        "mktemp",
+                        "-d",
+                    ).strip()
+                    dump_file = str(Path(dump_directory) / "admin-upgrade.dump")
                     stack.run(
                         "Dump pre-change baseline",
                         "exec",
                         "-T",
                         "postgres",
-                        "sh",
-                        "-ec",
-                        "umask 077\n"
-                        "exec pg_dump --username startunnel_admin --format=custom "
-                        "--file=/tmp/admin-upgrade.dump admin_upgrade_source",
+                        "pg_dump",
+                        "--username",
+                        "startunnel_admin",
+                        "--format=custom",
+                        "--file",
+                        dump_file,
+                        "admin_upgrade_source",
                         timeout_seconds=60,
                     )
                     stack.run(
@@ -247,7 +258,7 @@ def main() -> int:
                         "startunnel_admin",
                         "--dbname=admin_upgrade_restored",
                         "--exit-on-error",
-                        "/tmp/admin-upgrade.dump",
+                        dump_file,
                         timeout_seconds=60,
                     )
                 environment["TEST_DATABASE_URL"] = (
