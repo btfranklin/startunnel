@@ -116,8 +116,10 @@ def main(raw_arguments: list[str] | None = None) -> int:
     try:
         config = _config(arguments)
         config.validate()
+        print("Provisioning disposable load fixtures.", flush=True)
         _provision(manifest_path, arguments)
         manifest = load_credential_manifest(manifest_path)
+        print("Running the fixed-duration load workload.", flush=True)
         report = asyncio.run(
             run_load_profile(
                 base_url=arguments.base_url,
@@ -132,6 +134,7 @@ def main(raw_arguments: list[str] | None = None) -> int:
         print(f"Load proof failed: {error}", file=sys.stderr)
     finally:
         if manifest_path.exists():
+            print("Cleaning disposable load fixtures.", flush=True)
             cleanup_complete = _cleanup(manifest_path)
         if report is not None:
             finalize_fixture_cleanup(report, complete=cleanup_complete)

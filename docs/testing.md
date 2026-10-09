@@ -115,3 +115,10 @@ restore, database loss, and restarts. It tests the exact runtime image in an
 isolated development configuration; it does not prove a particular public
 server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
+
+The load proof schedules 50 sends per second for five minutes with 100 activity
+readers. Long polls use a separate HTTP connection pool. Message submissions
+overlap, with at most 100 in flight, and have a bounded drain after the workload
+deadline. Missed submissions, capacity exhaustion, request errors, and unfinished
+sends fail the proof rather than extending its duration. Its report still requires
+at least 95% of the expected sends and successful fixture cleanup.

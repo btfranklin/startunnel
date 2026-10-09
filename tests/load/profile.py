@@ -107,7 +107,16 @@ async def run_load_profile(
     tunnel_count = min(10, max(1, len(manifest.credentials) // 3))
     tunnels: list[dict[str, str]] = []
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=30, headers=common_headers) as client:
+    # Long polls must not occupy the connections used to submit messages.
+    async with (
+        httpx.AsyncClient(base_url=base_url, timeout=30, headers=common_headers) as client,
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30,
+            headers=common_headers,
+            limits=httpx.Limits(max_connections=max(1, config.concurrent_activity_readers)),
+        ) as activity_client,
+    ):
         for index in range(tunnel_count):
             credential = manifest.credentials[index]
             response = await client.post(
@@ -145,7 +154,7 @@ async def run_load_profile(
             cursor = tunnel["cursor"]
             while not stopped.is_set():
                 try:
-                    response = await client.post(
+                    response = await activity_client.post(
                         "/api/v1/activity",
                         headers={"Authorization": f"Bearer {credential.key}"},
                         json={
@@ -169,12 +178,12 @@ async def run_load_profile(
             for index in range(config.concurrent_activity_readers)
         ]
         started = time.monotonic()
-        next_send = started
         target_sends = int(config.duration_seconds * config.sends_per_second)
-        for index in range(target_sends):
-            delay = next_send - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
+        deadline = started + config.duration_seconds
+        send_tasks: set[asyncio.Task[None]] = set()
+
+        async def send(index: int) -> None:
+            nonlocal sent
             tunnel = tunnels[index % len(tunnels)]
             credential = manifest.credentials[(index + tunnel_count) % len(manifest.credentials)]
             request_started = time.monotonic()
@@ -199,11 +208,34 @@ async def run_load_profile(
                     failures[status] = failures.get(status, 0) + 1
             except httpx.HTTPError:
                 failures["transport"] = failures.get("transport", 0) + 1
-            next_send = started + (index + 1) / config.sends_per_second
+
+        for index in range(target_sends):
+            delay = started + index / config.sends_per_second - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if time.monotonic() >= deadline:
+                failures["missed_schedule"] = target_sends - index
+                break
+            if len(send_tasks) >= 100:
+                failures["sender_capacity"] = failures.get("sender_capacity", 0) + 1
+                continue
+            task = asyncio.create_task(send(index))
+            send_tasks.add(task)
+            task.add_done_callback(send_tasks.discard)
+            if index and index % max(1, int(config.sends_per_second * 60)) == 0:
+                print(f"Load progress: {index} scheduled, {sent} successful sends.", flush=True)
+
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
         stopped.set()
-        if readers:
-            done, pending = await asyncio.wait(readers, timeout=config.drain_seconds)
+        outstanding = [*readers, *send_tasks]
+        if outstanding:
+            done, pending = await asyncio.wait(outstanding, timeout=config.drain_seconds)
+            unfinished_sends = sum(task in send_tasks for task in pending)
+            if unfinished_sends:
+                failures["send_drain_timeout"] = unfinished_sends
             for task in pending:
                 task.cancel()
             await asyncio.gather(*done, *pending, return_exceptions=True)
