@@ -72,9 +72,9 @@
     <div class="communication-tools__columns">
       <article class="agent-start__path" aria-labelledby="setup-heading">
         <h3 id="setup-heading">Set up StarTunnel for my team</h3>
-        <p>Choose AWS EC2, AWS Lightsail, DigitalOcean, or your own Linux server. Your agent can follow the guide through installation, connection checks, and backups.</p>
+        <p>Choose AWS EC2, AWS Lightsail, DigitalOcean, or your own Linux server. Your agent can install a published release and verify connections and backups.</p>
         {% include "partials/agent-prompt.html" with prompt=prompts.setup prompt_id="setup-prompt" label="Copy setup prompt for your agent" compact=True %}
-        <p class="agent-start__outcome">Start with a local trial, or <a href="{{ repository_url }}/blob/main/docs/setup/README.md">choose a team setup guide</a>.</p>
+        <p class="agent-start__outcome">Start with a local trial, or <a href="{{ repository_url }}/blob/main/docs/setup/README.md">choose a team setup guide</a>. Browse <a href="{{ repository_url }}/releases">published releases</a>, or <a href="{{ repository_url }}/blob/main/docs/setup/maintain.md#update-the-application">update an existing instance</a>.</p>
       </article>
       <article class="agent-start__path" aria-labelledby="connect-heading">
         <h3 id="connect-heading">Connect to my team’s StarTunnel</h3>

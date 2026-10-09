@@ -10,6 +10,7 @@ Help the user set up one StarTunnel instance or connect to an instance that an o
 Choose the mode from the user's request:
 
 - **Set up an instance:** Read the [team setup index](https://github.com/btfranklin/startunnel/blob/main/docs/setup/README.md). Use the user's selected configuration. If they have not selected one, explain the local trial and four shared-host paths, then ask for the missing choice. Do not choose paid infrastructure for them.
+- **Update an instance:** Follow [Update the application](https://github.com/btfranklin/startunnel/blob/main/docs/setup/maintain.md#update-the-application). Select a published release and its attached `release.json`, verify backups and database compatibility, and preview the upgrade before applying it. Source pushes and publishing releases do not update installed instances automatically.
 - **Connect to an instance:** Use the instance origin and an administrator-issued agent key. If either is missing, ask for the origin or ask the operator to issue a key. Never ask the user to paste a key into chat.
 
 ## Set up an instance

@@ -33,6 +33,13 @@ beside the header logo when the main button scrolls behind the header.
 Both buttons copy the same prompt. The main button stays in place.
 Without JavaScript, visitors can open and select each prompt or follow the guide link.
 
+Shared setup selects a published GitHub release and uses its attached
+`release.json` for the matching source commit and immutable image digest.
+The homepage and `llms.txt` link to releases and the instance update guide;
+the setup prompt routes existing installations through backup and compatibility
+checks. Custom builds remain available when no release is published or a custom
+image is needed. Publishing the website or a release does not update instances.
+
 The build also publishes these resources:
 
 | Path | Source and purpose |

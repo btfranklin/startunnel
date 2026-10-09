@@ -8,6 +8,8 @@ It installs a new instance. It does not convert an older StarTunnel database.
 
 You need a prepared Ubuntu 24.04 x86-64 server, working DNS, and the exact
 source commit and image digest from [the image guide](image.md).
+For an official image, take both values from the published release's attached
+`release.json`. For a custom image, use the operator's matching image build record.
 For a public IP address with no DNS, first read [Run without a domain](no-domain.md).
 The default TLS steps below need the changes described there.
 
@@ -111,14 +113,15 @@ storage, as checked in the existing-server guide. In both cases,
 umask 022
 git clone https://github.com/btfranklin/startunnel.git /opt/startunnel
 cd /opt/startunnel
-printf 'Source commit from the image build: '
+printf 'Source commit from release.json or the custom image build record: '
 IFS= read -r SOURCE_COMMIT
 git checkout --detach "$SOURCE_COMMIT"
 git rev-parse HEAD
 umask 077
 ```
 
-The printed commit must match the image build record. Stop if it does not.
+The printed commit must match `source_commit` in `release.json` or the custom
+image build record. Stop if it does not.
 This checkout supplies Compose files, PostgreSQL scripts, and the Caddy file.
 Keep it at the matching commit for the life of this deployment.
 The checkout uses normal source permissions so PostgreSQL and Caddy can read
