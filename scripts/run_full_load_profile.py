@@ -135,8 +135,8 @@ def main(argv: list[str] | None = None) -> int:
             # profile against a reproducible worker and database budget.
             stack.environment.update(
                 {
-                    "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "6",
-                    "STARTUNNEL_WEB_WORKERS": "12",
+                    "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "18",
+                    "STARTUNNEL_WEB_WORKERS": "4",
                     "STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT": "500",
                 }
             )

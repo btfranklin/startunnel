@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import httpx
 
+MAX_IN_FLIGHT_SENDS = 256
+
 
 class LoadProfileError(RuntimeError):
     """The load proof configuration or result is invalid."""
@@ -109,7 +111,15 @@ async def run_load_profile(
 
     # Long polls must not occupy the connections used to submit messages.
     async with (
-        httpx.AsyncClient(base_url=base_url, timeout=30, headers=common_headers) as client,
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30,
+            headers=common_headers,
+            limits=httpx.Limits(
+                max_connections=MAX_IN_FLIGHT_SENDS,
+                max_keepalive_connections=MAX_IN_FLIGHT_SENDS,
+            ),
+        ) as client,
         httpx.AsyncClient(
             base_url=base_url,
             timeout=30,
@@ -218,7 +228,7 @@ async def run_load_profile(
             if time.monotonic() >= deadline:
                 failures["missed_schedule"] = target_sends - index
                 break
-            if len(send_tasks) >= 100:
+            if len(send_tasks) >= MAX_IN_FLIGHT_SENDS:
                 failures["sender_capacity"] = failures.get("sender_capacity", 0) + 1
                 continue
             task = asyncio.create_task(send(index))
@@ -265,6 +275,11 @@ async def run_load_profile(
             "duration_seconds": config.duration_seconds,
             "sends_per_second": config.sends_per_second,
             "concurrent_activity_readers": config.concurrent_activity_readers,
+            "max_in_flight_sends": MAX_IN_FLIGHT_SENDS,
+            "web_workers": os.getenv("STARTUNNEL_LOAD_WEB_WORKERS", "unknown"),
+            "web_database_pool_max_size": os.getenv(
+                "STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE", "unknown"
+            ),
             "credential_count": len(manifest.credentials),
             "tunnel_count": tunnel_count,
             "seed": config.seed,

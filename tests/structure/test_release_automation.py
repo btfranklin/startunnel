@@ -459,8 +459,8 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     assert load_environment["STARTUNNEL_LOAD_SEED"] == "42"
     assert load_environment["STARTUNNEL_LOAD_DOCKER_VERSION"] == "29.0.0"
     assert load_environment["STARTUNNEL_LOAD_BUILD_MODE"] == "built-current-run"
-    assert load_environment["STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE"] == "6"
-    assert load_environment["STARTUNNEL_WEB_WORKERS"] == "12"
+    assert load_environment["STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE"] == "18"
+    assert load_environment["STARTUNNEL_WEB_WORKERS"] == "4"
     assert load_environment["STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT"] == "500"
     assert "OPENAI_API_KEY" not in load_environment
 
