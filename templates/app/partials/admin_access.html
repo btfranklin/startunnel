@@ -1,0 +1,68 @@
+<details>
+  <summary>Manage access for {{ access_admin.username }}</summary>
+  <ul class="record-list">
+    {% for key in access_admin.admin_credentials.all %}
+      <li>
+        <div><strong>{{ key.name }}</strong><small>{{ key.display_prefix }}••••</small><small>Expires: {{ key.expires_at|default:"Never" }}</small><small>Last used: {{ key.last_used_at|default:"Never" }}</small></div>
+        {% if key.revoked_at %}
+          <span class="state state--muted">Revoked</span>
+        {% else %}
+          <form method="post" action="{% url 'site:admin-access' %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="revoke-key">
+            <input type="hidden" name="key_id" value="{{ key.id }}">
+            <input type="hidden"
+                   name="idempotency_key"
+                   value="{{ idempotency_key }}-revoke-{{ key.id }}">
+            <button class="button button--secondary" type="submit">Revoke admin key</button>
+          </form>
+        {% endif %}
+      </li>
+    {% empty %}
+      <li>No admin API keys.</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{% url 'site:admin-access' %}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create-key">
+    <input type="hidden" name="admin_id" value="{{ access_admin.id }}">
+    <input type="hidden"
+           name="idempotency_key"
+           value="{{ idempotency_key }}-key-{{ access_admin.id }}">
+    <label>
+      Admin key name
+      <input name="name" maxlength="100" required>
+    </label>
+    <label>
+      Expiry (optional, with time zone)
+      <input name="expires_at" type="text" placeholder="2026-12-31T23:59:00Z">
+    </label>
+    <button class="button button--secondary" type="submit">Download new admin key</button>
+    <p>After a download, refresh access before you issue another key.</p>
+    <a class="text-link" href="{% url 'site:admins' %}">Refresh admin access</a>
+  </form>
+  <form method="post" action="{% url 'site:admin-access' %}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="set-password">
+    <input type="hidden" name="admin_id" value="{{ access_admin.id }}">
+    <input type="hidden"
+           name="idempotency_key"
+           value="{{ idempotency_key }}-password-{{ access_admin.id }}">
+    <label>
+      New browser password
+      <input name="password" type="password" autocomplete="new-password" required>
+    </label>
+    <button class="button button--secondary" type="submit">Set browser password</button>
+  </form>
+  {% if access_admin.has_usable_password %}
+    <form method="post" action="{% url 'site:admin-access' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="remove-password">
+      <input type="hidden" name="admin_id" value="{{ access_admin.id }}">
+      <input type="hidden"
+             name="idempotency_key"
+             value="{{ idempotency_key }}-remove-password-{{ access_admin.id }}">
+      <button class="button button--secondary" type="submit">Remove browser password</button>
+    </form>
+  {% endif %}
+</details>

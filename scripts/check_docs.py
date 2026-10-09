@@ -18,6 +18,7 @@ PUBLIC_ROUTES = {
     "/api/v1/openapi.json",
     "/docs/",
     "/docs/agent-quickstart/",
+    "/docs/admin-quickstart/",
     "/docs/tutorial/",
     "/docs/concepts/",
     "/docs/authentication/",

@@ -1,4 +1,4 @@
-"""Strict signed cursor primitives for public API traversal state."""
+"""Strict signed cursor primitives for bounded traversal state."""
 
 from __future__ import annotations
 

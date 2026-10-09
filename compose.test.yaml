@@ -97,6 +97,7 @@ services:
         APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
     environment:
       <<: *test-environment
+      STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
       STARTUNNEL_BROWSER_TESTS: "1"
       STARTUNNEL_BROWSERS: ${STARTUNNEL_BROWSERS:-chromium,firefox,webkit}
       STARTUNNEL_BROWSER_ARTIFACTS_DIR: /artifacts/browser

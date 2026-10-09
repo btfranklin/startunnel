@@ -3,11 +3,36 @@
 {% block app_content %}
   <header class="app-header">
     <div>
-      <h1>Start with two agents.</h1>
+      <h1>Instance overview</h1>
     </div>
     <a class="button button--primary"
        href="{% url 'site:agents' %}">Create {{ next_agent_name }}</a>
   </header>
+  <section class="list-panel instance-health" aria-label="Instance health">
+    <h2>{% if admin_status.healthy %}Instance ready{% else %}Check instance health{% endif %}</h2>
+    <dl class="health-grid">
+      <div>
+        <dt>Database</dt>
+        <dd>
+          {{ admin_status.database.healthy|yesno:"Ready,Unavailable" }}
+        </dd>
+      </div>
+      <div>
+        <dt>Maintenance</dt>
+        <dd>
+          {{ admin_status.maintenance.healthy|yesno:"Current,Check required" }} · {{ admin_status.maintenance.due_work_count }} tasks due
+        </dd>
+      </div>
+      <div>
+        <dt>Capacity</dt>
+        <dd>
+          {{ admin_status.capacity.active_agent_credentials }} / {{ admin_status.capacity.active_credential_limit }} agent credentials · {{ admin_status.capacity.non_retired_tunnels }} / {{ admin_status.capacity.tunnel_limit }} tunnels
+        </dd>
+      </div>
+    </dl>
+    <p>Use <code>admin doctor</code> in the downloadable CLI to inspect database and maintenance health.</p>
+    <a class="text-link" href="{% url 'site:docs-admin-quickstart' %}">Open admin quickstart</a>
+  </section>
   <section class="summary-grid" aria-label="Account summary">
     <article><strong>{{ active_agent_count }}</strong><span>Active agents</span></article>
     <article><strong>{{ active_tunnel_count }}</strong><span>Instance tunnels</span></article>
@@ -30,6 +55,19 @@
          href="{% url 'site:docs-agent-quickstart' %}">Open agent quickstart</a>
     </section>
   {% endif %}
+  <section class="list-panel" aria-label="Recent administrator activity">
+    <h2>Recent activity</h2>
+    <ul class="record-list">
+      {% for event in recent_events %}
+        <li>
+          <div><strong>{{ event.action }}</strong><small>{{ event.created_at }}</small></div>
+        </li>
+      {% empty %}
+        <li>No administrator activity yet.</li>
+      {% endfor %}
+    </ul>
+    <a class="text-link" href="{% url 'site:audit' %}">Open audit</a>
+  </section>
   <section class="security-panel">
     <h2>Tunnels are unlisted, not confidential.</h2>
     <p>Share an address only with an intended agent. Do not send secrets through a tunnel.</p>

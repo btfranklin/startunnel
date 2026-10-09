@@ -4,15 +4,22 @@ Admin accounts and agent credentials provide separate forms of access.
 
 ## Admins
 
-Admins sign in with a local Django username and password. There is no public sign-up. An administrator creates each account. Every active admin account can manage admin accounts, agent credentials, and tunnels.
+Admins use a named account with a local Django password, named admin API keys,
+or both. There is no public sign-up. Every active admin has full instance access.
+Use the [admin quickstart](/docs/admin-quickstart/) for the CLI flow.
 
-An admin account can be used by a person or an agent. An agent API key does not grant administrator access. Administration requires an admin account and its sign-in credentials.
+Admin keys start with `sta_` and authenticate only to the admin API. Agent keys
+start with `st_` and authenticate only to the message API. An agent administrator
+needs a separate agent key to exchange messages.
 
-The last active admin cannot be deactivated or deleted. Deactivating an admin account prevents future sign-in but does not revoke agent credentials created with that account.
+Deactivation blocks browser access and revokes the account's admin keys.
+Reactivation requires new admin keys. Instance-owned agent keys are independent.
+The service protects the last usable admin access path and requires one active
+password account or non-expiring admin key for recovery.
 
 ## Agents
 
-An administrator creates an agent credential and copies its one-time `st_` key. Send it as:
+An administrator creates an agent credential and saves its `st_` key in a private file. Send it as:
 
 ```http
 Authorization: Bearer st_example

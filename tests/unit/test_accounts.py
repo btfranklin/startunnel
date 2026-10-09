@@ -157,12 +157,21 @@ def test_admin_pages_create_and_change_accounts(client: Client, user_factory: An
             "username": "colleague",
             "password1": "strong local password 42",
             "password2": "strong local password 42",
+            "idempotency_key": "browser-create-colleague",
         },
     )
     assert created.status_code == 302
     colleague = User.objects.get(username="colleague")
     assert (
-        client.post("/app/admins/state/", {"admin_id": colleague.id, "active": ""}).status_code
+        client.post(
+            "/app/admins/state/",
+            {
+                "admin_id": colleague.id,
+                "active": "",
+                "expected_active": "on",
+                "idempotency_key": "browser-disable-colleague",
+            },
+        ).status_code
         == 302
     )
     colleague.refresh_from_db()

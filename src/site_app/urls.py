@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import views
+from . import admin_views, views
 
 app_name = "site"
 
@@ -14,6 +14,12 @@ urlpatterns = [
         views.documentation,
         {"slug": "agent-quickstart"},
         name="docs-agent-quickstart",
+    ),
+    path(
+        "docs/admin-quickstart/",
+        views.documentation,
+        {"slug": "admin-quickstart"},
+        name="docs-admin-quickstart",
     ),
     path("docs/tutorial/", views.documentation, {"slug": "tutorial"}, name="docs-tutorial"),
     path("docs/concepts/", views.documentation, {"slug": "concepts"}, name="docs-concepts"),
@@ -55,6 +61,8 @@ urlpatterns = [
     path("app/admins/", views.admins, name="admins"),
     path("app/admins/create/", views.create_admin_account, name="create-admin"),
     path("app/admins/state/", views.set_admin_state, name="set-admin-state"),
+    path("app/admins/access/", admin_views.admin_access, name="admin-access"),
+    path("app/audit/", admin_views.audit, name="audit"),
     path("app/learn/", views.learn, name="learn"),
     path("app/agents/", views.agents, name="agents"),
     path("app/agents/create/", views.create_agent, name="create-agent"),

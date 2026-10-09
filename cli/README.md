@@ -34,3 +34,21 @@ responses to standard output. It uses `STARTUNNEL_BASE_URL` and
 
 There is no installed executable or package-manager release yet. Use the
 downloaded Python client or run the source from this repository.
+
+## Admin commands
+
+The same client also manages the instance through the admin API. Use
+`admin schema` to read the command definitions without a connection. Use
+`admin --help` to list the command groups.
+
+Set `STARTUNNEL_ADMIN_KEY_FILE` to a private admin key file, or set
+`STARTUNNEL_ADMIN_KEY`. Do not set both. Admin credentials and agent
+credentials have separate authority. Keep all keys out of command arguments.
+
+Admin writes read JSON from standard input and require `--idempotency-key`.
+Commands that issue a key or rotate an address also require `--secret-output`
+with a new file path. The client writes the secret to that private file.
+Standard output contains the resource, operation receipt, and file path.
+
+See the [admin quickstart](../docs/user/admin-quickstart.md) for bootstrap,
+account management, key rotation, audit verification, and retry examples.

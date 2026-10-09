@@ -12,7 +12,7 @@ EXCLUDED_PARTS = {".git", ".venv", "node_modules", "staticfiles", "__pycache__"}
 EXCLUDED_NAMES = {".env", ".env.tutorial", "pdm.lock", "package-lock.json"}
 PATTERNS = {
     "OpenAI key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
-    "StarTunnel key": re.compile(r"\bst_[A-Za-z0-9_-]{43}\b"),
+    "StarTunnel key": re.compile(r"\bst(?:a)?_[A-Za-z0-9_-]{43}\b"),
 }
 OCR_PATTERNS = {
     "OpenAI key-like OCR": re.compile(

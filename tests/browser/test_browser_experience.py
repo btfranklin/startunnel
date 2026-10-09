@@ -14,7 +14,20 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from playwright.sync_api import Browser, BrowserContext, Page, StorageState, expect, sync_playwright
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Download,
+    Page,
+    Request,
+    Response,
+    StorageState,
+    expect,
+    sync_playwright,
+)
+from playwright.sync_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 ENABLED = os.getenv("STARTUNNEL_BROWSER_TESTS") == "1"
 BROWSER_NAMES = tuple(
@@ -98,7 +111,7 @@ def account(browser: Browser, base_url: str) -> Iterator[BrowserAccount]:
     page.get_by_label("Username").fill(username)
     page.get_by_label("Password").fill(password)
     page.get_by_role("button", name="Sign in").click()
-    expect(page.get_by_role("heading", name="Start with two agents.")).to_be_visible()
+    expect(page.get_by_role("heading", name="Instance overview", exact=True)).to_be_visible()
     result = BrowserAccount(username, password, context.storage_state())
     context.close()
     try:
@@ -110,15 +123,53 @@ def account(browser: Browser, base_url: str) -> Iterator[BrowserAccount]:
 
 
 def _authenticated_context(browser: Browser, account: BrowserAccount) -> BrowserContext:
-    return browser.new_context(storage_state=account.storage_state)
+    return browser.new_context(storage_state=account.storage_state, accept_downloads=True)
+
+
+def _download_key(page: Page, *, button: str, endpoint: str) -> Download:
+    """Report only response metadata if a browser download does not start."""
+
+    requests: list[bool] = []
+    responses: list[dict[str, object]] = []
+
+    def request_seen(request: Request) -> None:
+        if request.method == "POST" and request.url.endswith(endpoint):
+            requests.append(True)
+
+    def response_seen(response: Response) -> None:
+        if response.request.method == "POST" and response.url.endswith(endpoint):
+            headers = response.headers
+            responses.append(
+                {
+                    "status": response.status,
+                    "content_type": headers.get("content-type"),
+                    "content_disposition": headers.get("content-disposition"),
+                }
+            )
+
+    page.on("request", request_seen)
+    page.on("response", response_seen)
+    try:
+        with page.expect_download(timeout=15000) as download_info:
+            page.get_by_role("button", name=button, exact=True).click()
+        return download_info.value
+    except PlaywrightTimeoutError:
+        raise AssertionError(
+            f"Key download did not start. POST seen: {bool(requests)}; responses: {responses}"
+        ) from None
+    finally:
+        page.remove_listener("request", request_seen)
+        page.remove_listener("response", response_seen)
 
 
 def _create_agent_key(page: Page, base_url: str, name: str) -> str:
     page.goto(f"{base_url}/app/agents/")
     page.get_by_label("Agent name").fill(name)
-    page.get_by_role("button", name="Create agent key").click()
-    expect(page.get_by_role("heading", name="One-time agent key")).to_be_visible()
-    key = page.locator("#one-time-agent-key").inner_text().strip()
+    downloaded_path = _download_key(
+        page, button="Create agent key", endpoint="/app/agents/create/"
+    ).path()
+    assert downloaded_path is not None
+    key = Path(downloaded_path).read_text().strip()
     assert re.fullmatch(r"st_[A-Za-z0-9_-]{43}", key)
     return key
 
@@ -170,6 +221,14 @@ def test_local_login_admin_and_password_change(
         page.goto(f"{base_url}/app/account/")
         page.get_by_role("link", name="Change password").click()
         expect(page.get_by_role("heading", name="Change password")).to_be_visible()
+        new_password = f"Updated-{uuid4().hex}-Pass9!"
+        page.locator('input[name="old_password"]').fill(account.password)
+        page.locator('input[name="new_password1"]').fill(new_password)
+        page.locator('input[name="new_password2"]').fill(new_password)
+        page.get_by_role("button", name="Change password", exact=True).click()
+        expect(page.get_by_role("heading", name=account.username, exact=True)).to_be_visible()
+        page.goto(f"{base_url}/app/")
+        expect(page.get_by_role("heading", name="Instance overview", exact=True)).to_be_visible()
     finally:
         page.close()
         context.close()

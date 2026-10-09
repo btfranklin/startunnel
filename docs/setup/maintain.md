@@ -67,8 +67,10 @@ start services after a server reboot; verify their health after every reboot.
    The helper validates the record, clean checkout, production configuration,
    secret files, and installed image's source/version labels. Versioned
    installations must appear in the release's `supported_from` list.
-   Unversioned installations must have an ancestor source commit and exactly
-   matching migration files. A missing revision label requires recovering the
+   Unversioned installations must have an ancestor source commit and matching
+   applied migration files in an unchanged prefix. Forward migration and recovery
+   evidence must cover the exact installed source. A missing revision label
+   requires recovering the
    original build record and a separately reviewed manual upgrade; do not
    guess a commit or bypass compatibility checks.
 5. Once the preview passes and the backup checks in step 2 are complete, apply:
@@ -88,7 +90,7 @@ start services after a server reboot; verify their health after every reboot.
    database volumes or regenerates secrets. There is no automatic rollback.
    If a prior attempt left recovery files, inspect them and the actual stack
    state before retrying; the helper refuses to overwrite them.
-6. Repeat [external verification](verify.md), including login and a two-agent
+6. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.
 
@@ -96,7 +98,7 @@ start services after a server reboot; verify their health after every reboot.
 
 The first release establishes a supported baseline; it does not convert the
 older migration graph. Use the installed image's source revision to determine
-eligibility with the preview above. Matching migration files permit existing
+eligibility with the preview above. A matching applied migration prefix and verified forward migration permit existing
 accounts, agent keys, messages, and secrets to remain in place. If they differ,
 stop and arrange an explicit data conversion tested against a restored copy.
 The ManageAI installation's actual commit and database must be inspected before

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from django.core import signing
 
-from api.cursors import CURSOR_SALT, cursor_int, cursor_uuid, decode_cursor, encode_cursor
+from core.cursors import CURSOR_SALT, cursor_int, cursor_uuid, decode_cursor, encode_cursor
 from core.limits import Limits
 from tunnels.errors import InvalidCursor
 
@@ -51,14 +51,14 @@ def test_cursor_uuid_rejects_missing_and_invalid_values(value: object) -> None:
 def test_cursor_has_one_fixed_lifetime_and_expires(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("api.cursors.time.time", lambda: 1_000)
+    monkeypatch.setattr("core.cursors.time.time", lambda: 1_000)
     encoded = encode_cursor("activity", tunnel_id=str(uuid4()), position=2)
     decoded = decode_cursor(encoded, kind="activity")
     assert decoded["issued_at"] == 1_000
     assert decoded["expires_at"] == 1_000 + Limits().cursor_lifetime_seconds
 
     monkeypatch.setattr(
-        "api.cursors.time.time",
+        "core.cursors.time.time",
         lambda: 1_000 + Limits().cursor_lifetime_seconds + 1,
     )
     with pytest.raises(InvalidCursor):
@@ -68,9 +68,9 @@ def test_cursor_has_one_fixed_lifetime_and_expires(
 def test_cursor_can_reproduce_one_operation_time_exactly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("api.cursors.time.time", lambda: 1_100)
+    monkeypatch.setattr("core.cursors.time.time", lambda: 1_100)
     first = encode_cursor("activity", 1_000, position=2)
-    monkeypatch.setattr("api.cursors.time.time", lambda: 1_200)
+    monkeypatch.setattr("core.cursors.time.time", lambda: 1_200)
     replay = encode_cursor("activity", 1_000, position=2)
 
     assert replay == first
@@ -86,7 +86,7 @@ def test_cursor_can_reproduce_one_operation_time_exactly(
 def test_cursor_rejects_invalid_or_future_policy_times(
     monkeypatch: pytest.MonkeyPatch, issued_at: object, expires_at: object
 ) -> None:
-    monkeypatch.setattr("api.cursors.time.time", lambda: 1_000)
+    monkeypatch.setattr("core.cursors.time.time", lambda: 1_000)
     encoded = signing.Signer(salt=CURSOR_SALT).sign_object(
         {
             "kind": "activity",

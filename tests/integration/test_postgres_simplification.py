@@ -17,11 +17,12 @@ from django.db import close_old_connections, connection, transaction
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import CredentialError, create_credential
-from api.rate_limits import _consume, consume_login_attempt
+from api.rate_limits import consume_login_attempt
 from core.activity_listener import ActivityListener
 from core.limits import Limits
 from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
+from core.rate_limits import _consume
 from tunnels.errors import QuotaExceeded, RateLimited
 from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles
 from tunnels.migrations.sql.guards import revoke_runtime_history_delete

@@ -70,6 +70,7 @@ def test_browser_cycle_lifetime_matches_supported_server_limit(
         "/app/tunnels/",
         {
             "action": action,
+            "idempotency_key": f"browser-{action}-operation",
             "tunnel_id": created.tunnel.id,
             "expected_cycle_id": created.cycle.id,
             "expected_address_generation": "1",

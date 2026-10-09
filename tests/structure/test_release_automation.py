@@ -747,13 +747,14 @@ def test_system_report_uses_bounded_host_fields(monkeypatch: pytest.MonkeyPatch)
     "unsafe_log",
     [
         "request st_" + "a" * 43,
+        "request sta_" + "a" * 43,
         "provider sk-" + "A" * 24,
         "address \U0001f700",
         'field "receipt_handle"',
         'field "text_payload"',
         'field "json_payload"',
     ],
-    ids=("startunnel-key", "provider-key", "glyph", "receipt", "text", "json"),
+    ids=("startunnel-key", "admin-key", "provider-key", "glyph", "receipt", "text", "json"),
 )
 def test_system_log_inspection_rejects_sensitive_values(unsafe_log: str) -> None:
     with pytest.raises(isolation.LaneError, match="forbidden"):

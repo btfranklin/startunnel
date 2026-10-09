@@ -11,7 +11,7 @@ pdm run openapi
 ```
 
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
-It also checks local Markdown files and heading anchors with `linkbust`.
+It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
 External web links are not fetched. Run `pdm run linkbust --no-color` for a
 focused link check. Documentation tests parse CLI examples with the actual
 command-line parser and compare documented CLI environment names with the
@@ -24,7 +24,7 @@ and CLI syntax. They do not require fixed prose or specific sentences.
 
 Install the published [Perfect Doc native executable](https://github.com/btfranklin/perfect-doc/releases/tag/v0.1.0)
 and verify it against that release's `SHA256SUMS`, or use its Homebrew tap.
-Run this separate gate when changing Markdown documentation:
+The aggregate check includes this gate. Run it directly when changing Markdown:
 
 ```shell
 pdm run docs-structure
@@ -50,14 +50,41 @@ pdm run python scripts/run_isolated_test_lane.py browser
 
 The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions. The privilege test grants the runtime role normal table permissions before it checks the migration's history-delete revocation.
 
-The canonical lane must prove migration from a fresh database. The PostgreSQL
-lane checks the current initial schema, constraints, and triggers. There is no
-upgrade path from the old migration graph in this repository.
+The canonical lane proves a fresh database. The PostgreSQL lane checks schema,
+constraints, and triggers. Admin changes also require forward migration and
+recovery proof on a restored matching initial baseline. Other historical graphs
+are unsupported unless their conversion has separate evidence.
+
+## Restored initial baseline
+
+Run this isolated PostgreSQL proof after the PostgreSQL lane:
+
+```shell
+pdm run python scripts/prove_admin_upgrade.py
+```
+
+The proof creates a fresh pre-change initial schema with historical migration
+models, seeds disposable account and message data, and performs a real custom
+`pg_dump` and `pg_restore` into a second database. It then applies the additive
+admin migrations and checks account IDs and passwords, agent-key digests and
+authentication, message IDs and ancestry, historical audit records, private
+recovery-key issuance, admin authentication, and a new message write.
+
+The isolated runner removes its containers and volumes. Dumps remain inside
+the disposable container. Temporary snapshots and recovery keys stay private
+and are removed at exit. Output reports safe check names, not keys or content.
+CI runs this proof after its PostgreSQL lane.
+
+This proves a synthetic matching initial baseline. It does not establish
+compatibility with a production snapshot or a published predecessor, and it
+does not prove reverse migrations. Test the exact installed baseline separately
+before an installation upgrade. The first release keeps `supported_from` empty.
 
 ## Required focused evidence
 
-- Identity changes: local login, login throttling, account creation, last-active-admin protection, password change, and session invalidation.
-- Credential changes: one-time key display, digest storage, instance ownership, independent admin deactivation, and revocation.
+- Identity changes: password and key-only accounts, credential-type isolation, expiry, revocation, last-access protection, concurrent account changes, bootstrap, recovery, and browser session invalidation.
+- Credential changes: digest storage, secret-file failures, lost responses, exact retries, changed-input conflicts, independent agent-key lifecycle, and revocation.
+- Admin changes: complete unattended CLI setup and operation, audit attribution, receipt inspection, pagination, secret-free logs, and no-JavaScript browser controls.
 - Lifecycle changes: exact deadline access, delayed close semantics, `forever`, tombstone deletion, and idempotent cleanup.
 - Notification changes: register-before-reread, commit wakeup, listener reconnect, and bounded polling fallback.
 - Rate changes: exact limits and atomic concurrent updates with real PostgreSQL.

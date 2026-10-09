@@ -55,7 +55,7 @@ CRITICAL_TARGETS = (
         ),
     ),
     CriticalTarget("src/tunnels/retention.py", ("delete_due_cycle_content",)),
-    CriticalTarget("src/api/rate_limits.py", ("_consume",)),
+    CriticalTarget("src/core/rate_limits.py", ("_consume",)),
     CriticalTarget("src/tunnels/maintenance.py", ("cleanup_once",)),
 )
 

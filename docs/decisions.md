@@ -10,9 +10,12 @@ limits belong to the instance.
 
 ## Local admin accounts
 
-Django local username and password authentication is the standard product. There is no self-sign-up. Every active admin account has full administrator access. The last active admin cannot be deactivated or deleted.
+The existing CLI and typed admin API are primary administration interfaces.
+Django accounts use optional passwords and named admin keys. There is no
+self-sign-up. Every active admin has full instance authority. Database locks
+protect the last usable access path and a non-expiring recovery path.
 
-This keeps the admin surface small and works without an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
+This lets agents perform routine administration without a browser and keeps the model small and works without an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
 
 ## Instance agent credentials
 

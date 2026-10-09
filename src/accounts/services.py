@@ -35,25 +35,22 @@ def create_admin(*, actor: User, username: str, password: str) -> User:
 
 @transaction.atomic
 def set_admin_active(*, actor: User, admin_id: UUID, active: bool) -> User:
-    locked_users = list(User.objects.select_for_update().order_by("id"))
-    users_by_id = {user.id: user for user in locked_users}
-    current_actor = users_by_id.get(actor.id)
-    target: User | None = users_by_id.get(admin_id)
-    if current_actor is None or not current_actor.is_active or target is None:
-        raise AccountError("This account is not available.")
+    from tunnels.errors import TunnelDomainError
 
-    if not active and target.is_active:
-        active_count = sum(user.is_active for user in locked_users)
-        if active_count == 1:
-            raise AccountError("The last active admin account cannot be deactivated.")
+    from .admin_access import change_admin_state
 
-    if target.is_active != active:
-        target.is_active = active
-        target.save(update_fields=["is_active"])
-        record_event(
-            actor_user=actor,
-            action="admin.reactivated" if active else "admin.deactivated",
-            target_type="user",
-            target_id=target.id,
-        )
+    try:
+        target = change_admin_state(actor=actor, admin_id=admin_id, active=active)
+    except TunnelDomainError as error:
+        raise AccountError(
+            "This account is not available."
+            if error.code == "invalid_credential"
+            else error.safe_message
+        ) from error
+    record_event(
+        actor_user=actor,
+        action="admin.reactivated" if active else "admin.deactivated",
+        target_type="user",
+        target_id=target.id,
+    )
     return target

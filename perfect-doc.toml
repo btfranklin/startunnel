@@ -26,6 +26,7 @@ base = "/source/"
 # scripts/check_docs.py separately validates ownership of application routes.
 [routes.redirects]
 "/api/docs/" = "/source/docs/api/"
+"/docs/admin-quickstart/" = "/source/docs/user/admin-quickstart/"
 "/docs/agent-quickstart/" = "/source/docs/user/agent-quickstart/"
 "/docs/tutorial/" = "/source/docs/user/tutorial/"
 "/docs/concepts/" = "/source/docs/user/concepts/"

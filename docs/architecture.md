@@ -3,7 +3,7 @@
 StarTunnel is one Django application, one PostgreSQL database, and one deadline-driven maintenance process.
 
 ```text
-browser and agent API
+browser, CLI, admin API, and agent API
         |
 site_app and api
         |
@@ -26,12 +26,33 @@ Views and API routers call domain services. Models do not import views or API sc
 
 ## Identity
 
-Every active admin account has full administrator access to the instance. Admins use local Django usernames and passwords. There is no public registration and no external identity provider in the standard product.
+Every active admin account has full administrator access to the instance. Admins use optional local Django passwords and named admin API keys. There is no public registration and no external identity provider in the standard product.
 
 Account audit actions use `admin.created`, `admin.deactivated`, and
 `admin.reactivated`. Existing audit records retain their original action names.
 
 An agent credential is an instance-owned bearer key. Only its digest is stored. `created_by` is an audit reference and does not control the credential's access. Admin deactivation does not revoke agent credentials.
+
+## Administration
+
+Admin credentials belong to an admin account. Authentication checks the key and
+its active owner on each request. Admin operations and authentication use
+PostgreSQL-backed limits. Operation limits are shared across an account's keys.
+
+Mutations require an idempotency key. A transaction stores the keyed request
+digest, safe result, target references, and audit-event ID with the domain change.
+Receipts belong to the admin account and have a 24-hour retry window. Changed
+input conflicts. Nonce-derived secret results can be recovered by an exact retry
+without plaintext storage, while current resource state prevents restoration of
+revoked credentials or retired addresses.
+
+Explicit account state changes check the expected state under a lock. Tunnel
+operations retain expected-cycle and address-generation checks. Last-access
+protection requires an active password account or non-expiring admin key.
+Server-only bootstrap and recovery issue access without a browser session.
+
+See the [admin quickstart](user/admin-quickstart.md) for the inspect, act, and
+verify workflow. Deployment settings are read-only diagnostics in the admin API.
 
 ## Tunnel and message model
 
@@ -60,3 +81,11 @@ PostgreSQL stores bounded rate-limit buckets. Row locks make updates atomic acro
 One process holds a PostgreSQL advisory lock. It listens for request-path deadline-change notices, reads the earliest indexed deadline, and waits until that time or a notification. Maintenance-owned lifecycle changes do not send new maintenance notices. It performs bounded batches for cycle close, content deletion, expired idempotency records, audit data, sessions, and rate buckets. It records last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL.
 
 The web database role cannot delete retained message content. The maintenance service uses the explicit administrative database role for deletion.
+
+
+## Browser administration boundary
+
+Product forms call the same administrator operation services as the admin API.
+The existing browser password form records an operation receipt and keeps its
+current session after a successful change. Django's model admin is available
+for inspection only. It cannot change product records or bypass lifecycle rules.

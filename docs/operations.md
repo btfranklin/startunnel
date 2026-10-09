@@ -27,7 +27,20 @@ Create the first admin account:
 docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME
 ```
 
-The command reads and confirms a password without showing it. After login, any active admin can create more admins and agent credentials.
+The command reads and confirms a password without showing it. For a key-only
+admin, use a private container file:
+
+```shell
+docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME --key-file /tmp/admin.key
+```
+
+Transfer that file through the operator's private secret channel to the agent's
+private key file. Do not print it or put it in chat. The command refuses an
+existing file. Use [the admin quickstart](user/admin-quickstart.md) for CLI access.
+
+For lost remote access, run `recover_instance_admin USERNAME --key-file FILE`
+on the server. Keep the resulting file private. Recovery issues a replacement
+key and records the action; it has no unauthenticated remote endpoint.
 
 ## Services
 
@@ -130,9 +143,8 @@ Both forms need DNS, encrypted storage, and a backup destination.
 No OAuth registration or external cache is required. Use the setup guide's
 production shell for administrator and maintenance commands.
 
-The current migrations install a new schema. They do not convert an earlier
-StarTunnel database. Back up an older installation and obtain an explicit data
-conversion before using this release with that database. For a new instance,
-create the first local administrator after startup. Admin accounts are not
-editable in Django admin because that path would bypass the last-active-admin
-rule.
+The admin additions use forward migrations from the matching initial baseline.
+Do not rewrite applied migrations. Confirm the installed source and migration
+prefix before an upgrade, then test a restored backup. Other migration graphs
+need an explicit conversion. See [release policy](releases.md). Admin accounts
+are not editable in Django admin because that would bypass access protection.

@@ -4,22 +4,21 @@
   <header class="app-header">
     <div>
       <h1>Name one agent per key.</h1>
-      <p>The complete key appears one time. Store it before you leave the page.</p>
+      <p>New keys download as private text files. Store each file before you close the browser.</p>
     </div>
   </header>
   <div class="workbench-grid">
     <section class="form-panel" aria-labelledby="create-agent-heading">
       <h2 id="create-agent-heading">Create an agent credential</h2>
-      <form method="post"
-            action="{% url 'site:create-agent' %}"
-            data-loading-form>
+      <form method="post" action="{% url 'site:create-agent' %}">
         {% csrf_token %}
+        <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
         <input type="hidden" name="action" value="create">
         {% include "site/partials/form.html" %}
-        <button class="button button--primary"
-                type="submit"
-                data-loading-label="Creating key…">Create agent key</button>
+        <button class="button button--primary" type="submit">Create agent key</button>
       </form>
+      <p>After a download, refresh the list before you issue another key.</p>
+      <a class="text-link" href="{% url 'site:agents' %}">Refresh credential list</a>
     </section>
     <section class="list-panel" aria-labelledby="agent-list">
       <div class="panel-heading">
@@ -42,6 +41,9 @@
                       action="{% url 'site:revoke-agent' %}"
                       data-confirm="Revoke this agent key? This cannot be undone.">
                   {% csrf_token %}
+                  <input type="hidden"
+                         name="idempotency_key"
+                         value="{{ idempotency_key }}-revoke-{{ credential.id }}">
                   <input type="hidden" name="action" value="revoke">
                   <input type="hidden" name="credential_id" value="{{ credential.id }}">
                   <button class="button button--danger button--small"

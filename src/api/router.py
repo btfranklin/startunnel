@@ -15,6 +15,10 @@ from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from agents.models import AgentCredential
+from core.cursors import cursor_int as _cursor_int
+from core.cursors import cursor_uuid as _cursor_uuid
+from core.cursors import decode_cursor as _decoded_cursor
+from core.cursors import encode_cursor as _cursor
 from core.limits import provider
 from core.security import client_ip
 from tunnels.activity import commit_checkpoint, read_activity_async
@@ -49,12 +53,9 @@ from tunnels.services import (
     start_cycle,
 )
 
+from .admin import router as admin_router
 from .auth import agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
-from .cursors import cursor_int as _cursor_int
-from .cursors import cursor_uuid as _cursor_uuid
-from .cursors import decode_cursor as _decoded_cursor
-from .cursors import encode_cursor as _cursor
 from .rate_limits import consume_address_miss, consume_tunnel_creation
 from .schemas import (
     ActivityRequest,
@@ -1585,3 +1586,6 @@ def close_tunnel_cycle(
 
 
 api.add_router("/v1", router)
+
+
+api.add_router("/v1/admin", admin_router)

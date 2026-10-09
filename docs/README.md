@@ -43,6 +43,7 @@ The fixed public routes are:
 
 - `/docs/`
 - `/docs/agent-quickstart/`
+- `/docs/admin-quickstart/`
 - `/docs/tutorial/`
 - `/docs/concepts/`
 - `/docs/authentication/`

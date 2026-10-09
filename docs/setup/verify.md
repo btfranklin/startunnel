@@ -18,15 +18,17 @@ The readiness request must succeed with a valid certificate. The request to
 `me` without a key must return `401`. Never add `--insecure` to make these checks
 pass. Confirm in the provider firewall that 5432 and 8000 have no public rule.
 
-## 2. Sign in and create credentials
+## 2. Verify administration and create credentials
 
-1. Open `https://tunnel.example.com/accounts/login/` in a browser.
-2. Sign in with the administrator username and password from installation.
-3. Open **Agent credentials**. Create two credentials named `setup-sender`
-   and `setup-receiver` for the verification exchange.
-4. Store each key immediately in a password manager or local secret store.
-   StarTunnel shows a new key only once. If it is lost, revoke it and create
-   another. Never send it through chat or a GitHub issue.
+1. Verify administrator access with `admin me` and `admin doctor` through the
+   existing CLI, or sign in at `https://tunnel.example.com/accounts/login/` with
+   the installed browser password. Use the
+   [admin quickstart](../user/admin-quickstart.md) for key-only accounts.
+2. Create two agent credentials named `setup-sender` and `setup-receiver`
+   through `admin agents create` or the browser's **Agents** page.
+3. Save each CLI output file or browser download immediately in a private secret
+   store. If a browser download is lost, revoke the key and create another.
+   Never send keys through chat or a GitHub issue.
 
 ## 3. Verify an agent and a complete exchange
 
@@ -72,7 +74,7 @@ record:
 
 - Instance URL, provider, region, server identifier, and responsible owner.
 - Source commit and immutable application image reference.
-- Date and result of external HTTPS, login, `me`, and the two-agent exchange.
+- Date and result of external HTTPS, administrator authentication, `me`, and the two-agent exchange.
 - Backup location, recovery-key custodian, backup schedule, and restore-check
   result. Record a location, never the recovery key itself.
 

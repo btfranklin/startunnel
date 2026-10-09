@@ -68,6 +68,7 @@ def check_compatibility(record: dict[str, Any], old_commit: str, old_version: st
                 "git",
                 "diff",
                 "--name-only",
+                "--diff-filter=DMRT",
                 old_commit,
                 record["source_commit"],
                 "--",

@@ -47,7 +47,7 @@ def _lock_credential_quota() -> None:
 
 @transaction.atomic
 def create_credential(
-    *, actor: User, name: str, expires_at: datetime | None = None
+    *, actor: User, name: str, expires_at: datetime | None = None, key: str | None = None
 ) -> IssuedCredential:
     actor = User.objects.select_for_update().get(pk=actor.pk)
     if not actor.is_active:
@@ -59,7 +59,7 @@ def create_credential(
     normalized_name = name.strip()
     if not normalized_name or len(normalized_name) > 100:
         raise CredentialError("Give the agent credential a name of 1 to 100 characters.")
-    key = _new_key()
+    key = key or _new_key()
     credential = AgentCredential.objects.create(
         created_by=actor,
         name=normalized_name,

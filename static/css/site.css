@@ -1721,3 +1721,54 @@ html:has(.admin-page) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.admin-record__access {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+
+.admin-record__access details > form,
+.account-actions details > form,
+.list-panel details > form {
+  display: grid;
+  gap: var(--space-sm);
+  margin-block: var(--space-md);
+  justify-items: start;
+}
+
+.admin-record__access label,
+.list-panel details label {
+  display: grid;
+  gap: var(--space-xs);
+  max-inline-size: 100%;
+}
+
+.admin-record__access input,
+.list-panel details input {
+  max-inline-size: 100%;
+}
+
+
+.instance-health {
+  display: grid;
+  gap: var(--space-md);
+  margin-block-end: var(--space-lg);
+}
+
+.instance-health h2 {
+  font-size: var(--text-lg);
+}
+
+.health-grid {
+  display: grid;
+  gap: var(--space-md);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}
+
+.health-grid dt {
+  font-weight: 600;
+}
+
+.health-grid dd {
+  margin: 0;
+}

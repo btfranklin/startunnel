@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from agents.models import AgentCredential
+from core.audit import record_event
 from core.logging import current_request_id
 from core.metrics import MESSAGES_SENT, TUNNELS_CREATED
 from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
@@ -51,7 +52,6 @@ from .idempotency import begin as begin_idempotency
 from .idempotency import find_replay as find_idempotency_replay
 from .idempotency import finish as finish_idempotency
 from .models import (
-    AuditEvent,
     Cycle,
     IdempotencyRecord,
     Message,
@@ -502,7 +502,7 @@ def create_tunnel(
         },
         resource_id=str(tunnel.id),
     )
-    AuditEvent.objects.create(
+    record_event(
         actor_credential=credential,
         action="tunnel.created",
         target_type="tunnel",
@@ -619,7 +619,7 @@ def post_reply(
         },
         resource_id=str(message.id),
     )
-    AuditEvent.objects.create(
+    record_event(
         actor_credential=credential,
         action="message.posted",
         target_type="message",
@@ -1207,7 +1207,7 @@ def _start_cycle_locked(
         ]
     )
     notify(ACTIVITY_CHANNEL, str(tunnel.id))
-    AuditEvent.objects.create(
+    record_event(
         actor_credential=credential if actor_user is None else None,
         actor_user=actor_user,
         action="cycle.started",
@@ -1532,7 +1532,7 @@ def _close_locked_cycle(
         ]
     )
     notify(ACTIVITY_CHANNEL, str(tunnel.id))
-    AuditEvent.objects.create(
+    record_event(
         actor_credential=actor_credential,
         actor_user=actor_user,
         action="cycle.closed",
@@ -1730,7 +1730,7 @@ def retirement_confirmation(tunnel: Tunnel) -> str:
 
 
 def _rotate_locked_address(
-    *, tunnel: Tunnel, actor: User, expected_address_generation: int
+    *, tunnel: Tunnel, actor: User, expected_address_generation: int, new_address: str | None = None
 ) -> RotatedAddress:
     if tunnel.state == Tunnel.State.RETIRED:
         raise LifecycleConflict()
@@ -1743,7 +1743,15 @@ def _rotate_locked_address(
     current.retirement_reason = "operator_rotation"
     current.save(update_fields=["state", "retired_at", "retirement_reason"])
     generation = current.generation + 1
-    _row, address = _allocate_random_address(tunnel=tunnel, generation=generation)
+    if new_address is None:
+        _row, address = _allocate_random_address(tunnel=tunnel, generation=generation)
+    else:
+        address = new_address
+        TunnelAddress.objects.create(
+            tunnel=tunnel,
+            generation=generation,
+            address_digest=address_digest(parse_address(address)),
+        )
     event_position = tunnel.next_event_position
     tunnel.next_event_position = event_position + 1
     tunnel.save(update_fields=["next_event_position"])
@@ -1753,7 +1761,7 @@ def _rotate_locked_address(
         event_type=TunnelEvent.Type.ADDRESS_ROTATED,
         metadata={"generation": generation},
     )
-    AuditEvent.objects.create(
+    record_event(
         actor_user=actor,
         action="tunnel.address_rotated",
         target_type="tunnel",
@@ -1771,13 +1779,18 @@ def _rotate_locked_address(
 
 @transaction.atomic
 def rotate_address_as_operator(
-    *, actor: User, tunnel_id: UUID, expected_address_generation: int
+    *,
+    actor: User,
+    tunnel_id: UUID,
+    expected_address_generation: int,
+    new_address: str | None = None,
 ) -> RotatedAddress:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _rotate_locked_address(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,
+        new_address=new_address,
     )
 
 
@@ -1820,7 +1833,7 @@ def _retire_locked_tunnel(
         event_type=TunnelEvent.Type.TUNNEL_RETIRED,
         metadata={"reason": reason},
     )
-    AuditEvent.objects.create(
+    record_event(
         actor_user=actor_user,
         action="tunnel.retired",
         target_type="tunnel",

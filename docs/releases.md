@@ -15,7 +15,9 @@ a published version's deployment record. Fix a released defect in a new version.
 
 The first version is `v0.1.0`. Its initial migration graph is the supported
 baseline. Unversioned instances can reach it only when their source is an
-ancestor and their migration files match exactly. Inspect ManageAI's actual
+ancestor and their applied migration files match an unchanged release migration prefix.
+The additive admin migrations require restored-database upgrade and recovery
+proof for the exact installed source before compatibility is claimed. Inspect ManageAI's actual
 installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 
@@ -123,3 +125,13 @@ A compatible rollback can restore the old checkout and image. After schema or
 data changes, follow the release-specific instructions; recovering the matching
 database backup and secrets may be required. Do not infer reverse migration
 support from a forward migration. Use [backup recovery](setup/backups.md).
+
+## Retired first draft
+
+Draft release `407488197` and its unpublished Git tag were removed before the
+admin additions. The original [deployment record](../releases/archive/0.1.0-draft-407488197.json)
+is retained for recovery. Its source is
+`7860506a13025f225245532e17c295337e664bf2`; its validation run is
+[37879301853](https://github.com/btfranklin/startunnel/actions/runs/37879301853).
+The original immutable image digest remains unchanged. This archive describes
+the retired candidate, not the replacement release's source or acceptance.

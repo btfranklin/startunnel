@@ -64,7 +64,7 @@ setup. Do not disable certificate checks or use plain HTTP for team credentials.
 
 Run [the normal team verification](verify.md) against the IP URL from another
 network. The browser and CLI must accept the certificate without a warning or
-an insecure option. Complete the administrator login and two-agent exchange.
+an insecure option. Complete the administrator authentication and two-agent exchange.
 Test the renewal process and the deploy hook; confirm that Caddy serves the
 new certificate after the hook runs.
 

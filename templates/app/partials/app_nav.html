@@ -9,6 +9,8 @@
      {% if request.resolver_match.url_name == 'tunnels' %}aria-current="page"{% endif %}>Tunnels</a>
   <a href="{% url 'site:admins' %}"
      {% if request.resolver_match.url_name == 'admins' or request.resolver_match.url_name == 'create-admin' %}aria-current="page"{% endif %}>Admins</a>
+  <a href="{% url 'site:audit' %}"
+     {% if request.resolver_match.url_name == 'audit' %}aria-current="page"{% endif %}>Audit</a>
   <a href="{% url 'site:account' %}"
      {% if request.resolver_match.url_name == 'account' %}aria-current="page"{% endif %}>Account</a>
 </nav>

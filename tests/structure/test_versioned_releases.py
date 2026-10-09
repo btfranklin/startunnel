@@ -51,7 +51,7 @@ def test_unversioned_upgrade_rejects_changed_migration_graph(
         upgrade.check_compatibility(record(), "c" * 40, "")
 
 
-def test_unversioned_upgrade_requires_ancestor_and_unchanged_graph(
+def test_unversioned_upgrade_requires_ancestor_and_unchanged_applied_migrations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands: list[list[str]] = []
@@ -64,6 +64,7 @@ def test_unversioned_upgrade_requires_ancestor_and_unchanged_graph(
     upgrade.check_compatibility(record(), "c" * 40, "")
     assert commands[0] == ["git", "merge-base", "--is-ancestor", "c" * 40, "a" * 40]
     assert ":(glob)src/**/migrations/*.py" in commands[1]
+    assert "--diff-filter=DMRT" in commands[1]
 
 
 def test_unlisted_version_is_rejected_even_without_migration_changes(

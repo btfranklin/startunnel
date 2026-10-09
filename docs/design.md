@@ -33,11 +33,11 @@ in examples, schemas, or tests when changing the brand.
 Every active admin account has full administrator access. The interface supports these tasks:
 
 - sign in with a local username and password;
-- change the current password;
+- manage an optional browser password and named admin keys;
 - create, activate, or deactivate admin accounts;
 - create and revoke instance agent credentials;
 - inspect and operate instance tunnels;
-- read product and API documentation.
+- read audit events, health, capacity, and product documentation.
 
 There is no team switcher, membership page, invitation flow, OAuth callback, personal workspace, or plan page.
 
@@ -47,23 +47,30 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 |---|---|
 | `/accounts/login/` | Local sign-in |
 | `/accounts/password/change/` | Password change |
-| `/app/` | Instance summary |
+| `/app/` | Health, maintenance, capacity, and recent admin activity |
 | `/app/admins/` | Admin account administration |
 | `/app/agents/` | Agent credential administration |
 | `/app/tunnels/` | Instance tunnel operations |
+| `/app/audit/` | Paginated audit inspection |
+| `/app/account/` | Own browser password and admin keys |
 | `/docs/` | User documentation |
 | `/api/docs` | Interactive API reference |
 
 ## Rules
 
 - Use plain labels and explicit actions.
-- Show a new agent key once, with a clear copy action and warning.
+- Return new keys as downloads. Show safe metadata, not raw keys, in pages.
 - Do not show stored digests.
 - Confirm destructive account, credential, address, or tunnel actions.
 - Explain the next administrator action after an admin account is deactivated.
 - Do not use eyebrow text.
 - Keep focus states, labels, error summaries, and keyboard order accessible.
 - Do not put addresses or keys in URLs or browser logs.
+
+The CLI and API are the primary administration interfaces. The browser uses the
+same domain services and supports manual inspection and recovery. Forms must
+work without JavaScript. Do not embed admin keys in page source or client storage.
+Show account state, browser-access status, and named admin-key metadata.
 
 ## Admin account layout
 
@@ -77,7 +84,7 @@ in two equal columns. Account names can wrap. Show the account state below
 its name and put the action in a separate column when space permits. On small
 screens, put the action below the account details.
 
-On this page, show all six application links in two rows below 40rem. Keep
+On this page, show all application links in two rows below 40rem. Keep
 field errors on separate lines from their help text. Use immediate page
 scrolling so form controls remain stable when the browser moves focus.
 

@@ -11,10 +11,10 @@ def test_initial_schema_has_current_models_and_guards() -> None:
     assert connection.vendor == "postgresql"
     leaves = dict(MigrationLoader(connection).graph.leaf_nodes())
     assert {name: leaves[name] for name in ("accounts", "agents", "core", "tunnels")} == {
-        "accounts": "0001_initial",
+        "accounts": "0002_admincredential_adminoperation",
         "agents": "0001_initial",
         "core": "0001_initial",
-        "tunnels": "0001_initial",
+        "tunnels": "0002_auditevent_actor_admin_credential_auditevent_channel",
     }
 
     tables = set(connection.introspection.table_names())

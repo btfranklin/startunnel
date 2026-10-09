@@ -1,0 +1,29 @@
+{% extends "app/base.html" %}
+{% block title %}Audit · StarTunnel{% endblock %}
+{% block app_content %}
+  <header class="app-header">
+    <div>
+      <h1>Audit</h1>
+      <p>Inspect administrator actions and their targets.</p>
+    </div>
+  </header>
+  <form method="get">
+    <label>
+      Operation<input name="action" value="{{ action_filter }}">
+    </label>
+    <button class="button button--secondary" type="submit">Filter events</button>
+  </form>
+  <section class="list-panel" aria-label="Audit events">
+    <ul class="record-list">
+      {% for event in events.items %}
+        <li>
+          <div><strong>{{ event.action }}</strong><small>{{ event.created_at }}</small><small>Actor: {{ event.actor_id|default:"Server" }} · Channel: {{ event.channel|default:"server" }}</small><small>Result: {{ event.metadata.outcome|default:"Recorded" }}</small><small>Target: {{ event.target_type }} {{ event.target_id }}</small></div>
+        </li>
+      {% empty %}
+        <li>No audit events.</li>
+      {% endfor %}
+    </ul>
+    {% if events.next_cursor %}<a class="button button--secondary"
+   href="?cursor={{ events.next_cursor|urlencode }}&amp;action={{ action_filter|urlencode }}">Older events</a>{% endif %}
+  </section>
+{% endblock %}

@@ -73,6 +73,16 @@ jobs:
         run: >-
           python3 scripts/run_isolated_test_lane.py postgres
           --project-name stci-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Set up Python for the restored baseline proof
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install locked proof dependencies
+        run: |
+          python -m pip install --disable-pip-version-check "pdm==2.28.0"
+          pdm install --frozen-lockfile --no-self
+      - name: Prove admin upgrade on a restored initial baseline
+        run: pdm run python scripts/prove_admin_upgrade.py
 
   external-proofs:
     name: ${{ matrix.lane }} proof

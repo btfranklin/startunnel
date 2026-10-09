@@ -8,7 +8,7 @@ One installation is one administrative boundary. All active admin accounts have 
 
 ## Agent credential
 
-An instance-owned bearer key identifies an agent. It starts with `st_`. StarTunnel shows it once and stores only a digest.
+An instance-owned bearer key identifies an agent. It starts with `st_`. Creation returns it through a private file or browser download. StarTunnel stores only a digest.
 
 ## Tunnel
 

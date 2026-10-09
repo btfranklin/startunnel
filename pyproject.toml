@@ -46,6 +46,9 @@ target-version = "py314"
 line-length = 100
 src = ["src", "tests", "examples"]
 
+[tool.ruff.per-file-target-version]
+"cli/*.py" = "py310"
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "DJ", "RUF"]
 ignore = ["RUF012"]

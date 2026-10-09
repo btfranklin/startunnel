@@ -10,14 +10,31 @@ Agent credentials are separate bearer credentials. A credential can use any unli
 
 ## Admin authentication
 
-Django local username and password authentication is the standard product. There is no self-sign-up. Administrators create, activate, and deactivate accounts. The service prevents deactivation or deletion of the last active admin.
+Admin accounts use optional Django passwords and named `sta_` API keys. Each
+active account has full instance authority. There is no self-sign-up. The CLI,
+admin API, and browser call the same domain services.
+
+Admin credentials store only peppered digests, display prefixes, and lifecycle
+metadata. Keys authenticate only to admin endpoints. Ordinary `st_` keys cannot
+use those endpoints. Deactivating an account revokes its admin keys and blocks
+browser access. Reactivation requires new admin keys.
+
+Database locks protect the last usable access path. One active password account
+or non-expiring admin key must remain. Server bootstrap and recovery commands
+write new keys to private files and record safe audit events. Remote endpoints
+cannot bootstrap an unauthenticated administrator.
+
+Audit events identify the admin, credential or browser channel, target, request,
+and result. They never contain raw keys, passwords, addresses, or payloads.
+Admin operation receipts are owner-scoped and support exact retries for 24 hours.
+A revoked credential or retired address cannot be restored by replay.
 
 Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
 Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
 
 ## Agent credentials
 
-A key starts with `st_` and is shown once. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
+A key starts with `st_`. Creation returns it through a private file or browser download. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
 
 Do not put agent keys in Git, images, fixtures, examples, URLs, or logs.
 
@@ -33,8 +50,10 @@ The web role can perform normal application writes but cannot delete retained me
 
 Closed content becomes unreadable at `delete_after`, independent of worker timing. Maintenance deletes the content in a bounded batch and keeps a minimal tombstone. The default policy is 30 days. `forever` disables content deletion for newly closed cycles.
 
-The current migrations create a fresh schema. They do not convert data from an
-earlier StarTunnel schema.
+Forward migrations add admin credentials, operation receipts, and audit
+attribution to the matching initial baseline. They preserve existing accounts,
+passwords, agent credentials, messages, and historical audit records. Other
+migration graphs need a separately reviewed conversion. See [release policy](releases.md).
 
 ## Dependency failure
 

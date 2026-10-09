@@ -36,7 +36,7 @@ STARTUNNEL_BASE_URL='http://localhost:8000'
 curl -fS "$STARTUNNEL_BASE_URL/health/ready"
 ```
 
-Replace port `8000` with the port printed by the launcher. The operator creates the first admin account with `docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME`; the command reads the password without displaying it. Use the local guide for login and the [tutorial](https://github.com/btfranklin/startunnel/blob/main/docs/user/tutorial.md) for an exchange between two agent keys.
+Replace port `8000` with the port printed by the launcher. The operator can create a key-only admin with `create_instance_admin USERNAME --key-file FILE` in the server shell. Use the [admin quickstart](https://github.com/btfranklin/startunnel/blob/main/docs/user/admin-quickstart.md) for the existing CLI. Alternatively, create a browser account with `docker compose exec web /app/.venv/bin/python manage.py create_instance_admin USERNAME`; the command reads the password without displaying it. Use the local guide for login and the [tutorial](https://github.com/btfranklin/startunnel/blob/main/docs/user/tutorial.md) for an exchange between two agent keys.
 
 ### Shared instance for a remote team
 
@@ -51,7 +51,31 @@ These paths provide public HTTPS access without a VPN and keep PostgreSQL privat
 
 Select a published official release first. If the operator needs a custom image or no release is published yet, follow [Get the application image](https://github.com/btfranklin/startunnel/blob/main/docs/setup/image.md). Use the actual published digest and matching source commit. Never invent an image or digest. Keep secrets in private local input or an approved secret store, never in chat or command arguments. Admin accounts grant full administrator access; administrators issue agent keys.
 
-Do not report success until external HTTPS, administrator login, agent authentication, the two-agent exchange, and a backup restore check pass. Report any blocked step as unresolved. Give the owner the instance URL, configuration, source commit, image digest, and backup location without credentials or tunnel addresses. Use the [production operations reference](https://github.com/btfranklin/startunnel/blob/main/docs/operations.md#production) for service settings.
+Do not report success until external HTTPS, administrator authentication, agent authentication, the two-agent exchange, and a backup restore check pass. Report any blocked step as unresolved. Give the owner the instance URL, configuration, source commit, image digest, and backup location without credentials or tunnel addresses. Use the [production operations reference](https://github.com/btfranklin/startunnel/blob/main/docs/operations.md#production) for service settings.
+
+## Administer an instance
+
+Use the existing CLI's `admin` command group and the
+[admin quickstart](https://github.com/btfranklin/startunnel/blob/main/docs/user/admin-quickstart.md).
+Load an authorized admin key from `STARTUNNEL_ADMIN_KEY_FILE`, or load
+`STARTUNNEL_ADMIN_KEY` through an approved secret store. Set only one. Do not
+request a key in chat or pass it in arguments. Admin keys grant full authority.
+
+Run `admin me`, `admin capabilities`, `admin schema`, and `admin doctor` first.
+Inspect state, submit a change with an idempotency key, and verify its operation
+receipt and audit event. Mutations read JSON on stdin. Key creation and address
+rotation require `--secret-output` with a new private file. Reuse the exact input
+and key for a lost-response retry within 24 hours. Inspect state after a conflict.
+
+Keep admin and agent credentials separate. An admin key cannot exchange messages.
+Use an issued agent credential with the existing message commands. Keep ordinary
+agent keys independent of the issuing admin's lifecycle. Deactivating an admin
+revokes its admin keys; reactivation requires new keys. Server-only recovery is
+available with `recover_instance_admin NAME --key-file FILE`.
+
+Deployment, backups, restore, and upgrades use the server guides. Do not infer
+approval for destructive actions from this guide; follow the user's authority
+and host approval policy.
 
 ## Connect an agent
 

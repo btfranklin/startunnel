@@ -2,6 +2,6 @@
   "version": "v0.1.0",
   "supported_from": [],
   "configuration_changes": [],
-  "database": "Initial supported migration baseline. Unversioned installations qualify only when their migration files exactly match this release and their source commit is an ancestor. Older schemas require a separately reviewed conversion.",
+  "database": "Initial supported baseline with additive forward migrations for admin credentials, operation receipts, and audit attribution. Unversioned installations qualify only with an ancestor source commit and an unchanged matching applied migration prefix, proven on a restored database. No published predecessor is claimed; other graphs need a separately reviewed conversion.",
   "rollback": "Restore the previous source checkout and image. If migrations have changed the database, recover the matching pre-upgrade database backup and secrets together."
 }

@@ -11,8 +11,10 @@
   <div class="workbench-grid admin-grid">
     <section class="form-panel" aria-labelledby="create-admin-heading">
       <h2 id="create-admin-heading">Create an admin account</h2>
+      <p>Leave both password fields empty for an agent. Its first admin key downloads as a private text file. Refresh this page before you create another account.</p>
       <form method="post" action="{% url 'site:create-admin' %}">
         {% csrf_token %}
+        <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
         {% if create_form.errors %}
           <div class="form-errors" role="alert">
             <p>Admin account not created. Check the fields below.</p>
@@ -38,9 +40,16 @@
               <span class="state {% if admin.is_active %}state--success{% else %}state--muted{% endif %}">
                 {% if admin.is_active %}Active{% else %}Inactive{% endif %}
               </span>
+              <small>Browser password: {% if admin.has_usable_password %}enabled{% else %}disabled{% endif %}</small>
             </div>
             <form method="post" action="{% url 'site:set-admin-state' %}">
               {% csrf_token %}
+              <input type="hidden"
+                     name="idempotency_key"
+                     value="{{ idempotency_key }}-state-{{ admin.id }}">
+              <input type="hidden"
+                     name="expected_active"
+                     value="{% if admin.is_active %}on{% endif %}">
               <input type="hidden" name="admin_id" value="{{ admin.id }}">
               <input type="hidden"
                      name="active"
@@ -51,6 +60,9 @@
                 {% if admin.is_active %}Deactivate{% else %}Reactivate{% endif %}
               </button>
             </form>
+            <div class="admin-record__access">
+              {% include "app/partials/admin_access.html" with access_admin=admin %}
+            </div>
           </li>
         {% endfor %}
       </ul>

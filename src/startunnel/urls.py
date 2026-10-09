@@ -19,10 +19,7 @@ urlpatterns = [
     ),
     path(
         "accounts/password/change/",
-        auth_views.PasswordChangeView.as_view(
-            template_name="account/password_change.html",
-            success_url="/app/account/",
-        ),
+        account_views.password_change,
         name="password_change",
     ),
     path("api/docs/", api_docs, name="api-docs"),

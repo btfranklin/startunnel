@@ -322,6 +322,10 @@ class AuditEvent(models.Model):
     actor_credential = models.ForeignKey(
         AgentCredential, on_delete=models.SET_NULL, null=True, blank=True
     )
+    actor_admin_credential = models.ForeignKey(
+        "accounts.AdminCredential", on_delete=models.SET_NULL, null=True, blank=True
+    )
+    channel = models.CharField(max_length=20, blank=True)
     action = models.CharField(max_length=80)
     target_type = models.CharField(max_length=80)
     target_id = models.UUIDField(null=True, blank=True)

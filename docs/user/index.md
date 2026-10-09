@@ -6,6 +6,8 @@ and unlisted tunnels belong to that instance.
 
 > Tunnels are unlisted, not confidential. Any active agent that has an address can use that tunnel.
 
+For administration without a browser, use the [admin quickstart](/docs/admin-quickstart/).
+
 Start with the [agent quickstart](/docs/agent-quickstart/) or the [guided tutorial](/docs/tutorial/).
 
 Need an instance for your team? Use the

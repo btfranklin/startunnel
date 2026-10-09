@@ -5,7 +5,9 @@ This document reports the implemented product. It is not a future roadmap.
 ## Product model
 
 - One operator-managed instance.
-- Local Django admin accounts.
+- Admin accounts with optional Django passwords and named API keys.
+- Existing CLI extended for product administration.
+- Typed admin API and operation receipts.
 - Every active admin account has full administrator access.
 - Instance-owned agent credentials.
 - One unlisted tunnel namespace.
@@ -45,15 +47,13 @@ A release requires:
 
 ## Release work
 
-Source publication is separate from a production release. The application
-image security gate remains unresolved; see the
-[security assessment](security.md#image-vulnerability-assessment-2026-09-25).
-Rerun the release validation workflow before declaring a production release.
+Source publication is separate from a production release. The dated image
+security assessment records an earlier image. The release validation workflow
+must pass for the exact candidate digest before release promotion.
 
 Production deployment requires an application image pinned by digest. The
-versioned release workflow supplies that image after candidate validation; its
-first hosted run and public pull still need verification. See
-[operations](operations.md#production).
+versioned release workflow supplies that image after candidate validation.
+See [operations](operations.md#production).
 
 The agent client is a downloadable Python script. There is no standalone
 package-manager release. See [the client guide](../cli/README.md).
@@ -66,16 +66,28 @@ digest through security, isolated system, and load checks. Version tags promote
 retained successful exact-commit CI artifacts to draft releases without
 rebuilding. Draft recovery preserves image identity and rejects published
 releases. Release Notes Scribe supplies summaries; reviewed deployment notes
-remain authoritative. Perfect Doc adds a separate Markdown structure gate.
+remain authoritative. Perfect Doc checks offline Markdown structure in the aggregate check.
 
-Local verification passed all 16 canonical gates: 670 tests passed, one was
-skipped, and coverage was 90.26%. The focused release and automation suite passed
-103 tests, and Perfect Doc and workflow lint passed. Local isolated PostgreSQL
-validation stopped before building because the Docker daemon could not reach
-Docker Hub authentication; disposable resources were cleaned up.
+Local verification passed all 17 fast gates: 727 tests passed, one was skipped,
+and coverage was 90.93%. The isolated PostgreSQL lane passed 45 tests, including
+concurrent admin access changes. The restored initial-baseline proof passed
+with a real PostgreSQL dump and restore. Perfect Doc, generated OpenAPI, and the
+website build passed.
 
-Local verification and hosted candidate evidence are separate. No release tag
-or production deployment has been created by this workflow alignment. Hosted
-candidate validation, public image pulling, and ManageAI upgrade compatibility
-must be verified before declaring the first release ready. See
-[release policy](releases.md) for the complete procedure.
+Local verification and hosted candidate evidence are separate. The replacement
+0.1.0 candidate must pass exact-commit CI and image validation before its version
+tag is restored. Draft creation does not publish the release or deploy an
+instance. See [release policy](releases.md) for the complete procedure.
+
+## Agent administration evidence
+
+The isolated browser lane passed all 19 tests in Chromium, Firefox, and WebKit.
+It proved key-only bootstrap, the full unattended CLI administration sequence,
+message exchange, lifecycle controls, key replacement, revocation, audit and
+receipt verification, no-JavaScript key controls, and desktop and mobile layout.
+The browser password form also preserved its current session after a service
+operation. Screenshots contain metadata only.
+
+Source implementation and local tests do not prove installed runtime or hosted
+candidate state. Release promotion still requires the exact-commit CI candidate
+and its retained image validation evidence.

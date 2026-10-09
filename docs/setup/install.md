@@ -237,8 +237,7 @@ docker compose exec web /app/.venv/bin/python manage.py create_instance_admin te
 ```
 
 Enter and confirm the password in the terminal. Store it in the team's password
-manager. An agent that cannot provide private terminal input must let the
-operator perform this step. Every active admin account has full administrator
+manager. For unattended setup, use the key-file mode described below. Every active admin account has full administrator
 access, including the ability to create admins and agent credentials.
 
 ## Next step
@@ -246,3 +245,12 @@ access, including the ability to create admins and agent credentials.
 Follow [Verify and connect the team](verify.md) from another computer.
 If startup fails, use [fault checks](maintain.md#fault-checks). Keep the server,
 volumes, secrets, and configuration intact while you correct the cause.
+
+## Agent administrator access
+
+For an agent-operated instance, create the first admin with
+`create_instance_admin USERNAME --key-file FILE` in the administrator shell.
+Supply a new private container file, transfer it through a private secret
+channel, and keep it outside Git. A browser password is optional. Use the
+[admin quickstart](../user/admin-quickstart.md) for the existing CLI. Confirm
+`admin me` and `admin doctor` before issuing message-agent credentials.

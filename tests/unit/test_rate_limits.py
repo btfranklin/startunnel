@@ -10,7 +10,6 @@ from django.db import DatabaseError, IntegrityError
 from django.utils import timezone
 
 from api.rate_limits import (
-    _consume,
     consume_address_miss,
     consume_api_operation,
     consume_login_attempt,
@@ -18,6 +17,7 @@ from api.rate_limits import (
 )
 from core.limits import Limits
 from core.models import RateLimitBucket
+from core.rate_limits import _consume
 from tunnels.errors import DependencyUnavailable, RateLimited
 
 pytestmark = pytest.mark.django_db
@@ -25,7 +25,7 @@ pytestmark = pytest.mark.django_db
 
 def test_primary_window_rejects_and_reports_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
     now = timezone.now()
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
     _consume(key="subject", limit=2, window_seconds=60, rule="test")
     _consume(key="subject", limit=2, window_seconds=60, rule="test")
     with pytest.raises(RateLimited) as caught:
@@ -37,8 +37,8 @@ def test_primary_window_rejects_and_reports_retry_after(monkeypatch: pytest.Monk
 def test_old_entries_are_pruned_and_bad_values_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     now = timezone.now()
     now_ms = int(now.timestamp() * 1000)
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
-    digest = __import__("api.rate_limits", fromlist=["_key_digest"])._key_digest("prune")
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
+    digest = __import__("core.rate_limits", fromlist=["_key_digest"])._key_digest("prune")
     RateLimitBucket.objects.create(
         key_digest=digest,
         accepted_at_ms=[now_ms - 61_000, "bad", now_ms - 1_000],
@@ -50,7 +50,7 @@ def test_old_entries_are_pruned_and_bad_values_are_ignored(monkeypatch: pytest.M
 
 def test_burst_window_can_reject_before_primary(monkeypatch: pytest.MonkeyPatch) -> None:
     now = timezone.now()
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
     _consume(key="burst", limit=10, window_seconds=60, rule="test", burst_limit=1)
     with pytest.raises(RateLimited) as caught:
         _consume(key="burst", limit=10, window_seconds=60, rule="test", burst_limit=1)
@@ -59,7 +59,7 @@ def test_burst_window_can_reject_before_primary(monkeypatch: pytest.MonkeyPatch)
 
 def test_equal_windows_enforce_the_stricter_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     now = timezone.now()
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
     _consume(
         key="equal-windows",
         limit=4,
@@ -109,7 +109,7 @@ def test_repeated_integrity_race_fails_closed(monkeypatch: pytest.MonkeyPatch) -
 
 def test_database_errors_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "api.rate_limits._database_now", lambda: (_ for _ in ()).throw(DatabaseError())
+        "core.rate_limits._database_now", lambda: (_ for _ in ()).throw(DatabaseError())
     )
     with pytest.raises(DependencyUnavailable):
         _consume(key="broken", limit=1, window_seconds=1, rule="test")
@@ -129,7 +129,7 @@ def test_named_limit_helpers_do_not_store_raw_subjects(credential_factory: Any) 
 
 def test_bucket_expiry_uses_longest_window(monkeypatch: pytest.MonkeyPatch) -> None:
     now = timezone.now()
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
     _consume(
         key="expiry",
         limit=10,
@@ -145,7 +145,7 @@ def test_longer_burst_window_keeps_its_full_accepted_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = timezone.now()
-    monkeypatch.setattr("api.rate_limits._database_now", lambda: now)
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
     for _ in range(4):
         _consume(
             key="long-burst",

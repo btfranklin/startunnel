@@ -30,7 +30,7 @@ else:
 
 SENSITIVE_LOG_PATTERNS = (
     ("OpenAI key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
-    ("StarTunnel key", re.compile(r"\bst_[A-Za-z0-9_-]{43}\b")),
+    ("StarTunnel key", re.compile(r"\bst(?:a)?_[A-Za-z0-9_-]{43}\b")),
     ("glyph address", re.compile(r"[\U0001f700-\U0001f73f]")),
     ("receipt field", re.compile(r"\breceipt_handle\b")),
     ("snapshot cursor field", re.compile(r"\bsnapshot_cursor\b")),

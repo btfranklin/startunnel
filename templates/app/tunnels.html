@@ -27,6 +27,9 @@
                           data-confirm="Close this cycle? Agents cannot add more messages after it closes.">
                       {% csrf_token %}
                       <input type="hidden" name="action" value="close">
+                      <input type="hidden"
+                             name="idempotency_key"
+                             value="{{ idempotency_key }}-{{ tunnel.id }}-close">
                       <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
                       <input type="hidden" name="expected_cycle_id" value="{{ row.cycle.id }}">
                       <button class="button button--danger button--small"
@@ -37,6 +40,9 @@
                       <form method="post">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="rollover">
+                        <input type="hidden"
+                               name="idempotency_key"
+                               value="{{ idempotency_key }}-{{ tunnel.id }}-rollover">
                         <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
                         <input type="hidden" name="expected_cycle_id" value="{{ row.cycle.id }}">
                         <input type="hidden"
@@ -72,6 +78,9 @@
                       <form method="post">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="start">
+                        <input type="hidden"
+                               name="idempotency_key"
+                               value="{{ idempotency_key }}-{{ tunnel.id }}-start">
                         <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
                         <input type="hidden"
                                name="expected_address_generation"
@@ -106,6 +115,9 @@
                     <form method="post">
                       {% csrf_token %}
                       <input type="hidden" name="action" value="rotate">
+                      <input type="hidden"
+                             name="idempotency_key"
+                             value="{{ idempotency_key }}-{{ tunnel.id }}-rotate">
                       <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
                       <input type="hidden"
                              name="expected_address_generation"
@@ -120,6 +132,9 @@
                     <form method="post">
                       {% csrf_token %}
                       <input type="hidden" name="action" value="retire">
+                      <input type="hidden"
+                             name="idempotency_key"
+                             value="{{ idempotency_key }}-{{ tunnel.id }}-retire">
                       <input type="hidden" name="tunnel_id" value="{{ tunnel.id }}">
                       <input type="hidden"
                              name="expected_address_generation"

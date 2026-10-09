@@ -52,13 +52,20 @@ def test_create_agent_shows_key_once_and_revoke_is_instance_wide(
 ) -> None:
     actor = user_factory()
     client.force_login(actor)
-    created = client.post("/app/agents/create/", {"name": "Build agent"})
+    created = client.post(
+        "/app/agents/create/", {"name": "Build agent", "idempotency_key": str(uuid4())}
+    )
     assert created.status_code == 200
     assert created["Cache-Control"].startswith("no-store, private")
     credential = AgentCredential.objects.get(name="Build agent")
     assert credential.created_by == actor
     other, _ = credential_factory(name="Other agent")
-    assert client.post("/app/agents/revoke/", {"credential_id": other.id}).status_code == 302
+    assert (
+        client.post(
+            "/app/agents/revoke/", {"credential_id": other.id, "idempotency_key": str(uuid4())}
+        ).status_code
+        == 302
+    )
     other.refresh_from_db()
     assert other.revoked_at is not None
     assert client.post("/app/agents/revoke/", {"credential_id": uuid4()}).status_code == 404
@@ -70,10 +77,12 @@ def test_agent_page_renders_form_and_domain_errors(
     client.force_login(user_factory())
     assert client.post("/app/agents/create/", {"name": ""}).status_code == 400
     monkeypatch.setattr(
-        "site_app.views.create_credential",
+        "accounts.admin_services.create_credential",
         lambda **kwargs: (_ for _ in ()).throw(CredentialError("No capacity.")),
     )
-    response = client.post("/app/agents/create/", {"name": "Agent"})
+    response = client.post(
+        "/app/agents/create/", {"name": "Agent", "idempotency_key": str(uuid4())}
+    )
     assert response.status_code == 400
     assert b"No capacity" in response.content
 
@@ -110,13 +119,7 @@ def test_tunnel_actions_call_instance_operator_services(
     def capture(**kwargs: Any) -> None:
         called.append(kwargs)
 
-    target = {
-        "close": "close_cycle_as_operator",
-        "start": "start_cycle_as_operator",
-        "rollover": "rollover_cycle_as_operator",
-        "retire": "retire_tunnel_as_operator",
-    }[action]
-    monkeypatch.setattr(f"site_app.views.{target}", capture)
+    monkeypatch.setattr("site_app.views.execute_admin_operation", capture)
     response = client.post(
         "/app/tunnels/",
         {
@@ -139,18 +142,17 @@ def test_tunnel_rotate_returns_one_time_address(
 ) -> None:
     client.force_login(user_factory())
     monkeypatch.setattr(
-        "site_app.views.rotate_address_as_operator",
-        lambda **kwargs: SimpleNamespace(
-            address="safe-address", display_address="safe display", generation=2
-        ),
+        "site_app.views.execute_admin_operation",
+        lambda **kwargs: {"secret": "safe-address", "resource": {"address_generation": 2}},
     )
+    monkeypatch.setattr("site_app.views.display_address", lambda value: value)
     response = client.post(
         "/app/tunnels/",
         {"action": "rotate", "tunnel_id": uuid4(), "expected_address_generation": "1"},
     )
     assert response.status_code == 200
     assert response["Cache-Control"] == "no-store, private"
-    assert b"safe display" in response.content
+    assert b"safe-address" in response.content
 
 
 def test_tunnel_page_maps_bad_input_and_domain_errors(
@@ -160,7 +162,7 @@ def test_tunnel_page_maps_bad_input_and_domain_errors(
     assert client.post("/app/tunnels/", {"action": "bad", "tunnel_id": uuid4()}).status_code == 302
     assert client.post("/app/tunnels/", {"action": "close", "tunnel_id": "bad"}).status_code == 302
     monkeypatch.setattr(
-        "site_app.views.close_cycle_as_operator",
+        "site_app.views.execute_admin_operation",
         lambda **kwargs: (_ for _ in ()).throw(TunnelUnavailable()),
     )
     response = client.post(
@@ -169,7 +171,7 @@ def test_tunnel_page_maps_bad_input_and_domain_errors(
     )
     assert response.status_code == 302
     monkeypatch.setattr(
-        "site_app.views.close_cycle_as_operator",
+        "site_app.views.execute_admin_operation",
         lambda **kwargs: (_ for _ in ()).throw(InvalidRequest("Invalid operation.")),
     )
     assert (
@@ -184,17 +186,12 @@ def test_tunnel_page_maps_bad_input_and_domain_errors(
 def test_private_response_helpers_do_not_cache(
     rf: Any, monkeypatch: pytest.MonkeyPatch, user_factory: Any
 ) -> None:
-    from site_app.views import _one_time_address_response, _one_time_key_response
+    from site_app.admin_views import private_download
+    from site_app.views import _one_time_address_response
 
     request = rf.get("/")
     request.user = user_factory()
-    key_response = _one_time_key_response(
-        request,
-        key="st_test",
-        agent_name="Agent",
-        subject_name="Instance",
-        return_url="/app/agents/",
-    )
+    key_response = private_download("st_test", "key.txt")
     address_response = _one_time_address_response(
         request,
         address="address",

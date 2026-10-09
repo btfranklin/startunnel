@@ -28,6 +28,7 @@ class DocumentationPage:
 
 DOCUMENTATION_PAGES = (
     DocumentationPage("index", "Documentation", "index.md"),
+    DocumentationPage("admin-quickstart", "Admin quickstart", "admin-quickstart.md"),
     DocumentationPage("agent-quickstart", "Agent quickstart", "agent-quickstart.md"),
     DocumentationPage("tutorial", "Guided two-agent tutorial", "tutorial.md"),
     DocumentationPage("concepts", "Concepts", "concepts.md"),

@@ -4,9 +4,13 @@
   <header class="app-header">
     <div>
       <h1>{{ user.username }}</h1>
-      <p>Admin accounts manage this instance. Agent keys authorize the JSON API.</p>
+      <p>Admin keys manage this instance. Agent keys use the message API.</p>
     </div>
   </header>
+  <section class="list-panel" aria-label="Admin API access">
+    <h2>Admin API access</h2>
+    {% include "app/partials/admin_access.html" with access_admin=user %}
+  </section>
   <section class="account-actions">
     <article>
       <div>

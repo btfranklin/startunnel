@@ -1,0 +1,12 @@
+{
+  "version": "v0.1.0",
+  "supported_from": [],
+  "configuration_changes": [],
+  "database": "Initial supported migration baseline. Unversioned installations qualify only when their migration files exactly match this release and their source commit is an ancestor. Older schemas require a separately reviewed conversion.",
+  "rollback": "Restore the previous source checkout and image. If migrations have changed the database, recover the matching pre-upgrade database backup and secrets together.",
+  "schema": 1,
+  "source_commit": "7860506a13025f225245532e17c295337e664bf2",
+  "image": "ghcr.io/btfranklin/startunnel@sha256:cbafe1a75399d3cc85e8f34b99e3d3ec4b9a204c5b244b5e7ab8830a9a4aa391",
+  "platform": "linux/amd64",
+  "validation_run_id": 37879301853
+}

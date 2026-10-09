@@ -98,6 +98,12 @@ GATES = [
         "Apply the recovery action printed by the documentation check.",
     ),
     Gate(
+        "Perfect Doc structure",
+        ("perfect-doc", "check", ".", "--offline", "--no-banner"),
+        "docs/testing.md",
+        "Install Perfect Doc, then run `pdm run docs-structure`.",
+    ),
+    Gate(
         "Markdown links and headings",
         ("linkbust", "--no-color"),
         "docs/README.md",

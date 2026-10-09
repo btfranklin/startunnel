@@ -1,4 +1,4 @@
-# Agent API
+# API
 
 The API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. StarTunnel never puts an address in a URL.
 
@@ -69,3 +69,40 @@ At a cycle's deletion deadline, content reads return the normal unavailable resp
 ## Errors
 
 Errors use a stable envelope with a code, safe message, request ID, and optional field errors. A dependency failure returns `503 dependency_unavailable`. Authentication and address failures do not reveal whether a protected value exists.
+
+## Admin API
+
+The admin root is `/api/v1/admin/`. Send a `sta_` key as a bearer token. Ordinary
+agent keys cannot authenticate here. Admin keys cannot authenticate to the
+message API. Every active admin has full instance authority.
+
+The generated OpenAPI contract owns the exact request and response fields. Use
+`admin schema` in the existing CLI to inspect its commands and request definitions.
+
+| Operation group | Purpose |
+|---|---|
+| `me`, `capabilities` | Identity, authority, supported operations, and limits |
+| `status`, `doctor` | Safe database, maintenance, capacity, and runtime checks |
+| `accounts` | List, inspect, create, set state, and manage browser passwords |
+| `keys` | List admin-key metadata, issue, and revoke |
+| `agents` | List agent-key metadata, issue, and revoke |
+| `tunnels` | Inspect, list cycles, start, close, roll over, rotate, and retire |
+| `audit`, `operations` | Filter audit events and inspect operation receipts |
+
+All mutations require `Idempotency-Key`. Receipts are scoped to the admin account,
+so a replacement key can inspect prior work. The exact retry window is 24 hours.
+Changed input with the same key conflicts. After the window, inspect state before
+issuing a new operation. Exact retries can recover nonce-derived keys and rotated
+addresses without plaintext storage. Replays check current authority and resource
+state; revoked keys and retired addresses cannot be restored.
+
+Successful mutations return safe state, target references, and an audit receipt.
+Creation with the first admin key is atomic. Account state changes check expected
+state. Tunnel actions check expected cycles and address generations. Retirement
+requires the confirmation value from inspection and still checks current state.
+Lists use bounded pages and stable resource IDs. Settings are read-only diagnostics.
+
+The CLI retries only transient failures with bounded backoff and `Retry-After`.
+Mutations reuse the exact body and idempotency key. Authentication, validation,
+and state conflicts return to the caller. Errors use the same safe envelope as
+the message API. See [the admin quickstart](user/admin-quickstart.md).
