@@ -528,6 +528,20 @@ def run_system_proof(
 
     def prove_database_restore() -> None:
         _coordinated_restore_proof(stack)
+        # The backup helper restarts writers asynchronously. Establish a healthy
+        # application before testing PostgreSQL loss, rather than racing startup.
+        stack.run(
+            "Wait for services after backup and restore",
+            "up",
+            "--detach",
+            "--wait",
+            "--wait-timeout",
+            "300",
+            "web",
+            "maintenance",
+            timeout_seconds=600,
+        )
+        prove_healthy_stack()
 
     def prove_postgres_recovery() -> None:
         stack.run(

@@ -24,6 +24,47 @@ from scripts import system_proof
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_system_outage_proof_waits_for_writers_restarted_by_backup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Stack:
+        project_name = "stproof-backup-restart"
+        environment: dict[str, str] = {}
+        running = False
+        backup_finished = False
+        recovery_waited = False
+
+        def run(self, label: str, *args: str, **kwargs: Any) -> None:
+            if args[0] == "up" and "--wait" in args:
+                self.running = True
+                if self.backup_finished:
+                    self.recovery_waited = True
+            if label == "Stop PostgreSQL":
+                assert self.running, "Outage injection raced the writer restart"
+            if label.startswith(("Verify live health", "Verify ready health", "Verify readiness")):
+                assert self.running, "HTTP probe reached a web service still starting"
+
+        def capture(self, *args: str, **kwargs: Any) -> str:
+            return "Application service started."
+
+    stack: Any = Stack()
+
+    def backup_restart(value: Any) -> None:
+        value.backup_finished = True
+        value.running = False
+
+    monkeypatch.setattr(system_proof, "_coordinated_restore_proof", backup_restart)
+    monkeypatch.setattr(system_proof, "_assert_reusable_images", lambda value: None)
+    monkeypatch.setattr(system_proof, "_run_activity_restart_proof", lambda value: None)
+    monkeypatch.setattr(system_proof, "_system_host_profile", lambda value: {})
+    monkeypatch.setattr(system_proof, "_system_image_ids", lambda value: {})
+    monkeypatch.setattr(system_proof, "required_output", lambda *args, **kwargs: "28.4.0")
+
+    report = system_proof.run_system_proof(stack, build_images=False)
+    assert report["status"] == "passed"
+    assert stack.recovery_waited
+
+
 @pytest.mark.skipif(
     shutil.which("docker") is None, reason="Compose rendering is checked on the host."
 )
