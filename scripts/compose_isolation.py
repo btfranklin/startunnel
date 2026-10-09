@@ -359,21 +359,20 @@ class IsolatedComposeProject:
         self._env_file = Path(self._temporary.name) / "empty.env"
         self._env_file.write_text("# Intentionally empty.\n", encoding="utf-8")
         self._env_file.chmod(0o600)
+        # Bind-mounted reports must be writable by helpers and readable by the
+        # host. The candidate runtime keeps its original image user ID.
+        helper_uid = os.getuid() or 10001
+        helper_gid = os.getgid() or 10001
+        self.environment.update(
+            STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
+        )
+        artifacts = ROOT / "artifacts"
+        if artifacts.is_symlink():
+            raise IsolationError("The proof artifact directory must not be a symlink.")
+        artifacts.mkdir(mode=0o700, exist_ok=True)
+        if os.getuid() == 0:
+            os.chown(artifacts, helper_uid, helper_gid)
         if self.candidate_image:
-            # Bind-mounted proof reports must be writable by the helper process
-            # and readable by the host artifact uploader. The candidate runtime
-            # retains its image's original UID; only helper builds use this UID.
-            helper_uid = os.getuid() or 10001
-            helper_gid = os.getgid() or 10001
-            self.environment.update(
-                STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
-            )
-            artifacts = ROOT / "artifacts"
-            if artifacts.is_symlink():
-                raise IsolationError("The proof artifact directory must not be a symlink.")
-            artifacts.mkdir(mode=0o700, exist_ok=True)
-            if os.getuid() == 0:
-                os.chown(artifacts, helper_uid, helper_gid)
             self._candidate_overlay = Path(self._temporary.name) / "candidate.yaml"
             overlay = "services:\n"
             for service in ("web", "migrate", "maintenance"):

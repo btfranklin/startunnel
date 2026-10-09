@@ -68,7 +68,7 @@ rebuilding. Draft recovery preserves image identity and rejects published
 releases. Release Notes Scribe supplies summaries; reviewed deployment notes
 remain authoritative. Perfect Doc checks offline Markdown structure in the aggregate check.
 
-Local verification passed all 17 fast gates: 727 tests passed, one was skipped,
+Local verification passed all 17 fast gates: 728 tests passed, one was skipped,
 and coverage was 90.93%. The isolated PostgreSQL lane passed 45 tests, including
 concurrent admin access changes. The restored initial-baseline proof passed
 with a real PostgreSQL dump and restore. Perfect Doc, generated OpenAPI, and the

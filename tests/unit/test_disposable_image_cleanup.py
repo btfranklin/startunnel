@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import pytest
 from scripts import compose_isolation as isolation
@@ -60,7 +61,13 @@ def test_failed_lane_prunes_owned_dangling_images_before_and_after_work(
         timeout_seconds: int,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        assert environment == {}
+        assert dict(environment) in (
+            {},
+            {
+                "STARTUNNEL_CONTAINER_UID": str(os.getuid() or 10001),
+                "STARTUNNEL_CONTAINER_GID": str(os.getgid() or 10001),
+            },
+        )
         if "prune" in command:
             assert list(command) == [
                 "docker",
@@ -141,3 +148,21 @@ def test_concurrent_daemon_cleanup_is_a_narrow_skip(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(isolation, "_run_process", run)
     isolation.prune_disposable_images({})
+
+
+def test_source_helpers_can_write_private_host_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(isolation, "ROOT", tmp_path)
+    monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
+    monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
+    monkeypatch.setattr(isolation, "prune_disposable_images", lambda environment: None)
+    monkeypatch.setattr(isolation.IsolatedComposeProject, "cleanup", lambda self: None)
+    with isolation.IsolatedComposeProject(
+        "sttest-browser-artifacts", profiles=("browser",), source_environment={}
+    ) as stack:
+        assert stack.environment["STARTUNNEL_CONTAINER_UID"] == str(os.getuid() or 10001)
+        assert stack.environment["STARTUNNEL_CONTAINER_GID"] == str(os.getgid() or 10001)
+        artifacts = tmp_path / "artifacts"
+        assert artifacts.stat().st_mode & 0o777 == 0o700
+        assert artifacts.stat().st_uid == int(stack.environment["STARTUNNEL_CONTAINER_UID"])
