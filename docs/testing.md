@@ -125,3 +125,4 @@ overlap, with at most 100 in flight, and have a bounded drain after the workload
 deadline. Missed submissions, capacity exhaustion, request errors, and unfinished
 sends fail the proof rather than extending its duration. Its report still requires
 at least 95% of the expected sends and successful fixture cleanup.
+CI retains failed load reports, including safe status counts and send latencies.
