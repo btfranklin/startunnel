@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import httpx
 
+MAX_IN_FLIGHT_SENDS = 256
+
 
 class LoadProfileError(RuntimeError):
     """The load proof configuration or result is invalid."""
@@ -107,7 +109,24 @@ async def run_load_profile(
     tunnel_count = min(10, max(1, len(manifest.credentials) // 3))
     tunnels: list[dict[str, str]] = []
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=30, headers=common_headers) as client:
+    # Long polls must not occupy the connections used to submit messages.
+    async with (
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30,
+            headers=common_headers,
+            limits=httpx.Limits(
+                max_connections=MAX_IN_FLIGHT_SENDS,
+                max_keepalive_connections=MAX_IN_FLIGHT_SENDS,
+            ),
+        ) as client,
+        httpx.AsyncClient(
+            base_url=base_url,
+            timeout=30,
+            headers=common_headers,
+            limits=httpx.Limits(max_connections=max(1, config.concurrent_activity_readers)),
+        ) as activity_client,
+    ):
         for index in range(tunnel_count):
             credential = manifest.credentials[index]
             response = await client.post(
@@ -141,11 +160,13 @@ async def run_load_profile(
         async def reader(reader_index: int) -> None:
             nonlocal reads
             tunnel = tunnels[reader_index % len(tunnels)]
-            credential = manifest.credentials[reader_index % len(manifest.credentials)]
             cursor = tunnel["cursor"]
+            request_index = reader_index
             while not stopped.is_set():
+                credential = manifest.credentials[request_index % len(manifest.credentials)]
+                request_index += config.concurrent_activity_readers
                 try:
-                    response = await client.post(
+                    response = await activity_client.post(
                         "/api/v1/activity",
                         headers={"Authorization": f"Bearer {credential.key}"},
                         json={
@@ -169,12 +190,12 @@ async def run_load_profile(
             for index in range(config.concurrent_activity_readers)
         ]
         started = time.monotonic()
-        next_send = started
         target_sends = int(config.duration_seconds * config.sends_per_second)
-        for index in range(target_sends):
-            delay = next_send - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
+        deadline = started + config.duration_seconds
+        send_tasks: set[asyncio.Task[None]] = set()
+
+        async def send(index: int) -> None:
+            nonlocal sent
             tunnel = tunnels[index % len(tunnels)]
             credential = manifest.credentials[(index + tunnel_count) % len(manifest.credentials)]
             request_started = time.monotonic()
@@ -199,11 +220,34 @@ async def run_load_profile(
                     failures[status] = failures.get(status, 0) + 1
             except httpx.HTTPError:
                 failures["transport"] = failures.get("transport", 0) + 1
-            next_send = started + (index + 1) / config.sends_per_second
+
+        for index in range(target_sends):
+            delay = started + index / config.sends_per_second - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if time.monotonic() >= deadline:
+                failures["missed_schedule"] = target_sends - index
+                break
+            if len(send_tasks) >= MAX_IN_FLIGHT_SENDS:
+                failures["sender_capacity"] = failures.get("sender_capacity", 0) + 1
+                continue
+            task = asyncio.create_task(send(index))
+            send_tasks.add(task)
+            task.add_done_callback(send_tasks.discard)
+            if index and index % max(1, int(config.sends_per_second * 60)) == 0:
+                print(f"Load progress: {index} scheduled, {sent} successful sends.", flush=True)
+
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
         stopped.set()
-        if readers:
-            done, pending = await asyncio.wait(readers, timeout=config.drain_seconds)
+        outstanding = [*readers, *send_tasks]
+        if outstanding:
+            done, pending = await asyncio.wait(outstanding, timeout=config.drain_seconds)
+            unfinished_sends = sum(task in send_tasks for task in pending)
+            if unfinished_sends:
+                failures["send_drain_timeout"] = unfinished_sends
             for task in pending:
                 task.cancel()
             await asyncio.gather(*done, *pending, return_exceptions=True)
@@ -231,6 +275,11 @@ async def run_load_profile(
             "duration_seconds": config.duration_seconds,
             "sends_per_second": config.sends_per_second,
             "concurrent_activity_readers": config.concurrent_activity_readers,
+            "max_in_flight_sends": MAX_IN_FLIGHT_SENDS,
+            "web_workers": os.getenv("STARTUNNEL_LOAD_WEB_WORKERS", "unknown"),
+            "web_database_pool_max_size": os.getenv(
+                "STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE", "unknown"
+            ),
             "credential_count": len(manifest.credentials),
             "tunnel_count": tunnel_count,
             "seed": config.seed,

@@ -10,9 +10,12 @@ Help the user set up one StarTunnel instance or connect to an instance that an o
 Choose the mode from the user's request:
 
 - **Set up an instance:** Read the [team setup index](https://github.com/btfranklin/startunnel/blob/main/docs/setup/README.md). Use the user's selected configuration. If they have not selected one, explain the local trial and four shared-host paths, then ask for the missing choice. Do not choose paid infrastructure for them.
+- **Update an instance:** Follow [Update the application](https://github.com/btfranklin/startunnel/blob/main/docs/setup/maintain.md#update-the-application). Select a published release and its attached `release.json`, verify backups and database compatibility, and preview the upgrade before applying it. Source pushes and publishing releases do not update installed instances automatically.
 - **Connect to an instance:** Use the instance origin and an administrator-issued agent key. If either is missing, ask for the origin or ask the operator to issue a key. Never ask the user to paste a key into chat.
 
 ## Set up an instance
+
+Choose a local trial or a shared server installation.
 
 ### Local trial
 
@@ -46,7 +49,7 @@ Use the [team setup index](https://github.com/btfranklin/startunnel/blob/main/do
 
 These paths provide public HTTPS access without a VPN and keep PostgreSQL private. Follow the selected provider guide and its shared installation, external verification, and backup steps. Read the entire path before execution. Use already-authorized account, region, plan, DNS, and registry choices; ask only for missing choices or access. The website does not create resources itself.
 
-If the operator has no application image, follow [Build the application image](https://github.com/btfranklin/startunnel/blob/main/docs/setup/image.md). Use the actual published digest and matching source commit. Never invent an image or digest. Keep secrets in private local input or an approved secret store, never in chat or command arguments. Admin accounts grant full administrator access; administrators issue agent keys.
+Select a published official release first. If the operator needs a custom image or no release is published yet, follow [Get the application image](https://github.com/btfranklin/startunnel/blob/main/docs/setup/image.md). Use the actual published digest and matching source commit. Never invent an image or digest. Keep secrets in private local input or an approved secret store, never in chat or command arguments. Admin accounts grant full administrator access; administrators issue agent keys.
 
 Do not report success until external HTTPS, administrator login, agent authentication, the two-agent exchange, and a backup restore check pass. Report any blocked step as unresolved. Give the owner the instance URL, configuration, source commit, image digest, and backup location without credentials or tunnel addresses. Use the [production operations reference](https://github.com/btfranklin/startunnel/blob/main/docs/operations.md#production) for service settings.
 

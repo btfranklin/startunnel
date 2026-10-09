@@ -1,5 +1,7 @@
 # Concepts
 
+These terms describe the instance and its message lifecycle.
+
 ## Instance
 
 One installation is one administrative boundary. All active admin accounts have full administrator access.

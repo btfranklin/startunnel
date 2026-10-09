@@ -16,6 +16,7 @@ from django.db.models import Exists, OuterRef, Prefetch, QuerySet, prefetch_rela
 
 from agents.models import AgentCredential
 from core.activity_listener import activity_listener
+from core.limits import Limits
 
 from .access import (
     active_credential_query,
@@ -379,6 +380,16 @@ def _confirm_activity_page_for_async(
         connection.close()
 
 
+def _limits_for_async(credential: AgentCredential) -> Limits:
+    """Return a worker's PostgreSQL connection after checking credential limits."""
+
+    try:
+        return limits_for(credential)
+    finally:
+        if connection.vendor == "postgresql" and not connection.in_atomic_block:
+            connection.close()
+
+
 async def read_activity_async(
     *,
     credential: AgentCredential,
@@ -391,15 +402,16 @@ async def read_activity_async(
     """Read activity without holding a synchronous worker during the wait."""
 
     sqlite_backend = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
+    executor = None if sqlite_backend else _ASYNC_DATABASE_EXECUTOR
     limits = await sync_to_async(
-        limits_for,
+        _limits_for_async,
         thread_sensitive=sqlite_backend,
+        executor=executor,
     )(credential)
     if wait_seconds < 0 or wait_seconds > limits.maximum_long_poll_seconds:
         raise InvalidRequest(
             f"wait_seconds must be from 0 through {limits.maximum_long_poll_seconds}."
         )
-    executor = None if sqlite_backend else _ASYNC_DATABASE_EXECUTOR
     if wait_seconds == 0:
         immediate = await sync_to_async(
             partial(

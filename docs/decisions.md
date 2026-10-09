@@ -1,5 +1,7 @@
 # Product and architecture decisions
 
+These decisions define the product scope and architecture.
+
 ## One operator-managed instance
 
 One operator-managed instance serves one trusted group. StarTunnel does not

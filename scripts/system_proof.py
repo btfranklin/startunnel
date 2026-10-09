@@ -94,7 +94,11 @@ def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
         environment = dict(stack.environment)
         environment.update(
             {
-                "COMPOSE_FILE": "compose.yaml:compose.test.yaml",
+                "COMPOSE_FILE": (
+                    ":".join(stack.compose_files())
+                    if getattr(stack, "candidate_image", None)
+                    else "compose.yaml:compose.test.yaml"
+                ),
                 "COMPOSE_PROJECT_NAME": stack.project_name,
                 "COMPOSE_DISABLE_ENV_FILE": "true",
             }
@@ -524,6 +528,20 @@ def run_system_proof(
 
     def prove_database_restore() -> None:
         _coordinated_restore_proof(stack)
+        # The backup helper restarts writers asynchronously. Establish a healthy
+        # application before testing PostgreSQL loss, rather than racing startup.
+        stack.run(
+            "Wait for services after backup and restore",
+            "up",
+            "--detach",
+            "--wait",
+            "--wait-timeout",
+            "300",
+            "web",
+            "maintenance",
+            timeout_seconds=600,
+        )
+        prove_healthy_stack()
 
     def prove_postgres_recovery() -> None:
         stack.run(
@@ -570,7 +588,22 @@ def run_system_proof(
             timeout_seconds=600,
         )
 
-    if build_images:
+    candidate_image = getattr(stack, "candidate_image", None)
+    if candidate_image:
+        step("pull immutable candidate", stack.pull_candidate)
+        step(
+            "proof helper image build",
+            lambda: stack.run(
+                "Build proof helper images",
+                "build",
+                "--no-cache",
+                "example-tests",
+                "agent-e2e",
+                "browser-tests",
+                timeout_seconds=3_600,
+            ),
+        )
+    elif build_images:
         step(
             "no-cache image build",
             lambda: stack.run(
@@ -719,6 +752,8 @@ def run_system_proof(
         ),
     )
 
+    if candidate_image:
+        step("candidate image identity", stack.verify_candidate_services)
     docker_version = required_output(
         ["docker", "version", "--format", "{{.Server.Version}}"],
         environment=stack.environment,
@@ -727,7 +762,14 @@ def run_system_proof(
     report = {
         "proof": "clean-stack system",
         "status": "passed",
-        "build_mode": "no-cache" if build_images else "reused-current-images",
+        "build_mode": (
+            "immutable-candidate"
+            if candidate_image
+            else "no-cache"
+            if build_images
+            else "reused-current-images"
+        ),
+        "candidate_image": candidate_image,
         "release_evidence_eligible": build_images,
         "project": stack.project_name,
         "started_at": started_at.isoformat(),

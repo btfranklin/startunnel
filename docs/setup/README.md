@@ -36,7 +36,8 @@ send agents to this index so they can select the address path as well as the hos
 
 ## Follow the complete path
 
-1. Use [Build the application image](image.md) on a workstation or build host.
+1. Use [Get the application image](image.md) to select an official release.
+   Custom images can be built on a workstation or build host.
    If your operator already supplies an image digest and its source commit,
    use those values instead.
 2. Follow one provider guide from the table to prepare the server and, if used, DNS.
@@ -59,9 +60,8 @@ owns application settings and service behavior.
   Replace the example address in every step.
 - SSH access to the selected server and a private workstation for passwords
   and keys. Keep the SSH private key on that workstation.
-- Permission to publish an application image to a registry and to pull it
-  from the server. [The image guide](image.md) supplies a GitHub Container
-  Registry path; no prebuilt public StarTunnel image is assumed.
+- Access to pull the selected official public image, or permission to publish
+  and pull a custom image. [The image guide](image.md) explains both paths.
 - Encrypted storage outside the server for backups and recovery secrets.
 
 On a macOS or Linux workstation, find the public IPv4 address for the SSH rule

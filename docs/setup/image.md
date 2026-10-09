@@ -1,6 +1,26 @@
-# Build the application image
+# Get the application image
 
 [Setup index](README.md) → image → provider → installation → verification → backup
+
+## Use an official release
+
+For a shared installation, select a published version from
+[StarTunnel releases](https://github.com/btfranklin/startunnel/releases).
+Download its attached `release.json`. It supplies the exact `source_commit`,
+`image` reference pinned with `@sha256:`, supported predecessors, configuration
+changes, database requirements, and rollback instructions. Read the release
+notes before installing or updating. Use the record's values in the installation
+guide; do not use a mutable version tag or guess a digest.
+
+Official images use `ghcr.io/btfranklin/startunnel`, Linux amd64, the `runtime`
+target, and UID/GID `10001:10001`. Published public images need no registry token.
+The application uses a digest-pinned official Python Alpine image with patched
+Alpine packages. Development and browser test helpers use a separate Debian
+image; that tooling is not included in the application runtime.
+If there is no published release yet, use the custom build path below. A draft
+release or successful source merge is not an installation recommendation.
+
+## Build a custom image
 
 Run these steps on a trusted **workstation or build host**, not on the production
 server. You need Git and Docker with Buildx. Docker Desktop includes Buildx;

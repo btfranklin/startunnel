@@ -1,0 +1,40 @@
+# Repository Markdown structure. Django templates are checked by djLint and browsers.
+include = ["**/*.md"]
+exclude = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/dist/**", "artifacts/**", "output/**"]
+
+[markdown]
+heading_start = 1
+single_h1 = true
+no_heading_skips = true
+nonempty_headings = true
+nonempty_sections = true
+closed_fences = true
+table_columns = true
+undefined_references = true
+unused_definitions = true
+require_language = true
+
+[files]
+portable_names = true
+hidden_characters = true
+
+[routes]
+enabled = true
+base = "/source/"
+
+# Resolve served URLs to their repository sources for this documentation scan.
+# scripts/check_docs.py separately validates ownership of application routes.
+[routes.redirects]
+"/api/docs/" = "/source/docs/api/"
+"/docs/agent-quickstart/" = "/source/docs/user/agent-quickstart/"
+"/docs/tutorial/" = "/source/docs/user/tutorial/"
+"/docs/concepts/" = "/source/docs/user/concepts/"
+"/docs/authentication/" = "/source/docs/user/authentication/"
+"/docs/instance-tunnels/" = "/source/docs/user/instance-tunnels/"
+"/docs/rotation-and-history/" = "/source/docs/user/rotation-and-history/"
+"/docs/delivery/" = "/source/docs/user/delivery/"
+"/docs/errors/" = "/source/docs/user/errors/"
+"/docs/limits/" = "/source/docs/user/limits/"
+"/docs/security/" = "/source/docs/user/security/"
+"/docs/examples/" = "/source/docs/user/examples/"
+"/docs/local-development/" = "/source/docs/user/local-development/"

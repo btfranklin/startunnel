@@ -27,6 +27,7 @@ The full ownership map is in `docs/README.md`.
 
 ## Critical rules
 
+- Work and commit on `main`. Create a branch or pull request only if the owner asks.
 - Every tunnel and agent credential belongs to the instance.
 - PostgreSQL controls tree order, lifecycle correctness, rate limits, and
   database notifications.
@@ -34,7 +35,8 @@ The full ownership map is in `docs/README.md`.
 - A cycle has one root. Every later message has one parent.
 - Messages are immutable after creation.
 - Concurrency tests use real PostgreSQL.
-- OpenAI is optional and is only for opt-in live-agent tests.
+- OpenAI is optional for opt-in live-agent tests and draft release summaries.
+  Keep provider credentials out of application images and normal test jobs.
 - Run each test or load Compose lane through the isolated runner. Never use the
   shared `startunnel` project for proof.
 - Do not put a secret in Git, an image, a fixture, or an example.
@@ -70,9 +72,12 @@ runtime inspection and recovery commands.
 - Never print keys, glyph addresses, payloads, or passwords in logs or
   runtime-inspection output. Direct API and tutorial output
   can show the address and safe example payload that the user requested.
-- Give OpenAI settings only to the opt-in live-agent test process.
+- Give OpenAI settings only to the opt-in live-agent test process or the
+  Release Notes Scribe action step.
 
 ## Definition of done
+
+Markdown changes also require `pdm run docs-structure` with Perfect Doc installed.
 
 A change is done when its domain tests pass, `pdm run check` passes, generated
 artifacts are current, affected documentation is current, and no secret is

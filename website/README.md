@@ -33,6 +33,13 @@ beside the header logo when the main button scrolls behind the header.
 Both buttons copy the same prompt. The main button stays in place.
 Without JavaScript, visitors can open and select each prompt or follow the guide link.
 
+Shared setup selects a published GitHub release and uses its attached
+`release.json` for the matching source commit and immutable image digest.
+The homepage and `llms.txt` link to releases and the instance update guide;
+the setup prompt routes existing installations through backup and compatibility
+checks. Custom builds remain available when no release is published or a custom
+image is needed. Publishing the website or a release does not update instances.
+
 The build also publishes these resources:
 
 | Path | Source and purpose |
@@ -50,7 +57,7 @@ The website does not issue keys or host a shared application instance.
 
 Publishing the site does not publish that repository, an application image,
 or a standalone CLI package. The [image guide](../docs/setup/image.md) explains
-how to build and publish the team's image. Production setup still requires
+how to select an official release or build and publish a custom image. Production setup still requires
 the team's provider access, DNS, registry, and backup choices.
 
 The resource index follows the [llms.txt proposal](https://llmstxt.org/), checked

@@ -49,3 +49,8 @@ generated/live-agent-results/
 /archive-data/
 /secrets/
 *.log
+
+# Local release records and private upgrade recovery configuration
+/release.json
+/release-notes.md
+/production.env*

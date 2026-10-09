@@ -391,33 +391,47 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                 )
             _validate_runtime_image(arguments.image)
+            # Resolve immutable candidates directly from the registry. Diagnostic
+            # builds use the local daemon. Both lanes retain all vulnerability findings.
+            scan_source = "remote" if "@sha256:" in arguments.image else "docker"
             _run(
                 "Application image SBOM",
                 [
-                    "docker",
-                    "scout",
-                    "sbom",
+                    "trivy",
+                    "image",
+                    "--image-src",
+                    scan_source,
+                    "--timeout",
+                    "15m",
+                    "--scanners",
+                    "vuln",
                     "--format",
                     "cyclonedx",
                     "--output",
                     str(report_directory / "image-sbom.cdx.json"),
-                    f"local://{arguments.image}",
+                    arguments.image,
                 ],
             )
             _run(
                 "Application image vulnerability scan",
                 [
-                    "docker",
-                    "scout",
-                    "cves",
-                    "--only-severity",
-                    "critical,high",
+                    "trivy",
+                    "image",
+                    "--image-src",
+                    scan_source,
+                    "--timeout",
+                    "15m",
+                    "--scanners",
+                    "vuln",
+                    "--severity",
+                    "CRITICAL,HIGH",
                     "--exit-code",
+                    "1",
                     "--format",
                     "sarif",
                     "--output",
                     str(report_directory / "image-vulnerabilities.sarif"),
-                    f"local://{arguments.image}",
+                    arguments.image,
                 ],
             )
             image_archive = temporary / "application-image.tar"
@@ -447,6 +461,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Security release gate failed: {error}")
         return 1
 
+    (report_directory / "validated-image.json").write_text(
+        json.dumps({"status": "passed", "image": arguments.image}) + "\n", encoding="utf-8"
+    )
     print(f"Security release gate passed. Reports: {report_directory}")
     return 0
 

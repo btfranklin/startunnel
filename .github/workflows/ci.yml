@@ -1,6 +1,7 @@
 name: Continuous integration
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -12,7 +13,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   PDM_CHECK_UPDATE: "false"
@@ -41,6 +42,20 @@ jobs:
           python -m pip install --disable-pip-version-check "pdm==2.28.0"
           pdm install --frozen-lockfile --no-self
           npm ci --ignore-scripts
+      - name: Install Perfect Doc
+        run: |
+          tool_dir="$RUNNER_TEMP/perfect-doc"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=perfect-doc-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+          base=https://github.com/btfranklin/perfect-doc/releases/download/v0.1.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/SHA256SUMS" --output SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$archive"
+          echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      - name: Check Markdown structure
+        run: perfect-doc check . --offline --no-banner
       - name: Run the canonical gate
         run: pdm run check
 
@@ -94,3 +109,12 @@ jobs:
         run: >-
           python3 scripts/run_isolated_test_lane.py browser
           --project-name stci-browser-${{ github.run_id }}-${{ github.run_attempt }}
+
+  release-candidate:
+    name: Validate the distribution image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [canonical, postgres, external-proofs, browser]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release-candidate.yml

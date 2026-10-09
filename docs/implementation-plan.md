@@ -50,9 +50,32 @@ image security gate remains unresolved; see the
 [security assessment](security.md#image-vulnerability-assessment-2026-09-25).
 Rerun the release validation workflow before declaring a production release.
 
-Production deployment requires an operator-provided application image pinned
-by digest. A public image distribution workflow is not yet provided. See
+Production deployment requires an application image pinned by digest. The
+versioned release workflow supplies that image after candidate validation; its
+first hosted run and public pull still need verification. See
 [operations](operations.md#production).
 
 The agent client is a downloadable Python script. There is no standalone
 package-manager release. See [the client guide](../cli/README.md).
+
+## Versioned release delivery
+
+Release source is committed directly to `main`. The CI workflow now builds a
+single candidate runtime image after the normal gates and validates its exact
+digest through security, isolated system, and load checks. Version tags promote
+retained successful exact-commit CI artifacts to draft releases without
+rebuilding. Draft recovery preserves image identity and rejects published
+releases. Release Notes Scribe supplies summaries; reviewed deployment notes
+remain authoritative. Perfect Doc adds a separate Markdown structure gate.
+
+Local verification passed all 16 canonical gates: 670 tests passed, one was
+skipped, and coverage was 90.26%. The focused release and automation suite passed
+103 tests, and Perfect Doc and workflow lint passed. Local isolated PostgreSQL
+validation stopped before building because the Docker daemon could not reach
+Docker Hub authentication; disposable resources were cleaned up.
+
+Local verification and hosted candidate evidence are separate. No release tag
+or production deployment has been created by this workflow alignment. Hosted
+candidate validation, public image pulling, and ManageAI upgrade compatibility
+must be verified before declaring the first release ready. See
+[release policy](releases.md) for the complete procedure.

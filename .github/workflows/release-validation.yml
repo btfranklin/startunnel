@@ -1,8 +1,18 @@
 name: Release validation
 
 on:
+  workflow_call:
+    inputs:
+      candidate_image:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
+      candidate_image:
+        description: Optional immutable candidate digest to validate
+        required: false
+        type: string
+        default: ""
       run_live_agents:
         description: Spend provider credit on the bounded live-agent proof.
         required: true
@@ -11,9 +21,10 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
-  group: release-validation
+  group: release-validation-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -53,22 +64,46 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes tesseract-ocr
-          go install github.com/gitleaks/gitleaks/v8@v8.28.0
+          go install github.com/zricethezav/gitleaks/v8@v8.28.0
           sudo install -m 0755 "$(go env GOPATH)/bin/gitleaks" /usr/local/bin/gitleaks
-          curl -fsSL \
-            https://raw.githubusercontent.com/docker/scout-cli/v1.21.0/install.sh \
-            -o "${RUNNER_TEMP}/install-docker-scout.sh"
-          sh "${RUNNER_TEMP}/install-docker-scout.sh" \
-            -b "${HOME}/.docker/cli-plugins" v1.21.0
+          tool_dir="$RUNNER_TEMP/trivy"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=trivy_0.75.0_Linux-64bit.tar.gz
+          base=https://github.com/aquasecurity/trivy/releases/download/v0.75.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/trivy_0.75.0_checksums.txt" --output checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf "$archive" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
           gitleaks version
           tesseract --version
-          docker scout version
+          trivy --version
+      - uses: docker/login-action@v3
+        if: inputs.candidate_image != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull the immutable candidate
+        if: inputs.candidate_image != ''
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: docker pull "$CANDIDATE_IMAGE"
       - name: Run the fail-closed security lane
-        run: pdm run security-release
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          args=()
+          if [[ -n "$CANDIDATE_IMAGE" ]]; then
+            args=(--skip-build --image "$CANDIDATE_IMAGE")
+          fi
+          pdm run security-release "${args[@]}"
       - name: Upload validated security reports
         uses: actions/upload-artifact@v7
         with:
-          name: security-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          name: security-reports-${{ github.run_id }}
+          overwrite: true
           path: artifacts/security/
           if-no-files-found: error
           retention-days: 14
@@ -83,14 +118,27 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: docker/login-action@v3
+        if: inputs.candidate_image != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Run the isolated system proof
-        run: >-
-          python3 scripts/run_isolated_test_lane.py system
-          --project-name strelease-system-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          args=()
+          if [[ -n "$CANDIDATE_IMAGE" ]]; then
+            args=(--candidate-image "$CANDIDATE_IMAGE")
+          fi
+          python3 scripts/run_isolated_test_lane.py system "${args[@]}" \
+            --project-name strelease-system-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload the safe system report
         uses: actions/upload-artifact@v7
         with:
-          name: system-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          name: system-proof-${{ github.run_id }}
+          overwrite: true
           path: artifacts/system-proof-*.json
           if-no-files-found: error
           retention-days: 14
@@ -107,15 +155,31 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: docker/login-action@v3
+        if: inputs.candidate_image != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Run the isolated load proof
-        run: >-
-          python3 scripts/run_full_load_profile.py
-          --project-name strelease-load-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          args=()
+          if [[ -n "$CANDIDATE_IMAGE" ]]; then
+            args=(--candidate-image "$CANDIDATE_IMAGE")
+          fi
+          python3 scripts/run_full_load_profile.py "${args[@]}" \
+            --project-name strelease-load-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload the safe load report
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: load-proof-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/load-profile-*.json
+          name: load-proof-${{ github.run_id }}
+          overwrite: true
+          path: |
+            artifacts/load-profile-*.json
+            artifacts/validated-load-image.json
           if-no-files-found: error
           retention-days: 14
 

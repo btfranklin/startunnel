@@ -115,7 +115,8 @@ or identity data. Keep `.env` and `.env.tutorial` untracked and at mode `0600`.
 
 Use [Install StarTunnel](setup/install.md) for the complete production procedure,
 including the image, Linux secret-file ownership, DNS, HTTPS, and first login.
-Use [Build the application image](setup/image.md) if the operator has no image.
+Use [Get the application image](setup/image.md) to select an official release
+or build a custom image. See [Release policy](releases.md) for publication and compatibility.
 
 `compose.prod.yaml` uses immutable images and Docker secret files.
 `STARTUNNEL_APP_IMAGE` selects the reviewed image with an `@sha256:` digest;

@@ -117,6 +117,7 @@ def test_runtime_image_removes_unused_package_runtimes() -> None:
         "FROM development-dependencies AS development-runtime", 1
     )[0]
 
-    assert "apt-get purge --yes --allow-remove-essential perl-base" in runtime
+    assert "apk add --no-cache ca-certificates tini" in runtime
+    assert "apt-get" not in runtime
     assert "/usr/local/lib/python3.14/site-packages/pip" in runtime
     assert "/app/.venv/lib/python3.14/site-packages/pip" in runtime

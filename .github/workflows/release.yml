@@ -1,0 +1,107 @@
+name: Promote StarTunnel release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to retry or recover
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Promote tested image and create draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select successful CI for the exact tagged commit
+        id: ci
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          git merge-base --is-ancestor HEAD origin/main
+          python3 scripts/release_record.py --check "$RELEASE_TAG"
+          python3 scripts/release_candidate.py --find-run "$RELEASE_TAG"
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.ci.outputs.run_id }}
+          name: release-candidate
+          path: artifacts/promotion
+      - name: Verify retained evidence and write deployment record
+        id: candidate
+        env:
+          VALIDATION_RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          python3 scripts/release_candidate.py --verify artifacts/promotion
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          candidate = json.loads(pathlib.Path('artifacts/promotion/release-candidate.json').read_text())
+          image = candidate['image']
+          subprocess.run(['python3', 'scripts/release_record.py', '--write', os.environ['RELEASE_TAG'], image, '--validation-run', os.environ['VALIDATION_RUN_ID']], check=True)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'image={image}\n')
+          PY
+      - name: Check draft recovery is permitted
+        run: python3 scripts/release_draft.py "$RELEASE_TAG" --check
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the tested digest without rebuilding
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate.outputs.image }}
+        run: |
+          docker buildx imagetools create --prefer-index=false \
+            --tag "ghcr.io/btfranklin/startunnel:$RELEASE_TAG" "$CANDIDATE_IMAGE"
+          docker buildx imagetools inspect "ghcr.io/btfranklin/startunnel:$RELEASE_TAG" > "$RUNNER_TEMP/promoted-image.txt"
+          python3 scripts/release_candidate.py --check-digest "$RUNNER_TEMP/promoted-image.txt" "$CANDIDATE_IMAGE"
+      - name: Generate the change summary
+        id: notes
+        uses: btfranklin/release-notes-scribe@v0
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ env.RELEASE_TAG }}
+          include_github_generated_notes: "true"
+          create_release: "false"
+      - name: Keep reviewed deployment instructions with the generated summary
+        env:
+          GENERATED_NOTES: ${{ steps.notes.outputs.release_notes }}
+          VALIDATION_RUN_ID: ${{ steps.ci.outputs.run_id }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          notes = pathlib.Path('release-notes.md')
+          reviewed = notes.read_text()
+          summary = os.environ['GENERATED_NOTES'].strip()
+          if not summary:
+              raise SystemExit('Release Notes Scribe returned an empty summary.')
+          run_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['VALIDATION_RUN_ID']}"
+          notes.write_text(summary + '\n\n' + reviewed + '\n\nValidation: ' + run_url + '\n')
+          PY
+      - name: Create or recover the draft release
+        run: python3 scripts/release_draft.py "$RELEASE_TAG"

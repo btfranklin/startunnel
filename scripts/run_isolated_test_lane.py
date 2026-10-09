@@ -83,6 +83,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=(*LANES, "system", "resources"))
     parser.add_argument("--project-name")
+    parser.add_argument("--candidate-image", help="Test the exact immutable release image.")
     parser.add_argument(
         "--allow-openai-cost",
         action="store_true",
@@ -102,6 +103,11 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     arguments = _parser().parse_args(argv)
+    if arguments.candidate_image and (arguments.lane != "system" or arguments.reuse_current_images):
+        print(
+            "--candidate-image requires the system lane and a fresh proof build.", file=sys.stderr
+        )
+        return 2
     if arguments.lane == "resources":
         if arguments.project_name or arguments.allow_openai_cost or arguments.reuse_current_images:
             print("The resources lane does not accept other lane options.", file=sys.stderr)
@@ -136,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
                 project_name,
                 profiles=profiles,
                 include_openai=include_openai,
+                **(
+                    {"candidate_image": arguments.candidate_image}
+                    if arguments.candidate_image
+                    else {}
+                ),
             ) as stack,
             termination_signals(),
         ):

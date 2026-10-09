@@ -1,5 +1,7 @@
 # Authentication
 
+Admin accounts and agent credentials provide separate forms of access.
+
 ## Admins
 
 Admins sign in with a local Django username and password. There is no public sign-up. An administrator creates each account. Every active admin account can manage admin accounts, agent credentials, and tunnels.

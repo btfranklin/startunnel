@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.12
 
-ARG PYTHON_BASE_IMAGE="python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d"
+ARG PYTHON_BASE_IMAGE="python:3.14.8-alpine3.23@sha256:e7cff362a12454395f8dc99607c21a602ea880cdce03538877b90c2ba932b16f"
+ARG PYTHON_TEST_BASE_IMAGE="python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d"
 
 FROM ${PYTHON_BASE_IMAGE} AS python-base
 
@@ -15,9 +16,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends --only-upgrade --yes openssl libssl3t64 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk upgrade --no-cache \
+    && apk add --no-cache "zlib>=1.3.2-r1"
 
 FROM python-base AS dependency-builder
 
@@ -32,11 +32,32 @@ FROM dependency-builder AS production-dependencies
 RUN pdm install --prod --frozen-lockfile --no-editable \
     && find .venv -type d -name __pycache__ -prune -exec rm -rf '{}' +
 
-FROM dependency-builder AS development-dependencies
+# Playwright ships glibc browser binaries. Test tools are separate from the
+# musl application image and exercise the Alpine web/migration/maintenance services.
+FROM ${PYTHON_TEST_BASE_IMAGE} AS test-dependency-builder
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PDM_CHECK_UPDATE=false \
+    PDM_IGNORE_SAVED_PYTHON=1 \
+    PDM_USE_VENV=1 \
+    PDM_VENV_IN_PROJECT=1 \
+    PATH="/app/.venv/bin:${PATH}"
+
+WORKDIR /app
+ARG PDM_VERSION="2.28.0"
+RUN apt-get update \
+    && apt-get install --no-install-recommends --only-upgrade --yes openssl libssl3t64 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir "pdm==${PDM_VERSION}"
+COPY pyproject.toml pdm.lock ./
+
+FROM test-dependency-builder AS development-dependencies
 
 RUN pdm install --frozen-lockfile --no-editable -G dev
 
-FROM dependency-builder AS agent-dependencies
+FROM test-dependency-builder AS agent-dependencies
 
 RUN pdm install --frozen-lockfile --no-editable -G dev -G live-agents
 
@@ -73,12 +94,10 @@ FROM python-base AS runtime
 ARG APP_UID=10001
 ARG APP_GID=10001
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates tini \
-    && apt-get purge --yes --allow-remove-essential perl-base \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid "${APP_GID}" startunnel \
-    && useradd --uid "${APP_UID}" --gid startunnel --create-home --home-dir /home/startunnel startunnel
+RUN apk add --no-cache ca-certificates tini \
+    && ln -s /sbin/tini /usr/bin/tini \
+    && addgroup -g "${APP_GID}" startunnel \
+    && adduser -D -u "${APP_UID}" -G startunnel -h /home/startunnel startunnel
 
 COPY --from=production-dependencies /app/.venv /app/.venv
 COPY --from=application-builder /app/manage.py /app/manage.py
