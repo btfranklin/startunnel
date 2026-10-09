@@ -391,6 +391,13 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                 )
             _validate_runtime_image(arguments.image)
+            # Registry resolution handles the OCI index/attestations produced by
+            # Buildx without relying on the daemon's local digest alias lookup.
+            scan_image = (
+                f"registry://{arguments.image}"
+                if "@sha256:" in arguments.image
+                else f"local://{arguments.image}"
+            )
             _run(
                 "Application image SBOM",
                 [
@@ -401,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                     "cyclonedx",
                     "--output",
                     str(report_directory / "image-sbom.cdx.json"),
-                    f"local://{arguments.image}",
+                    scan_image,
                 ],
             )
             _run(
@@ -417,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
                     "sarif",
                     "--output",
                     str(report_directory / "image-vulnerabilities.sarif"),
-                    f"local://{arguments.image}",
+                    scan_image,
                 ],
             )
             image_archive = temporary / "application-image.tar"

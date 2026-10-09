@@ -24,7 +24,7 @@ x-app-build: &app-build
   dockerfile: Dockerfile
   target: runtime
   args:
-    PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d}
+    PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.8-alpine3.23@sha256:e7cff362a12454395f8dc99607c21a602ea880cdce03538877b90c2ba932b16f}
     PDM_VERSION: ${PDM_VERSION:-2.28.0}
     APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
     APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}

@@ -52,6 +52,21 @@ now selects the patched PyJWT 2.15.1 release. This dependency update does not
 resolve the separate image vulnerability below. Debian's tracker still listed
 that issue as unfixed when checked on 2026-10-08.
 
+## Alpine runtime migration: 2026-10-08
+
+The application now uses the official Python 3.14.8 Alpine 3.23 image, pinned
+by registry digest. The build updates Alpine packages and requires
+`zlib>=1.3.2-r1`, the version Alpine identifies as fixing `CVE-2026-85091` in its
+[security database](https://secdb.alpinelinux.org/v3.23/main.json). This replaces
+the Debian runtime described in the historical assessment below; no vulnerability
+exclusion or custom zlib build is used.
+
+Production dependencies have Python 3.14 amd64 musl wheels. Browser and other
+test-helper images retain a separate Debian base because Playwright requires
+glibc. Application services in those stacks run Alpine. Release readiness still
+requires the complete security, system, and load proof on the candidate digest;
+availability of patched packages alone does not establish that evidence.
+
 ## Image vulnerability assessment: 2026-09-25
 
 The Python 3.14.7 image pin was updated to the official `slim-trixie` digest
@@ -82,5 +97,5 @@ still marks the package as vulnerable and has no fixed package version.
 The application source has no direct `gzwrite` or `gzprintf` call. This does
 not prove that the image is unaffected, and application-level exploitability
 has not been established. The release gate remains blocked. No CVE exclusion,
-VEX override, or custom zlib build is used. Wait for an official Debian fix,
-then update the image pin, rebuild without cache, and rerun the release gate.
+VEX override, or custom zlib build was used for this assessment. The Alpine
+runtime migration above supersedes waiting for an official Debian fix.
