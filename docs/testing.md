@@ -78,8 +78,9 @@ authentication, message IDs and ancestry, historical audit records, private
 recovery-key issuance, admin authentication, and a new message write. Address
 conversion must preserve the original glyph strings, including retired rows.
 The proof checks refusal and transaction rollback for a missing conversion
-file, invalid file permissions, an incorrect old lookup secret, and an
-unexpired address-based operation receipt.
+file, invalid file permissions, and an incorrect old lookup secret. It also
+checks that an unexpired old-format reply receipt causes a conflict on retry
+without another message, while a new write succeeds immediately.
 
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private

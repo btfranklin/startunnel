@@ -64,7 +64,7 @@ not recover deployment secrets or a lost database. Use the
 
 For a database that still stores address digests, first follow the
 [address storage conversion](address-storage.md). That conversion needs the
-original addresses and a writer pause before the normal upgrade.
+original addresses and a brief writer stop during the schema migration.
 
 1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
    Read its notes, configuration changes, database compatibility, and rollback

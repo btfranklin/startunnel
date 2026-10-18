@@ -41,6 +41,8 @@ def baseline(snapshot_path: Path) -> None:
     address_model = apps.get_model("tunnels", "TunnelAddress")
     cycle_model = apps.get_model("tunnels", "Cycle")
     message_model = apps.get_model("tunnels", "Message")
+    event_model = apps.get_model("tunnels", "TunnelEvent")
+    idempotency_model = apps.get_model("tunnels", "IdempotencyRecord")
     audit_model = apps.get_model("tunnels", "AuditEvent")
     password = secrets.token_urlsafe(32)
     agent_key = "st_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -96,7 +98,54 @@ def baseline(snapshot_path: Path) -> None:
         cycle.root_message = messages[0]
         cycle.next_sequence = 3
         cycle.message_count = 2
+        cycle.content_bytes = sum(message.byte_count for message in messages)
         cycle.save()
+        tunnel.next_event_position = 4
+        tunnel.next_cycle_number = 2
+        tunnel.save(update_fields=["next_event_position", "next_cycle_number"])
+        for position, event_type, message in (
+            (1, "cycle_started", messages[0]),
+            (2, "message_posted", messages[0]),
+            (3, "message_posted", messages[1]),
+        ):
+            event_model.objects.create(
+                tunnel=tunnel,
+                cycle=cycle,
+                message=message,
+                position=position,
+                event_type=event_type,
+            )
+        old_reply_key = "upgrade-proof-old-reply"
+        old_request_data = {
+            "address_digest": hmac.digest(address_secret.encode(), address_token, "sha256").hex(),
+            "parent_id": str(messages[0].pk),
+            "content": {"type": "text", "text": "Reply retained"},
+            "mentions": [],
+            "correlation_id": "",
+        }
+        old_request = json.dumps(
+            old_request_data,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+        reply_receipt = idempotency_model.objects.create(
+            credential=credential,
+            operation="post_reply",
+            key_digest=hmac.digest(
+                settings.IDEMPOTENCY_SECRET.encode(), old_reply_key.encode(), "sha256"
+            ),
+            request_digest=hashlib.sha256(old_request).digest(),
+            response={
+                "message_id": str(messages[1].pk),
+                "cycle_id": str(cycle.pk),
+                "sequence": 2,
+                "event_position": 3,
+            },
+            resource_id=messages[1].pk,
+            expires_at=timezone.now() + timedelta(hours=24),
+        )
         audit = audit_model.objects.create(
             actor_user=user,
             action="human.created",
@@ -124,6 +173,9 @@ def baseline(snapshot_path: Path) -> None:
                 "cycle_id": str(cycle.pk),
                 "root_id": str(messages[0].pk),
                 "reply_id": str(messages[1].pk),
+                "reply_receipt_id": str(reply_receipt.pk),
+                "old_reply_key": old_reply_key,
+                "old_reply_digest": bytes(reply_receipt.request_digest).hex(),
                 "audit_id": str(audit.pk),
             }
         ),
@@ -138,7 +190,7 @@ def upgraded(snapshot_path: Path) -> None:
 
     django.setup()
     from django.core.management import call_command
-    from django.db import connection, transaction
+    from django.db import connection
     from django.db.migrations.executor import MigrationExecutor
     from django.utils import timezone
 
@@ -147,8 +199,16 @@ def upgraded(snapshot_path: Path) -> None:
     from agents.models import AgentCredential
     from agents.services import authenticate_key
     from tunnels.access import resolve_tunnel
-    from tunnels.errors import TunnelUnavailable
-    from tunnels.models import AuditEvent, Cycle, IdempotencyRecord, Message, TunnelAddress
+    from tunnels.errors import IdempotencyConflict, TunnelUnavailable
+    from tunnels.models import (
+        AuditEvent,
+        Cycle,
+        IdempotencyRecord,
+        Message,
+        TunnelAddress,
+        TunnelEvent,
+    )
+    from tunnels.services import post_reply
 
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)
@@ -185,16 +245,6 @@ def upgraded(snapshot_path: Path) -> None:
     snapshot_path.write_text(json.dumps(wrong), encoding="utf-8")
     rejected_conversion("Supply a mode-0600")
     snapshot_path.write_text(original, encoding="utf-8")
-    pending = IdempotencyRecord.objects.create(
-        credential_id=expected["credential_id"],
-        operation="post_reply",
-        key_digest=secrets.token_bytes(32),
-        request_digest=secrets.token_bytes(32),
-        expires_at=timezone.now() + timedelta(hours=1),
-    )
-    rejected_conversion("Stop writers")
-    pending.expires_at = timezone.now() - timedelta(seconds=1)
-    pending.save(update_fields=["expires_at"])
     try:
         executor = MigrationExecutor(connection)
         executor.migrate(executor.loader.graph.leaf_nodes())
@@ -228,6 +278,38 @@ def upgraded(snapshot_path: Path) -> None:
     assert root.sequence == 1 and reply.sequence == 2 and reply.depth == 1
     assert root.session is None and reply.session is None
     assert root.sender_name == reply.sender_name == credential.name
+    receipt = IdempotencyRecord.objects.get(pk=expected["reply_receipt_id"])
+    assert receipt.expires_at > timezone.now()
+    assert bytes(receipt.request_digest).hex() == expected["old_reply_digest"]
+    assert receipt.resource_id == reply.pk
+    assert receipt.response["message_id"] == str(reply.pk)
+    try:
+        post_reply(
+            credential=credential,
+            idempotency_key=expected["old_reply_key"],
+            address=address,
+            parent_id=root.pk,
+            content={"type": "text", "text": "Reply retained"},
+        )
+    except IdempotencyConflict:
+        pass
+    else:
+        raise AssertionError("An old-format reply receipt replayed after conversion.")
+    assert Message.objects.filter(cycle=cycle).count() == 2
+    assert TunnelEvent.objects.filter(tunnel_id=expected["tunnel_id"]).count() == 3
+    labeled = post_reply(
+        credential=credential,
+        idempotency_key="upgrade-proof-new-reply",
+        address=address,
+        parent_id=reply.pk,
+        content={"type": "text", "text": "Post-upgrade reply"},
+        session="upgrade-proof",
+    ).message
+    cycle.refresh_from_db()
+    assert labeled.sequence == 3 and labeled.session == "upgrade-proof"
+    assert cycle.next_sequence == 4 and cycle.message_count == 3
+    assert Message.objects.filter(cycle=cycle).count() == 3
+    assert TunnelEvent.objects.filter(tunnel_id=expected["tunnel_id"]).count() == 4
     audit = AuditEvent.objects.get(pk=expected["audit_id"])
     assert audit.action == "human.created" and audit.metadata == {"historical": True}
     assert audit.actor_user_id == user.pk and audit.actor_admin_credential_id is None
@@ -238,24 +320,6 @@ def upgraded(snapshot_path: Path) -> None:
     recovered = authenticate_admin_key(recovery_path.read_text().strip())
     assert recovered.owner_id == user.pk
     assert AuditEvent.objects.filter(action="admin.recovered", channel="server").exists()
-    with transaction.atomic():
-        labeled = Message.objects.create(
-            tunnel_id=expected["tunnel_id"],
-            cycle=cycle,
-            parent=reply,
-            sender=credential,
-            sender_name=credential.name,
-            session="upgrade-proof",
-            sequence=3,
-            depth=2,
-            payload_type="text",
-            text_payload="Post-upgrade reply",
-            byte_count=18,
-            content_digest=hashlib.sha256(b"Post-upgrade reply").digest(),
-        )
-        cycle.next_sequence = 4
-        cycle.message_count = 3
-        cycle.save()
     assert Message.objects.get(pk=labeled.pk).session == "upgrade-proof"
     connection.close()
 

@@ -8,7 +8,6 @@ import hmac
 import json
 import os
 import stat
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,15 +33,6 @@ def _token(address: str) -> bytes:
 
 def restore_addresses(apps: Any, schema_editor: Any) -> None:
     alias = schema_editor.connection.alias
-    records = apps.get_model("tunnels", "IdempotencyRecord").objects.using(alias)
-    if records.filter(
-        operation__in=["post_reply", "close_cycle", "start_cycle", "rollover_cycle"],
-        expires_at__gt=datetime.now(UTC),
-    ).exists():
-        raise RuntimeError(
-            "Stop writers and let address-based operation receipts expire before this migration. "
-            "See docs/setup/address-storage.md. No addresses were changed."
-        )
     addresses = apps.get_model("tunnels", "TunnelAddress").objects.using(alias)
     if not addresses.exists():
         return
