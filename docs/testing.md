@@ -168,7 +168,8 @@ For official release promotion, use the official digest reference. Self-hosted
 operators can use an image from their own registry pinned with `@sha256:`.
 Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
-proof helpers, and verify application service image IDs. The system proof covers
+proof helpers, and verify application service image IDs. Helper builds use the
+Docker cache; changed source files still cause their copy layers to rebuild. The system proof covers
 health, agent exchanges, browser flows, runtime database privileges, backup,
 restore, database loss, and restarts. It tests the exact runtime image in an
 isolated development configuration; it does not prove a particular public

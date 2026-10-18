@@ -583,7 +583,6 @@ def run_system_proof(
             lambda: stack.run(
                 "Build proof helper images",
                 "build",
-                "--no-cache",
                 "example-tests",
                 "agent-e2e",
                 "browser-tests",
