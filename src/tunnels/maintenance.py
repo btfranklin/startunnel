@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 
+from accounts.models import AdminOperation
 from core.maintenance_liveness import publish_local_maintenance_heartbeat
 from core.models import MaintenanceState, RateLimitBucket
 
@@ -49,6 +50,9 @@ def next_deadline() -> datetime | None:
         .values_list("expires_at", flat=True)
         .first()
     )
+    admin_operation_expiry = (
+        AdminOperation.objects.order_by("expires_at").values_list("expires_at", flat=True).first()
+    )
     oldest_audit = (
         AuditEvent.objects.order_by("created_at").values_list("created_at", flat=True).first()
     )
@@ -63,6 +67,7 @@ def next_deadline() -> datetime | None:
             active_expiry,
             history_delete,
             idempotency_expiry,
+            admin_operation_expiry,
             oldest_audit + AUDIT_RETENTION if oldest_audit else None,
             session_expiry,
             bucket_expiry,
@@ -183,6 +188,10 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
         IdempotencyRecord.objects.filter(expires_at__lte=checked_at),
         ordered_field="expires_at",
     )
+    admin_operations = _delete_batch(
+        AdminOperation.objects.filter(expires_at__lte=checked_at),
+        ordered_field="expires_at",
+    )
     audit = _delete_batch(
         AuditEvent.objects.filter(created_at__lte=checked_at - AUDIT_RETENTION),
         ordered_field="created_at",
@@ -195,7 +204,15 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
         RateLimitBucket.objects.filter(expires_at__lte=checked_at),
         ordered_field="expires_at",
     )
-    due_work_count = close_candidates + delete_candidates + idempotency + audit + sessions + buckets
+    due_work_count = (
+        close_candidates
+        + delete_candidates
+        + idempotency
+        + admin_operations
+        + audit
+        + sessions
+        + buckets
+    )
     last_error = (
         f"{deletion_failures} cycle content deletion(s) failed." if deletion_failures else ""
     )
@@ -211,6 +228,7 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
         "cycle_content_deleted": deleted,
         "cycle_delete_failures": deletion_failures,
         "idempotency_purged": idempotency,
+        "admin_operations_purged": admin_operations,
         "audit_events_purged": audit,
         "sessions_purged": sessions,
         "rate_limit_buckets_purged": buckets,

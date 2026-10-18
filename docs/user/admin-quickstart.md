@@ -210,7 +210,9 @@ Tunnels should not be treated as confidential.
 
 The retry window is 24 hours. Repeat the same operation with the same JSON and
 idempotency key after a lost response. A replacement key for the same admin can
-inspect its earlier receipts. Changed input with the same key conflicts.
+inspect its earlier receipts within their 24-hour lifetime. Maintenance deletes
+expired receipts. Audit events remain for 30 days. Changed input with the same
+key conflicts.
 
 The client makes at most three attempts for transient failures. It respects
 `Retry-After`. If the required wait exceeds ten seconds, it returns control

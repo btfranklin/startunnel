@@ -9,6 +9,7 @@ from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpRequest
+from django.utils import timezone
 from ninja import Field, HeaderEx, P, Router, Schema
 from ninja.security import HttpBearer
 
@@ -425,7 +426,7 @@ def audit(
 
 @router.get("/operations/{uuid:operation_id}", response={200: OperationRecord, **ADMIN_ERRORS})
 def operation(request: AdminRequest, operation_id: UUID) -> dict[str, Any]:
-    row = AdminOperation.objects.filter(pk=operation_id).first()
+    row = AdminOperation.objects.filter(pk=operation_id, expires_at__gt=timezone.now()).first()
     if row is None:
         raise InvalidRequest("This operation is not available.")
     return {

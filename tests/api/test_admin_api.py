@@ -9,11 +9,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+import time_machine
 from django.core.management import call_command
 from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
 from accounts.models import AdminOperation
+from tunnels.maintenance import cleanup_once
 from tunnels.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
@@ -174,6 +176,37 @@ def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: An
     handed_over_page = client.get("/api/v1/admin/accounts", query, **other_headers)
     assert handed_over_page.status_code == 200
     assert handed_over_page.json() == original_page.json()
+
+
+def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory: Any) -> None:
+    actor = user_factory()
+    _, secret = issue_admin_key(owner=actor, name="receipt inspection")
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    response = client.post(
+        "/api/v1/admin/accounts/create",
+        data=json.dumps({"username": "receipt-expiry"}),
+        content_type="application/json",
+        HTTP_IDEMPOTENCY_KEY="receipt-expiry-create",
+        **headers,
+    )
+    assert response.status_code == 200
+    result = response.json()
+    receipt = AdminOperation.objects.get(pk=result["operation"]["id"])
+    assert (
+        timedelta(hours=24, seconds=-1)
+        < receipt.expires_at - receipt.created_at
+        <= timedelta(hours=24)
+    )
+    path = f"/api/v1/admin/operations/{receipt.pk}"
+    with time_machine.travel(receipt.expires_at - timedelta(microseconds=1), tick=False):
+        assert client.get(path, **headers).status_code == 200
+    with time_machine.travel(receipt.expires_at, tick=False):
+        assert client.get(path, **headers).status_code == 400
+        assert AdminOperation.objects.filter(pk=receipt.pk).exists()
+        assert cleanup_once()["admin_operations_purged"] == 1
+        assert not AdminOperation.objects.filter(pk=receipt.pk).exists()
+        assert AuditEvent.objects.filter(pk=result["operation"]["audit_event_id"]).exists()
+        assert client.get("/api/v1/admin/me", **headers).status_code == 200
 
 
 def test_admin_api_rejects_agent_keys_and_missing_idempotency(

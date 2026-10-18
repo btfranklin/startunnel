@@ -3,8 +3,9 @@
 Message-agent writes use idempotency keys. Repeat the exact request after a timeout. StarTunnel returns the original result. A create, start, or rollover retry returns `404` when that cycle reaches its deletion deadline. Do not reuse an idempotency key for different input.
 
 Admin writes also require idempotency keys, but use a separate 24-hour retry
-window and an account-owned operation receipt. An exact retry can recover an
-issued key only while it remains valid. A rotation retry returns the original
+window and an account-owned operation receipt. The receipt is available for
+24 hours, then maintenance deletes it. Audit events remain for 30 days. An exact
+retry can recover an issued key only while it remains valid. A rotation retry returns the original
 address in its resource only while that address remains current. A changed request
 with the same key conflicts. After the window, inspect current state before a
 new operation. Use the [admin quickstart](/docs/admin-quickstart/) for receipt

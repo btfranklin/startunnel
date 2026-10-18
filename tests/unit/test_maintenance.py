@@ -12,6 +12,7 @@ import pytest
 from django.contrib.sessions.models import Session
 from django.utils import timezone
 
+from accounts.models import AdminOperation
 from core.logging import SafeJsonFormatter
 from core.maintenance_status import read_maintenance_status
 from core.models import MaintenanceState, RateLimitBucket
@@ -142,6 +143,42 @@ def test_next_deadline_and_due_work_use_earliest_persisted_value(
     assert not has_due_work(now=now)
     Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=now - timedelta(seconds=1))
     assert has_due_work(now=now)
+
+
+def test_admin_receipt_deadlines_and_cleanup_are_bounded(
+    user_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = user_factory()
+    now = timezone.now()
+    expiry = now - timedelta(seconds=1)
+    future = now + timedelta(hours=1)
+    monkeypatch.setattr("tunnels.maintenance.MAINTENANCE_BATCH_SIZE", 2)
+    AdminOperation.objects.bulk_create(
+        [
+            AdminOperation(
+                owner=owner,
+                operation="accounts.create",
+                key_digest=hashlib.sha256(str(index).encode()).digest(),
+                request_digest=b"r" * 32,
+                derivation_nonce=b"n" * 32,
+                expires_at=expiry if index < 3 else future,
+            )
+            for index in range(4)
+        ]
+    )
+    audit = AuditEvent.objects.create(actor_user=owner, action="recent", target_type="test")
+
+    assert next_deadline() == expiry
+    assert has_due_work(now=now)
+    assert cleanup_once(now=now)["admin_operations_purged"] == 2
+    assert MaintenanceState.objects.get(key="worker").due_work_count == 2
+    assert has_due_work(now=now)
+    assert cleanup_once(now=now)["admin_operations_purged"] == 1
+    assert cleanup_once(now=now)["admin_operations_purged"] == 0
+    assert not has_due_work(now=now)
+    assert next_deadline() == future
+    assert list(AdminOperation.objects.values_list("expires_at", flat=True)) == [future]
+    assert AuditEvent.objects.filter(pk=audit.pk).exists()
 
 
 def test_failed_cycle_does_not_block_later_deletion(

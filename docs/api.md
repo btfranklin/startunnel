@@ -156,6 +156,8 @@ It works without credentials or a connection. OpenAPI defines types and constrai
 All mutations require `Idempotency-Key`, scoped to the admin account. Any active
 admin can inspect safe operation receipts and continue list cursors with the
 same filters. The exact retry window is 24 hours for the original admin account.
+Operation receipts are available for 24 hours. Maintenance deletes expired
+receipts; audit events remain for 30 days.
 Changed input with the same key conflicts. After the window, inspect state before
 issuing a new operation. Exact retries can recover derived keys and the stored
 current rotated address. Replays check current authority and resource

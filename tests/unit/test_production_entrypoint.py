@@ -235,22 +235,12 @@ def test_postgres_entrypoint_rejects_equal_role_passwords() -> None:
     assert "admin and runtime passwords must be different" in result.stderr
 
 
-def test_runtime_role_init_passes_arbitrary_password_through_psql_environment(
-    tmp_path: Path,
-) -> None:
-    fake_psql = tmp_path / "psql"
-    fake_psql.write_text(
-        "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\"\n"
-        "printf 'PGOPTIONS:%s\\n' \"${PGOPTIONS-unset}\"\ncat\n",
-        encoding="utf-8",
-    )
-    fake_psql.chmod(0o755)
+def test_runtime_role_init_passes_arbitrary_password_through_psql_environment() -> None:
     password = "runtime ' \\ $ ü " + "x" * 130
     environment = os.environ.copy()
     environment.pop("PGOPTIONS", None)
     environment.update(
         {
-            "PATH": str(tmp_path) + os.pathsep + environment["PATH"],
             "POSTGRES_DB": "startunnel",
             "POSTGRES_USER": "startunnel_admin",
             "STARTUNNEL_DB_RUNTIME_PASSWORD": password,
@@ -258,7 +248,13 @@ def test_runtime_role_init_passes_arbitrary_password_through_psql_environment(
     )
 
     result = subprocess.run(
-        ["sh", "docker/postgres/init/10-runtime-role.sh"],
+        [
+            "sh",
+            "-c",
+            "psql() { printf 'ARGS:%s\\n' \"$*\"; "
+            "printf 'PGOPTIONS:%s\\n' \"${PGOPTIONS-unset}\"; cat; }\n"
+            ". ./docker/postgres/init/10-runtime-role.sh",
+        ],
         cwd=ROOT,
         env=environment,
         text=True,

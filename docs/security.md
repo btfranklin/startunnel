@@ -29,7 +29,9 @@ Audit events identify the admin, credential or browser channel, target, request,
 and result. They never contain raw keys, passwords, addresses, or payloads.
 Every active admin can inspect safe operation receipts and use list cursors
 with the same filters. Exact retries are scoped to the original admin account
-for 24 hours.
+for 24 hours. Receipts are available for the same 24 hours. Maintenance
+deletes expired receipts in bounded batches. Audit events have a separate
+30-day retention period.
 A receipt row lock covers one owner and idempotency key. Independent admin
 writes can run at the same time.
 A revoked credential or retired address cannot be restored by replay.
