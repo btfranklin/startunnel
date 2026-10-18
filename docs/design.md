@@ -54,7 +54,7 @@ There is no team switcher, membership page, invitation flow, OAuth callback, per
 | `/app/audit/` | Paginated audit inspection |
 | `/app/account/` | Own browser password and admin keys |
 | `/docs/` | User documentation |
-| `/api/docs` | Interactive API reference |
+| `/api/docs/` | Interactive API reference |
 
 ## Rules
 

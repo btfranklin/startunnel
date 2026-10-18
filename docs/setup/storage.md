@@ -10,9 +10,9 @@ device. Stop if you cannot prove which attached device is the new disk, if it
 has a filesystem or partition table, or if it contains data. Do not format the
 server's root disk or any existing disk.
 
-EC2 hosts with encrypted root EBS and existing servers whose Docker data disk
-is already encrypted do not need a new volume. For those hosts, create the
-directory in the root shell:
+EC2 hosts with encrypted root EBS and existing servers with an encrypted root
+filesystem do not need a new volume. For those hosts, create the directory in
+the root shell:
 
 ```sh
 sudo -i

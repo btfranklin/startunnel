@@ -104,20 +104,17 @@ application no longer stores a per-message content digest.
    python3 scripts/upgrade_production.py /absolute/path/release.json
    ```
 
-   For another config name, add `--env-file /absolute/path/team.env` to the
-   preview and apply commands. The helper validates the record, clean checkout,
-   selected Compose model, secret files, and installed image's source/version
-   labels. It checks any existing web containers against the configured image,
-   but it does not require web to run. The migration check runs in a disposable
-   container from the configured old application image. It accepts a
-   digest-pinned image from a custom registry. Versioned
-   installations must appear in the release's `supported_from` list.
-   Unversioned installations must have an ancestor source commit and matching
-   applied migration files in an unchanged prefix. Forward migration and recovery
-   evidence must cover the exact installed source. A missing revision label
-   requires recovering the
-   original build record and a separately reviewed manual upgrade; do not
-   guess a commit or bypass compatibility checks.
+   For another config name, add `--env-file /absolute/path/team.env` to both
+   commands. The preview checks the release record, clean checkout, selected
+   Compose model, secret files, and installed image labels. It checks existing
+   web containers and runs a migration check in a temporary container from the
+   old image. Web does not need to be running; PostgreSQL must be available.
+
+   Versioned installations must appear in `supported_from`. Unversioned
+   installations need an ancestor source commit and unchanged migration files.
+   Test forward migration and recovery from the exact installed source before
+   claiming compatibility. If the revision label is missing, recover the build
+   record and arrange a reviewed manual upgrade.
 5. Once the preview passes and the backup checks in step 2 are complete, apply:
 
    ```shell
@@ -127,21 +124,18 @@ application no longer stores a per-message content digest.
    set +a
    ```
 
-   `--backup-verified` is the operator's attestation, not an automated restore
-   check. The helper pulls the selected image and checks its revision before
-   stopping writers. The preview can run while web is stopped or absent. The
-   helper checks existing web container images and runs the old image's
-   migration check in a disposable Compose `web` container. Each apply saves
-   the old configuration in a unique mode `0600` file and prints its path. It
-   keeps earlier snapshots. It writes the new configuration to a unique sibling
-   file, then replaces the selected file atomically. It removes an unused
-   temporary file after a normal error. It changes only the application image
-   reference, removes the completed old migration container, and waits for the
-   production stack. It never deletes database volumes or regenerates secrets.
-   There is no automatic rollback.
-   Check the snapshot path and the actual environment and stack state after an
-   interrupted attempt. Retry from the original old image and configuration
-   only when the database and writers remain unchanged.
+   `--backup-verified` confirms that you restored a fresh backup and copied it
+   outside the server. The helper does not perform that check.
+
+   The helper pulls and checks the new image before it stops writers. It saves
+   the old configuration in a unique mode `0600` file and prints the path, then
+   replaces the image setting and starts the stack. It retains earlier
+   snapshots. Database volumes and secret files remain in place. A pending
+   database migration can change stored data, including the one-time reset.
+
+   There is no automatic rollback. After an interrupted attempt, check the
+   printed snapshot, configuration, migrations, and service state. Retry from
+   the old configuration only if the database and writers remain unchanged.
 6. Tell each CLI user to replace their downloaded client with the script from
    the upgraded instance. On each client machine, in its client directory:
 

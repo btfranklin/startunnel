@@ -20,18 +20,14 @@ For a project site, use `--site-url https://btfranklin.github.io` with
 
 ## Agent entry points
 
-The homepage offers a general prompt and separate setup and connection prompts.
-The general and setup prompts link to the [team setup index](../docs/setup/README.md).
-The setup card, agent guide, and `llms.txt` also link to that index. It owns
-configuration selection and the complete EC2, Lightsail, DigitalOcean, and
-existing-server paths. These Markdown guides are read from the source repository;
-they are not copied into the static website artifact.
-Their authored text lives in `website/prompts/`. The static build renders each
-prompt once into selectable text under a closed “Read the prompt” control.
-The shared copy control reads that text. A second general copy button fades in
-beside the header logo when the main button scrolls behind the header.
-Both buttons copy the same prompt. The main button stays in place.
-Without JavaScript, visitors can open and select each prompt or follow the guide link.
+The homepage offers general, setup, and connection prompts from
+`website/prompts/`. Each prompt renders once as selectable text under
+“Read the prompt”. The copy buttons use that same text. A header copy button
+appears when the main button scrolls out of view. Without JavaScript, visitors
+can select the prompt text or follow the guide link.
+
+The setup links lead to the [team setup index](../docs/setup/README.md).
+Its provider guides stay in the repository; the static build does not copy them.
 
 Shared setup selects a published GitHub release and uses its attached
 `release.json` for the matching source commit and immutable image digest.
@@ -59,14 +55,8 @@ with an admin key and an optional browser password. Use the
 keys, tunnel controls, receipts, and access recovery. The website does not issue
 keys or host a shared application instance.
 
-Publishing the site does not publish that repository, an application image,
-or a standalone CLI package. The [image guide](../docs/setup/image.md) explains
-how to select an official release or build and publish a custom image. Production setup still requires
-the team's provider access, DNS, registry, and backup choices.
-
-The resource index follows the [llms.txt proposal](https://llmstxt.org/), checked
-on September 25, 2026. It gives agents a useful entry point; it does not control
-crawlers or guarantee that an agent will discover it.
+Publishing the site does not publish an application image or CLI package.
+Production setup still needs provider access, DNS, an image, and backup choices.
 
 ## Build and preview
 
@@ -75,7 +65,7 @@ It needs no database, credentials, running service, or network connection.
 The output contains only HTML and public assets. Shared CSS, fonts, favicon,
 and page behavior are copied from their single sources under `static/`.
 These shared assets are tracked, so a fresh checkout can build without Node.
-Run `npm ci` and `npm run vendor` only when updating the shared vendor assets.
+Run `npm ci --ignore-scripts` and `npm run vendor` when updating vendor assets.
 The build records its output files and removes stale owned files on a rebuild.
 It refuses a nonempty output directory without that record, and refuses to
 overwrite a build directory that contains unrelated files.

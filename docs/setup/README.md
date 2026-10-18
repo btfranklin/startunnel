@@ -29,10 +29,10 @@ failure causes an outage until recovery.
 - **No domain:** use a fixed public IPv4 address. Read
   [Run without a domain](no-domain.md) before installation. This path needs
   an IP address certificate and additional certificate renewal configuration.
-  The page gives guidance; it is not a complete automated installation recipe.
+  The page describes required changes; it is not a tested installation recipe.
 
-Both choices work with the hosting options above. The website setup prompts
-send agents to this index so they can select the address path as well as the host.
+Both choices work with the hosting options above. Select the address path as
+well as the host.
 
 ## Follow the complete path
 

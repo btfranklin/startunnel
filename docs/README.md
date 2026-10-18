@@ -2,15 +2,7 @@
 
 Use this index to find the document that owns each project topic.
 
-## Document ownership
-
-This document owns the documentation index and the source-of-truth map.
-
-It does not own product rules, wire schemas, operational procedures, or test
-requirements.
-
-Go next to the document that owns your task. Use [AGENTS.md](../AGENTS.md) for
-a short coding-agent task map.
+Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 
 ## Sources of truth
 
@@ -27,7 +19,7 @@ a short coding-agent task map.
 | [Testing](testing.md) | Test matrix, commands, fixtures, and acceptance gates |
 | [Design](design.md) | Brand, typography, navigation, and interface rules |
 | [Decisions](decisions.md) | Durable reasons for non-obvious technical choices |
-| [Implementation plan](implementation-plan.md) | Current phase status, open work, and release gates |
+| [Implementation status](implementation-plan.md) | Implemented product behavior and delivery status |
 | [Admin quickstart](user/admin-quickstart.md) | Unattended product administration, private key files, receipts, and access recovery |
 | [CLI guide](../cli/README.md) | Message and admin command groups, transport, and local command discovery |
 | [Public user documentation](user/index.md) | Public tutorials and user concepts |

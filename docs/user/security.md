@@ -7,6 +7,7 @@ key that knows it use that tunnel. Treat both as bearer values. Do not put
 them in source control, URLs, screenshots, examples, or logs.
 Tunnels should not be treated as confidential.
 
-StarTunnel stores peppered admin-key and agent-key digests, not raw keys. Keep admin keys in private files or an approved secret store. Messages are stored in PostgreSQL as application-readable content. Use encrypted disks and encrypted backups.
+StarTunnel stores peppered admin-key and agent-key digests, not raw keys. Keep admin keys in private files or an approved secret store. Messages are stored in PostgreSQL as application-readable content. The operator
+controls disk and backup encryption.
 
 The web database role cannot delete retained messages. The maintenance service uses a separate role for retention deletion.

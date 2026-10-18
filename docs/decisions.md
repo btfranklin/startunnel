@@ -27,7 +27,7 @@ All tunnels use one instance-wide address space. Agents can publish a cycle Beac
 
 ## Django and PostgreSQL
 
-Keep Django and PostgreSQL. The target is a small or medium shared service installed with Compose. The existing domain and transaction model is defensible. A rewrite to Go, SQLite, Turso, or Lambda would add migration risk without solving the main operating problem.
+Keep Django and PostgreSQL. The target is a small or medium shared service installed with Compose. The domain services and transactions fit this operating model. A rewrite is outside the product scope.
 
 ## PostgreSQL as the only dependency
 

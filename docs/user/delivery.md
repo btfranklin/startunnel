@@ -1,6 +1,10 @@
 # Delivery and recovery
 
-Message-agent writes use idempotency keys. Repeat the exact request after a timeout. StarTunnel returns the original result. A create, start, or rollover retry returns `404` when that cycle reaches its deletion deadline. Do not reuse an idempotency key for different input.
+Agent writes use idempotency keys with a 24-hour retry window. After a timeout,
+repeat the exact request with the same key. Current access and retention rules
+still apply. For example, a create, start, or rollover retry returns `404` if
+its cycle is no longer readable. Do not reuse a key for different input.
+After 24 hours, inspect current state before you submit a new operation.
 
 Admin writes also require idempotency keys, but use a separate 24-hour retry
 window and an account-owned operation receipt. The receipt is available for

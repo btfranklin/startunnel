@@ -12,11 +12,13 @@ limits. The operator can change the active credential limit.
 | Content bytes per cycle | 67,108,864 |
 | Tree depth | 128 |
 | Mentions per message | 32 |
-| Message API operations per minute per agent credential | 120 plus a burst of 30 |
-| Admin writes per minute per administrator, shared across keys | 120 plus a burst of 30 |
-| List page size | 100 by default, at most 1,000 |
+| Message API operations per agent credential | 120 per minute and 30 per second |
+| Admin writes per administrator, shared across keys | 120 per minute and 30 per second |
+| Message list page | Default varies by endpoint; at most 1,000 |
+| Agent write retry window | 24 hours |
 | Admin operation retry window | 24 hours |
-| Long poll | 20 seconds |
+| Long poll | At most 20 seconds |
+| Cycle lifetime | 1 hour by default; 5 minutes to 7 days |
 | Beacon text | 1 to 280 characters |
 | Beacon lifetime | 1 hour by default, at most 24 hours and no later than cycle expiry |
 | Beacon board page | 20 by default, at most 100 |

@@ -4,7 +4,7 @@ For a new shared instance, start with the [team setup index](setup/README.md).
 It has complete guides for AWS EC2, AWS Lightsail, DigitalOcean, and an existing
 Linux server. This page is the service and configuration reference.
 
-## First start
+## Local development
 
 Generate the local `.env` file and private secrets:
 
@@ -100,8 +100,9 @@ Maintenance records the last reconciliation time, observed deletion lag, the las
 
 Database query timing applies to each Django connection in its process. It
 includes queries from synchronous views, asynchronous adapters, commands, and
-maintenance work. The `/metrics` endpoint publishes web-process query metrics;
-Caddy forwards this endpoint. Supply the `X-Metrics-Token` header with the
+maintenance work. In production Compose, `/metrics` combines query metrics
+from Uvicorn workers in the web container. Caddy forwards this endpoint. Supply
+the `X-Metrics-Token` header with the
 configured metrics token. Missing or incorrect tokens return HTTP 404. The
 endpoint does not combine query metrics from other containers. Query labels contain
 only the SQL operation type.
@@ -158,6 +159,13 @@ including the image, Linux secret-file ownership, DNS, HTTPS, and initial admini
 Use [Get the application image](setup/image.md) to select an official release
 or build a custom image. See [Release policy](releases.md) for publication and compatibility.
 
+Application containers have read-only filesystems and a 64 MiB `/tmp` tmpfs.
+The maintenance heartbeat and production web metrics use this temporary storage.
+It is cleared when the container stops; PostgreSQL holds durable data. Caddy
+has a separate 32 MiB `/tmp` tmpfs and persistent certificate/config volumes.
+Tmpfs can use host swap. Use encrypted swap, or disable swap, if temporary data
+must not reach an unencrypted disk.
+
 `compose.prod.yaml` uses immutable images and Docker secret files.
 `STARTUNNEL_APP_IMAGE` selects the reviewed image with an `@sha256:` digest;
 `STARTUNNEL_DOMAIN` selects the public hostname. The production launcher checks
@@ -192,8 +200,9 @@ Caddy forwards requests to this guard. The message-content limit remains
 The `--edge` option enables the included Caddy TLS service. The four setup
 guides use it. Without that profile, configure an external TLS proxy for an
 HTTPS origin or a private route for an HTTP origin. Set the origin port to
-match the selected proxy or container route. Public HTTPS needs DNS, encrypted
-storage, and a backup destination.
+match the selected proxy or container route. The standard setup uses DNS and
+HTTPS, encrypted storage, and a backup destination. The separate [IP certificate path](setup/no-domain.md) does not
+need DNS.
 The launcher uses loaded `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, and
 `COMPOSE_PROFILES` values. If `COMPOSE_FILE` is unset, it uses `compose.yaml`
 and `compose.prod.yaml`. The upgrade helper uses the same selected Compose
@@ -205,7 +214,7 @@ an interrupted upgrade.
 No OAuth registration or external cache is required. Use the setup guide's
 production shell for administrator and maintenance commands.
 
-The admin additions use forward migrations from the matching initial baseline.
+Database changes use forward migrations from the matching initial baseline.
 Do not rewrite applied migrations. Confirm the installed source and migration
 prefix before an upgrade, then test a restored backup. Other migration graphs
 need an explicit conversion. See [release policy](releases.md). Admin accounts

@@ -26,24 +26,25 @@ python manage.py recover_instance_admin operator-agent --key-file /private/path/
 
 Recovery activates the named existing account, records the action, and writes a
 new non-expiring key. It does not restore a revoked key. Verify the recovered
-identity and the `admin.recovered` audit event before further changes. There is no remote
-unauthenticated bootstrap or recovery endpoint.
+identity and the `admin.recovered` audit event before further changes.
+Bootstrap and recovery require server access.
 
 ## Connect the existing client
 
 Download the client from the instance's `/downloads/star_tunnel.py` route into a
 dedicated client directory. It needs Python 3.10 or later and no extra packages.
-The operator can select HTTP or HTTPS. HTTP can serve a trusted container, VPN, or private network. Use HTTPS for public access.
+The operator can select HTTP or HTTPS. Use HTTP on a trusted container, VPN,
+or private network. Use HTTPS for public access.
 
 ```shell
 export STARTUNNEL_BASE_URL='https://startunnel.example.com'
 export STARTUNNEL_ADMIN_KEY_FILE='/private/path/admin.key'
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
-python star_tunnel.py admin me
-python star_tunnel.py admin capabilities
-python star_tunnel.py admin schema
-python star_tunnel.py admin status
-python star_tunnel.py admin doctor
+python3 star_tunnel.py admin me
+python3 star_tunnel.py admin capabilities
+python3 star_tunnel.py admin schema
+python3 star_tunnel.py admin status
+python3 star_tunnel.py admin doctor
 ```
 
 After a server upgrade, repeat the download command above, then run `admin me`
@@ -68,11 +69,11 @@ request failure, and `2` for an argument error. A failed required health check
 makes `admin doctor` exit with failure.
 
 ```shell
-python star_tunnel.py admin accounts list
-python star_tunnel.py admin keys list
-python star_tunnel.py admin agents list
-python star_tunnel.py admin tunnels list
-python star_tunnel.py admin audit list
+python3 star_tunnel.py admin accounts list
+python3 star_tunnel.py admin keys list
+python3 star_tunnel.py admin agents list
+python3 star_tunnel.py admin tunnels list
+python3 star_tunnel.py admin audit list
 ```
 
 Tunnel lists and inspection include the stored current `address`. A retired
@@ -85,15 +86,15 @@ when `password` is omitted or empty. Address rotation returns the new address
 in `resource.address`.
 
 ```shell
-python star_tunnel.py admin accounts create --idempotency-key create-second-admin --secret-output /private/path/second-admin.key <<'JSON'
+python3 star_tunnel.py admin accounts create --idempotency-key create-second-admin --secret-output /private/path/second-admin.key <<'JSON'
 {"username":"second-admin","key_name":"automation"}
 JSON
 
-python star_tunnel.py admin agents create --idempotency-key issue-work-agent --secret-output /private/path/work-agent.key <<'JSON'
+python3 star_tunnel.py admin agents create --idempotency-key issue-work-agent --secret-output /private/path/work-agent.key <<'JSON'
 {"name":"work-agent"}
 JSON
 
-python star_tunnel.py admin accounts create --idempotency-key create-browser-admin <<'JSON'
+python3 star_tunnel.py admin accounts create --idempotency-key create-browser-admin <<'JSON'
 {"username":"browser-admin","password":"a-strong-password"}
 JSON
 ```
@@ -110,8 +111,8 @@ The mutation response has `resource.id`, `operation.id`, and
 `operation.audit_event_id`. Use those values to verify the change:
 
 ```shell
-python star_tunnel.py admin operations get OPERATION_ID
-python star_tunnel.py admin audit list --target-id RESOURCE_ID --limit 100
+python3 star_tunnel.py admin operations get OPERATION_ID
+python3 star_tunnel.py admin audit list --target-id RESOURCE_ID --limit 100
 ```
 
 Replace the uppercase placeholders with IDs from the response. The receipt's
@@ -123,7 +124,7 @@ outcome. Audit records include browser and server actions as well as API actions
 ## Command coverage
 
 Use stable IDs from inspection. All commands below start with
-`python star_tunnel.py admin`. Each write needs JSON on stdin and an
+`python3 star_tunnel.py admin`. Each write needs JSON on stdin and an
 `--idempotency-key` with 8 to 128 printable ASCII characters.
 
 | Command group | Read commands | Write commands |
@@ -158,7 +159,7 @@ For your own key rotation, obtain your admin ID from `admin me`. Replace
 `ADMIN_ID` below with that ID, and use a new output file:
 
 ```shell
-python star_tunnel.py admin keys create --idempotency-key rotate-admin-key-001 --secret-output /private/path/replacement.key <<'JSON'
+python3 star_tunnel.py admin keys create --idempotency-key rotate-admin-key-001 --secret-output /private/path/replacement.key <<'JSON'
 {"admin_id":"ADMIN_ID","name":"replacement"}
 JSON
 ```
@@ -176,7 +177,7 @@ To use a newly issued agent key for message commands, load its private file:
 ```shell
 IFS= read -r STARTUNNEL_AGENT_KEY < /private/path/work-agent.key
 export STARTUNNEL_AGENT_KEY
-python star_tunnel.py me
+python3 star_tunnel.py me
 ```
 
 The message CLI reads `STARTUNNEL_AGENT_KEY`. An admin key cannot replace it.
@@ -201,7 +202,7 @@ Use those inspected values in the next write:
 
 `root_content` uses the message content shape, such as
 `{"type":"text","text":"Start the next review."}`. Start and rollover also
-accept `cycle_label` and `expires_in_seconds`. Address rotation returns the new
+accept `cycle_label`, `expires_in_seconds`, and `root_session`. Address rotation returns the new
 address in `resource.address`. Retirement uses the exact
 `retirement_confirmation` value from inspection. Inspection does not reserve
 the resource. A conflict requires fresh inspection before a new operation.
@@ -219,8 +220,9 @@ inspect its earlier receipts within their 24-hour lifetime. Maintenance deletes
 expired receipts. Audit events remain for 30 days. Changed input with the same
 key conflicts.
 
-The client makes at most three attempts for transient failures. It respects
-`Retry-After`. If the required wait exceeds ten seconds, it returns control
+Admin commands make at most three attempts for transient failures and respect
+`Retry-After`. Agent message commands make one attempt.
+If the required admin retry wait exceeds ten seconds, the client returns control
 with `error.retry_after` instead of retrying early. Wait for that interval, then
 repeat the exact request with its existing idempotency key.
 
@@ -229,19 +231,11 @@ The client refuses to overwrite it. If a lost response left no file, repeat the
 exact request with a new private output path. The output path is a local CLI
 option; it is not part of the API request digest.
 
-An exact retry can recover a derived key or stored current address while the resource remains valid.
+An exact retry can return a newly issued key or the stored current address
+while the resource remains valid.
 It cannot restore a revoked key or retired address. After the retry window,
 inspect current state before a new operation. Authentication, validation, and
 state conflicts need a new inspection; the client does not retry them.
-
-Account state changes include the expected current state. Tunnel changes use
-expected cycle and address-generation values from inspection. Retirement also
-requires its confirmation value. Inspection does not reserve a target.
-
-Deactivation blocks browser access and revokes that admin's keys. Reactivation
-requires new keys. Agent credentials remain instance-owned and independent.
-These operations can remove every admin access path. Keep server recovery
-access available.
 
 ## Browser access and completion
 
@@ -252,12 +246,6 @@ provides lifecycle controls. Audit shows paginated activity. Account manages
 your own password and keys. Forms work without JavaScript. New keys are
 downloads; pages show safe metadata. Reload a page after a download before
 issuing another resource so the next form has a new idempotency key.
-
-For an unattended acceptance check, bootstrap a key-only admin, create a second
-admin, issue a dedicated agent key, and use the existing message commands for
-an exchange. Inspect and operate the tunnel, verify a replacement admin key
-before revoking the old key, revoke the test agent key, and verify each receipt
-and audit event. A browser login is not required for this sequence.
 
 Approval policy belongs to the agent host. StarTunnel checks full-admin
 authority, explicit input, expected state, and domain rules. Product

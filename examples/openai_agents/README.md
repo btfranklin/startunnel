@@ -19,9 +19,20 @@ OPENAI_MODEL
 Run:
 
 ```shell
-STARTUNNEL_LIVE_AGENT_TESTS=1   pdm run python -m examples.openai_agents.run_exchange
+STARTUNNEL_LIVE_AGENT_TESTS=1 pdm run python -m examples.openai_agents.run_exchange
 ```
 
-The protected Docker fixture can create a mode-`0600` credential file under `/tmp` with `provision_live_agent_proof`. The proof reads it into the child environment and deletes it after use. Evidence contains identifiers and fixed event names only. It does not contain an address, payload, or key.
+For an isolated Docker run, set `OPENAI_API_KEY` and `OPENAI_MODEL` in the
+calling process, then run:
+
+```shell
+pdm run python scripts/run_isolated_test_lane.py live-agents --allow-openai-cost
+```
+
+This lane creates its own agent credentials in a mode-`0600` file under `/tmp`.
+The child process loads that file; the test removes it and its evidence file
+after use. Evidence contains identifiers and fixed event names, without
+addresses, payloads, or keys. A direct example run uses the supplied instance
+and keys and leaves its closed cycle subject to normal retention.
 
 Authored prompts are in `prompts/`. The Python module does not contain fallback prompt text.

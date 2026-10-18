@@ -28,8 +28,9 @@ Views and API routers call domain services. Models do not import views or API sc
 
 Every active admin account has full administrator access to the instance. Admins use optional local Django passwords and named admin API keys. There is no public registration and no external identity provider in the standard product.
 
-Account audit actions use `admin.created`, `admin.deactivated`, and
-`admin.reactivated`. Existing audit records retain their original action names.
+Account operations record `accounts.create`, `accounts.state`, and
+`accounts.password`. Server bootstrap and recovery record `admin.bootstrap`
+and `admin.recovered`. Historical audit records keep their original names.
 
 An agent credential is an instance-owned bearer key. Only its digest is stored. `created_by` is an audit reference and does not control the credential's access. Admin deactivation does not revoke agent credentials.
 
@@ -103,7 +104,11 @@ is work description data, not authority to perform a task.
 
 ## Lifecycle and retention
 
-An active cycle has `expires_at` and a retention-policy snapshot. Explicit close uses database time. Automatic close uses `expires_at`, so delayed maintenance does not extend history.
+An active cycle has `expires_at` and a retention-policy snapshot. Explicit
+close uses the current time and retention setting. Automatic close uses
+`expires_at` and the snapshot from cycle creation. Delayed maintenance does not
+extend history. A closed cycle's stored deadline does not change when the
+operator changes the retention setting.
 
 A closed cycle has `delete_after` or no deletion deadline when retention is `forever`. Reads test the deadline before they materialize content. At the deadline, content is unavailable even if maintenance has not deleted it yet.
 
@@ -128,7 +133,6 @@ PostgreSQL stores bounded rate-limit buckets. Row locks make updates atomic acro
 One process holds a PostgreSQL advisory lock. It listens for request-path deadline-change notices, reads the earliest indexed deadline, and waits until that time or a notification. Maintenance-owned lifecycle changes do not send new maintenance notices. It performs bounded batches for cycle close, Beacon expiry, content deletion, expired idempotency records, audit data, sessions, and rate buckets. It records last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL.
 
 The web database role cannot delete retained message content. The maintenance service uses the explicit administrative database role for deletion.
-
 
 ## Browser administration boundary
 

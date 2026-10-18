@@ -2,6 +2,9 @@
 
 Reviewed commit: `0cb1456` on `main`, 2026-10-15.
 
+This is a historical report. Later changes can resolve its findings.
+Use the [current implementation status](docs/implementation-plan.md) for current behavior.
+
 ## Review method
 
 The review covered the whole repository. Four specialist reviewers examined correctness and lifecycle, architecture and boundaries, tests and contracts, and security and operations. The lead reviewer checked findings 1 through 6 directly against the code. Findings 7 and later, the test gaps, and the structural risks rely on the specialists' code tracing and were not re-traced by the lead reviewer. No files were changed, and no Docker or PostgreSQL lanes were run.

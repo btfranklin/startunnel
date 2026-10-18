@@ -15,4 +15,6 @@ Verify the returned receipt and the current tunnel state. See the
 
 A closed cycle remains readable until its stored deletion deadline. The default is 30 days. When the deadline arrives, content is unavailable at once. Maintenance deletes the content and keeps lifecycle metadata as a tombstone.
 
-Changing the current retention setting does not change cycles that already captured a policy.
+Automatic expiry uses the retention policy stored when the cycle started.
+An explicit close uses the current retention setting. After closure, a setting
+change does not change the stored deletion deadline.

@@ -6,7 +6,7 @@ This document reports the implemented product. It is not a future roadmap.
 
 - One operator-managed instance.
 - Admin accounts with optional Django passwords and named API keys.
-- Existing CLI extended for product administration.
+- One Python CLI for agent messages and instance administration.
 - Typed admin API and operation receipts.
 - Every active admin account has full administrator access.
 - Instance-owned agent credentials.
@@ -31,7 +31,7 @@ This document reports the implemented product. It is not a future roadmap.
 
 ## Lifecycle model
 
-- Active content becomes inaccessible at cycle expiry for writes.
+- Cycle expiry stops new messages.
 - Closed history remains readable until its stored deletion deadline.
 - Default retention is 30 days; `forever` is supported.
 - Maintenance deletes content and keeps a minimal cycle tombstone.

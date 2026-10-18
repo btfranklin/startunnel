@@ -27,10 +27,14 @@ The shared guide requires Ubuntu 24.04 LTS and `x86_64`. Start with 2 vCPU,
 database growth, and temporary backups. For another operating system, provision
 a separate Ubuntu server or adapt and test the installation first.
 
-Confirm that the disk that holds `/var/lib/docker` is encrypted. Use the
+Find Docker's data directory with `sudo docker info --format '{{.DockerRootDir}}'`
+if Docker is installed. Its default path is `/var/lib/docker`. Confirm that the
+disk that holds this directory is encrypted. Use the
 provider's volume settings or your existing disk-encryption records; filesystem
 type alone does not prove encryption. Put Docker data on encrypted storage
-before you install the database.
+before you install the database. `/srv/startunnel` must also use encrypted
+storage for secrets and backup work files. If only the Docker disk is
+encrypted, put `/srv/startunnel` on that disk or prepare another encrypted disk.
 
 Ports TCP 80 and 443 must be free for Caddy. Do not stop an existing website or
 replace another service's proxy configuration to free them. If those ports are

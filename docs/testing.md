@@ -29,9 +29,6 @@ focused link check. Documentation tests parse CLI examples with the actual
 command-line parser and compare documented CLI environment names with the
 client source.
 
-Documentation checks validate links, heading anchors, routes, example includes,
-and CLI syntax. They do not require fixed prose or specific sentences.
-
 ## Documentation structure
 
 Install the published [Perfect Doc native executable](https://github.com/btfranklin/perfect-doc/releases/tag/v0.1.0)
@@ -151,7 +148,7 @@ reloader. The lane removes its stacks and volumes. It uses only internal
 clients. The report is in `artifacts/resource-measurement-*.json`.
 
 1. Warm the stack for two minutes.
-2. Measure idle CPU and wakeups for ten minutes.
+2. Measure idle CPU and recorded activity counters for ten minutes.
 3. Record cgroup CPU at the measurement boundaries, low-frequency memory,
    health-probe executions, database transactions, and available maintenance
    counters.

@@ -123,7 +123,7 @@ umask 077
 The printed commit must match `source_commit` in `release.json` or the custom
 image build record. Stop if it does not.
 This checkout supplies Compose files, PostgreSQL scripts, and the Caddy file.
-Keep it at the matching commit for the life of this deployment.
+Update the checkout and image together for each release.
 The checkout uses normal source permissions so PostgreSQL and Caddy can read
 their mounted scripts and configuration. Only private runtime files use mode
 `0600`. Do not apply mode `0600` to the whole source checkout.
@@ -183,10 +183,12 @@ The revision label must match the recorded source commit. If a supplied image
 has no label, obtain its build record before you proceed. The generator creates
 independent secret files. It refuses to replace existing files. Do not
 regenerate secrets for a running instance.
-The generator uses URL-safe base64 for the three application secrets. You can
-provide another format: each value must contain at least 32 printable,
-single-line ASCII characters, and the three values must be different. Base64 is
-not required. See [security](../security.md#production-application-secrets).
+The generator creates a Django secret key, three application secrets, and two
+database passwords. The Django secret key needs at least 50 characters. The
+API key pepper, idempotency secret, and metrics token each need at least 32
+printable ASCII characters on one line; these three values must differ.
+URL-safe base64 is not required. See
+[security](../security.md#production-application-secrets).
 
 The default application image runs with UID `10001`. On Linux, Compose mounts
 these files with their host ownership. The ownership step lets the application

@@ -6,8 +6,6 @@ and tunnels belong to that instance.
 
 > Tunnels should not be treated as confidential. Any active agent that has an address can use that tunnel.
 
-For administration without a browser, use the [admin quickstart](/docs/admin-quickstart/).
-
 Start with the [agent quickstart](/docs/agent-quickstart/) or the [guided tutorial](/docs/tutorial/).
 
 Need an instance for your team? Use the
@@ -26,4 +24,4 @@ to select AWS EC2, AWS Lightsail, DigitalOcean, or an existing Linux server.
 - [Examples](/docs/examples/)
 - [Local development](/docs/local-development/)
 
-The complete interactive API reference is available at `/api/docs` on a running instance.
+Use the [interactive API reference](/api/docs/) for request and response schemas.

@@ -2,7 +2,7 @@
 
 The message API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. Cursors have no time expiry. Current access and content retention rules still apply. StarTunnel never puts an address in a URL.
 
-Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership selectors are invalid.
+Request schemas reject unknown fields.
 
 ## Routes
 
@@ -80,7 +80,12 @@ the same label. A changed label conflicts with the stored idempotency key.
 
 ## Write idempotency
 
-Tunnel creation, replies, close, start, rollover, Beacon publication, and Beacon withdrawal require `Idempotency-Key`. Use 8 to 128 printable ASCII characters. Repeating the exact request returns the original result while its cycle history is available. A create, start, or rollover retry returns `404` when that cycle reaches its deletion deadline. Reusing a key with changed input returns a conflict.
+Tunnel creation, replies, close, start, rollover, Beacon publication, and Beacon
+withdrawal require `Idempotency-Key`. Use 8 to 128 printable ASCII characters.
+Retry the exact request with the same key within 24 hours. Current access and
+retention rules still apply. A create, start, or rollover retry returns `404`
+if its cycle is no longer readable. Changed input with the same key conflicts.
+After 24 hours, inspect current state before you submit a new operation.
 
 ## Activity waits
 

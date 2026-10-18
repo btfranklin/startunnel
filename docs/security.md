@@ -14,7 +14,7 @@ Admin accounts use optional Django passwords and named `sta_` API keys. Each
 active account has full instance authority. There is no self-sign-up. The CLI,
 admin API, and browser call the same domain services.
 
-Admin credentials store only peppered digests, display prefixes, and lifecycle
+Admin credential rows store peppered digests, display prefixes, and lifecycle
 metadata. Keys authenticate only to admin endpoints. Ordinary `st_` keys cannot
 use those endpoints. Deactivating an account revokes its admin keys and blocks
 browser access. Reactivation requires new admin keys.
@@ -35,6 +35,9 @@ deletes expired receipts in bounded batches. Audit events have a separate
 A receipt row lock covers one owner and idempotency key. Independent admin
 writes can run at the same time.
 A revoked credential or retired address cannot be restored by replay.
+During the retry window, a receipt and the idempotency secret can reproduce a
+key issued by an admin operation while that key remains available. The
+credential row does not store the raw key.
 
 Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
 Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
@@ -45,7 +48,10 @@ product controls, API, or domain commands to change instance data.
 
 ## Agent credentials
 
-A key starts with `st_`. Creation returns it through a private file or browser download. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
+A key starts with `st_`. Creation returns it through a private file or browser
+download. Its credential row stores a peppered digest. Credentials do not
+expire by default. Administrators can revoke them at any time. Deactivating
+the issuing admin does not revoke agent credentials.
 
 Do not put agent keys in Git, images, fixtures, examples, URLs, or logs.
 The release scan checks candidate source files, the current security reports,
@@ -86,8 +92,9 @@ the board has no anonymous access and does not cross instance boundaries.
 
 Withdrawal or expiry removes the Beacon from discovery. It does not revoke an
 address that an agent already obtained. Address rotation invalidates the old
-address; retirement keeps its existing meaning. Revocation stops a credential's
-future API access. It does not remove content or Beacons that it already wrote.
+address. Retirement blocks all address access and future cycles. Revocation
+stops a credential's future API access. It does not remove content or Beacons
+that it already wrote.
 An active administrator can withdraw a Beacon.
 
 Treat Beacon text as untrusted work description data. It does not authorize an
@@ -99,7 +106,12 @@ The web role can perform normal application writes but cannot delete retained me
 
 ## Retention
 
-Closed content becomes unreadable at `delete_after`, independent of worker timing. Maintenance deletes the content in a bounded batch and keeps a minimal tombstone. The default policy is 30 days. `forever` disables content deletion for newly closed cycles.
+Closed content becomes unreadable at `delete_after`, regardless of worker
+timing. Maintenance deletes content in bounded batches and keeps a minimal
+tombstone. The default retention is 30 days. `forever` disables content deletion
+for cycles that capture that policy. Automatic expiry uses the policy from
+cycle creation; explicit close uses the current setting. Closed deadlines do
+not change.
 
 Forward migrations add admin credentials, operation receipts, and audit
 attribution to the matching initial baseline. Accounts, passwords, credentials,
@@ -139,65 +151,3 @@ system, and load gates for source
 `581349f578602798411b7a115c7581d05faf14f6`. Its deployment record identifies the
 tested image digest. This evidence applies to that candidate; later changes
 need their own validation. Publication does not deploy an installed instance.
-The assessments below are dated history, not current release blockers.
-
-## Dependency audit: 2026-10-08
-
-The release candidate audit on 2026-10-08 also found `CVE-2026-101918` and
-`CVE-2026-102275` in PyJWT 2.14.0, an optional live-agent dependency. The lockfile
-now selects the patched PyJWT 2.15.1 release. This dependency update does not
-resolve the separate image vulnerability below. Debian's tracker still listed
-that issue as unfixed when checked on 2026-10-08.
-
-## Alpine runtime migration: 2026-10-08
-
-The application now uses the official Python 3.14.8 Alpine 3.23 image, pinned
-by registry digest. The build updates Alpine packages and requires
-`zlib>=1.3.2-r1`, the version Alpine identifies as fixing `CVE-2026-85091` in its
-[security database](https://secdb.alpinelinux.org/v3.23/main.json). This replaces
-the Debian runtime described in the historical assessment below; no vulnerability
-exclusion or custom zlib build is used.
-
-Production dependencies have Python 3.14 amd64 musl wheels. Browser and other
-test-helper images retain a separate Debian base because Playwright requires
-glibc. Application services in those stacks run Alpine. Release readiness still
-requires the complete security, system, and load proof on the candidate digest;
-availability of patched packages alone does not establish that evidence.
-
-The current image gate uses checksummed Trivy 0.75.0 for CycloneDX inventory and
-SARIF vulnerability reports. It scans the exact candidate digest, blocks high and
-critical findings including unfixed vulnerabilities, and needs no Docker Hub
-account. The Docker Scout findings below remain historical evidence.
-
-## Image vulnerability assessment: 2026-09-25
-
-The Python 3.14.7 image pin was updated to the official `slim-trixie` digest
-`sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d`.
-A runtime build without cache contains the fixed Debian packages:
-
-| Package | Installed version |
-|---|---|
-| `libc6` | `2.41-12+deb13u4` |
-| `libpcre2-8-0` | `10.46-1~deb13u2` |
-| `libsqlite3-0` | `3.46.1-7+deb13u2` |
-
-Docker Scout no longer reports the six high or critical findings for those
-packages. The remaining high finding is `CVE-2026-85091`, against
-`zlib1g` version `1:1.3.dfsg+really1.3.1-1+b1`. The scan is recorded in
-`artifacts/security/20260926T015309Z/image-vulnerabilities.sarif`.
-
-The CVE description gives an affected range of zlib 1.3.1.2 through 1.3.2.
-That range is not sufficient evidence to exclude our 1.3.1 package.
-[Debian bug 1146895, message 36](https://bugs.debian.org/1146895#36)
-reports reproduction in older versions after an ordinary write failure and
-explicitly includes the trixie source package. The
-[upstream fix](https://github.com/madler/zlib/commit/df84af25dc1942490e1d1c899a07619152a46148)
-resets stale input-buffer state after a failed write. The
-[Debian tracker](https://security-tracker.debian.org/tracker/CVE-2026-85091)
-still marks the package as vulnerable and has no fixed package version.
-
-The application source has no direct `gzwrite` or `gzprintf` call. This does
-not prove that the image is unaffected, and application-level exploitability
-has not been established. At the time of this assessment, the release gate was blocked. No CVE exclusion,
-VEX override, or custom zlib build was used for this assessment. The Alpine
-runtime migration above supersedes waiting for an official Debian fix.

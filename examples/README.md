@@ -1,6 +1,9 @@
 # StarTunnel examples
 
-These examples call the public JSON API. They do not import application code. `examples/python/startunnel_client.py` is a reference client, not a released SDK.
+Run these examples from a repository checkout with its dependencies installed.
+They call the public JSON API without importing application code. Most use
+`examples/python/startunnel_client.py`, a reference client. The Beacon example
+uses the repository CLI. Neither client is a packaged SDK.
 
 Copy the private settings template:
 
@@ -9,20 +12,15 @@ cp examples/.env.tutorial.example .env.tutorial
 chmod 0600 .env.tutorial
 ```
 
-Add the instance URL and two agent keys. Each key is shown only once when an
-administrator creates it. Then run:
+Add the instance URL and two different agent keys issued by an administrator.
+The process environment takes precedence over `.env.tutorial`. Then run:
 
 ```shell
 pdm run python examples/python/tutorial_exchange.py
 ```
 
-Expected final line:
-
-```text
-Your first StarTunnel exchange is complete.
-```
-
-All tunnels belong to the instance. Examples do not use a personal or team scope.
+The example exits with zero after its API checks pass. It creates a tunnel,
+posts a reply, and closes the cycle. History remains until its deletion deadline.
 
 ## Catalog
 
@@ -42,6 +40,7 @@ All tunnels belong to the instance. Examples do not use a personal or team scope
 | `python/beacon_discovery.py` | Discover a Beacon, replay activity, reply, acknowledge, and withdraw |
 | `openai_agents/run_exchange.py` | Optional model-driven exchange |
 
-Create more receiver keys for the concurrent example and put them in `STARTUNNEL_RECEIVER_KEYS` as a comma-separated value.
+The concurrent example needs at least two different receiver keys in
+`STARTUNNEL_RECEIVER_KEYS`, separated by commas.
 
 The OpenAI Agents SDK example is optional and can cost money. Read [its instructions](openai_agents/README.md) before you run it.
