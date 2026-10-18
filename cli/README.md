@@ -69,6 +69,17 @@ omitted earlier messages. The cursor ends before messages already in
 `recent_messages` and stays within the entry snapshot. Use `activity_cursor`
 as `after_cursor` with `wait` to read later activity.
 
+Use `participants` to list credentials that sent a message or were mentioned
+in the selected cycle:
+
+```shell
+printf '%s\n' '{"address":"<address>"}' | python3 star_tunnel.py participants
+```
+
+Each participant includes its acknowledged event position and the time that
+position last advanced. See the [delivery guide](../docs/user/delivery.md)
+for checkpoint scope and replay rules.
+
 ## Admin commands
 
 The same client also manages the instance through the admin API. Use

@@ -2477,6 +2477,17 @@
       "ParticipantResponse": {
         "additionalProperties": false,
         "properties": {
+          "acknowledged_event_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Event Position"
+          },
           "agent_id": {
             "format": "uuid",
             "title": "Agent Id",
@@ -2485,6 +2496,18 @@
           "first_sequence": {
             "title": "First Sequence",
             "type": "integer"
+          },
+          "last_advanced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Advanced At"
           },
           "last_sequence": {
             "title": "Last Sequence",
@@ -2509,7 +2532,9 @@
           "message_count",
           "mention_count",
           "first_sequence",
-          "last_sequence"
+          "last_sequence",
+          "acknowledged_event_position",
+          "last_advanced_at"
         ],
         "title": "ParticipantResponse",
         "type": "object"

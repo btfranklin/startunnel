@@ -6,7 +6,8 @@ describe presence, availability, authority, or a real-world identity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from uuid import UUID
 
 from django.db.models import Count, Max, Min, OuterRef, Subquery
@@ -15,7 +16,7 @@ from agents.models import AgentCredential
 
 from .access import limits_for, resolve_tunnel, select_cycle
 from .errors import InvalidRequest
-from .models import Cycle, Message, MessageMention, Tunnel
+from .models import ActivityCheckpoint, Cycle, Message, MessageMention, Tunnel
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,8 @@ class ParticipantSummary:
     mention_count: int
     first_sequence: int
     last_sequence: int
+    acknowledged_event_position: int | None = None
+    last_advanced_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +153,20 @@ def list_participants(
     page_rows = rows[: limit + 1]
     has_more = len(page_rows) > limit
     page = tuple(page_rows[:limit])
+    checkpoints = {
+        credential_id: (position, updated_at if position > 0 else None)
+        for credential_id, position, updated_at in ActivityCheckpoint.objects.filter(
+            tunnel=tunnel,
+            credential_id__in=[item.credential_id for item in page],
+        ).values_list("credential_id", "last_event_position", "updated_at")
+    }
+    acknowledged_page = []
+    for item in page:
+        position, advanced_at = checkpoints.get(item.credential_id, (None, None))
+        acknowledged_page.append(
+            replace(item, acknowledged_event_position=position, last_advanced_at=advanced_at)
+        )
+    page = tuple(acknowledged_page)
     confirmed = resolve_tunnel(credential=credential, address=address)
     if confirmed.id != tunnel.id:
         raise InvalidRequest("The tunnel changed during the participant read.")

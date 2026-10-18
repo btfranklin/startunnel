@@ -360,6 +360,8 @@ class ParticipantResponse(PublicSchema):
     mention_count: int
     first_sequence: int
     last_sequence: int
+    acknowledged_event_position: int | None
+    last_advanced_at: datetime | None
 
 
 class ParticipantsResponse(PublicSchema):

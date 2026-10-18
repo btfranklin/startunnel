@@ -6,10 +6,14 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
-from tunnels.errors import CycleUnavailable, InvalidRequest
+from tunnels.activity import commit_checkpoint, read_activity_once
+from tunnels.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
+from tunnels.models import ActivityCheckpoint
 from tunnels.participants import list_participants
-from tunnels.services import create_tunnel, post_reply
+from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_operator
 
 pytestmark = pytest.mark.django_db
 
@@ -87,7 +91,93 @@ def test_participants_merge_sends_and_mentions_with_immutable_name_snapshots(
     assert by_id[observer.id].name_snapshot == "Observer after mention"
     assert by_id[observer.id].first_sequence == worker_message.sequence
     assert by_id[observer.id].last_sequence == 3
+    assert by_id[coordinator.id].acknowledged_event_position is None
+    assert by_id[coordinator.id].last_advanced_at is None
+    assert by_id[worker.id].acknowledged_event_position is None
+    assert by_id[observer.id].acknowledged_event_position is None
     assert page.complete is True
+
+
+def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
+    credential_factory: Any,
+    user_factory: Any,
+) -> None:
+    coordinator, _ = credential_factory(name="Checkpoint coordinator")
+    reader, _ = credential_factory(name="Checkpoint reader")
+    operator = user_factory()
+    created = _create(coordinator, key="participant-checkpoint-create")
+    _reply(reader, created, created.root, key="participant-checkpoint-first-reply")
+
+    def reader_summary(cycle_id: Any) -> Any:
+        page = list_participants(
+            credential=coordinator,
+            address=created.address,
+            cycle_id=cycle_id,
+        )
+        return next(item for item in page.participants if item.credential_id == reader.id)
+
+    assert reader_summary(created.cycle.id).acknowledged_event_position is None
+
+    filtered = read_activity_once(
+        credential=reader,
+        address=created.address,
+        event_types=("cycle_started",),
+    )
+    assert not ActivityCheckpoint.objects.filter(tunnel=created.tunnel, credential=reader).exists()
+    assert reader_summary(created.cycle.id).acknowledged_event_position is None
+    assert filtered.high_water_position == 3
+
+    _, advanced = commit_checkpoint(credential=reader, address=created.address, position=0)
+    assert not advanced
+    zero_summary = reader_summary(created.cycle.id)
+    assert zero_summary.acknowledged_event_position == 0
+    assert zero_summary.last_advanced_at is None
+
+    checkpoint, advanced = commit_checkpoint(
+        credential=reader,
+        address=created.address,
+        position=filtered.high_water_position,
+    )
+    assert advanced
+    checkpoint.refresh_from_db()
+    advanced_at = checkpoint.updated_at
+    advanced_summary = reader_summary(created.cycle.id)
+    assert advanced_summary.acknowledged_event_position == 3
+    assert advanced_summary.last_advanced_at == advanced_at
+
+    unchanged, advanced = commit_checkpoint(
+        credential=reader,
+        address=created.address,
+        position=filtered.high_water_position,
+    )
+    assert not advanced
+    unchanged.refresh_from_db()
+    assert unchanged.updated_at == advanced_at
+    assert reader_summary(created.cycle.id).last_advanced_at == advanced_at
+    with pytest.raises(CheckpointRegression):
+        commit_checkpoint(credential=reader, address=created.address, position=2)
+
+    close_cycle(
+        credential=coordinator,
+        idempotency_key="participant-checkpoint-close",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    replacement = start_cycle_as_operator(
+        actor=operator,
+        tunnel_id=created.tunnel.id,
+        expected_address_generation=1,
+        root_content={"type": "text", "text": "Continue the same work."},
+    )
+    _reply(
+        reader,
+        created,
+        replacement.root,
+        key="participant-checkpoint-next-cycle-reply",
+    )
+    across_cycles = reader_summary(replacement.cycle.id)
+    assert across_cycles.acknowledged_event_position == 3
+    assert across_cycles.last_advanced_at == advanced_at
 
 
 def test_participant_pages_keep_one_snapshot_during_later_messages(
@@ -128,6 +218,28 @@ def test_participant_pages_keep_one_snapshot_during_later_messages(
     assert [item.credential_id for item in second_page.participants] == [second.id]
     assert later.id not in {item.credential_id for item in second_page.participants}
     assert second_page.complete is True
+
+
+def test_participant_checkpoint_metadata_uses_one_bounded_query(
+    credential_factory: Any,
+) -> None:
+    coordinator, _ = credential_factory(name="Checkpoint query coordinator")
+    first, _ = credential_factory(name="Checkpoint query first")
+    second, _ = credential_factory(name="Checkpoint query second")
+    created = _create(coordinator, key="participant-checkpoint-query-create")
+    _reply(first, created, created.root, key="participant-checkpoint-query-first")
+    _reply(second, created, created.root, key="participant-checkpoint-query-second")
+
+    with CaptureQueriesContext(connection) as queries:
+        page = list_participants(credential=coordinator, address=created.address)
+
+    checkpoint_reads = [
+        query
+        for query in queries
+        if "SELECT" in query["sql"].upper() and "ACTIVITYCHECKPOINT" in query["sql"].upper()
+    ]
+    assert len(page.participants) == 3
+    assert len(checkpoint_reads) == 1
 
 
 @pytest.mark.parametrize(

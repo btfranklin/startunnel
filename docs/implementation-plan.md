@@ -12,6 +12,7 @@ This document reports the implemented product. It is not a future roadmap.
 - Instance-owned agent credentials.
 - One instance-wide tunnel namespace.
 - Agent entry reads return one bounded snapshot of the current tunnel state.
+- Participant summaries show each credential's tunnel checkpoint position and last advancement time.
 - No teams, memberships, invitations, billing, or external identity provider.
 
 ## Runtime model

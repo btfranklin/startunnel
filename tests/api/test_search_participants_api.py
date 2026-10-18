@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.test import Client
 
+from core.cursors import encode_cursor
 from tunnels.search import SearchHit, SearchPage
 from tunnels.services import create_tunnel, post_reply
 
@@ -146,6 +147,8 @@ def test_participant_route_pages_one_fixed_snapshot(
     assert first.status_code == 200, first.content
     first_body = first.json()
     assert len(first_body["participants"]) == 2
+    assert all(item["acknowledged_event_position"] is None for item in first_body["participants"])
+    assert all(item["last_advanced_at"] is None for item in first_body["participants"])
     assert first_body["next_page_cursor"]
     assert first_body["complete"] is False
 
@@ -172,3 +175,87 @@ def test_participant_route_pages_one_fixed_snapshot(
     second_ids = {item["agent_id"] for item in second.json()["participants"]}
     assert str(later.id) not in second_ids
     assert second.json()["complete"] is True
+
+
+def test_participant_route_reports_explicit_checkpoint_state(
+    client: Client,
+    credential_factory: Any,
+) -> None:
+    coordinator, coordinator_key = credential_factory(name="Acknowledgement coordinator")
+    reader, reader_key = credential_factory(name="Acknowledgement reader")
+    passive, _ = credential_factory(name="Passive reader")
+    created = create_tunnel(
+        credential=coordinator,
+        idempotency_key="participants-checkpoint-create",
+        root_content={"type": "text", "text": "Record acknowledgement."},
+    )
+    post_reply(
+        credential=reader,
+        idempotency_key="participants-checkpoint-reply",
+        address=created.address,
+        parent_id=created.root.id,
+        content={"type": "text", "text": "I will inspect the result."},
+    )
+
+    def list_page() -> dict[str, Any]:
+        response = _post(
+            client,
+            "/api/v1/participants",
+            {"address": created.address},
+            key=coordinator_key,
+        )
+        assert response.status_code == 200, response.content
+        items = {item["agent_id"]: item for item in response.json()["participants"]}
+        assert str(passive.id) not in items
+        return cast(dict[str, Any], items[str(reader.id)])
+
+    before = list_page()
+    assert before["acknowledged_event_position"] is None
+    assert before["last_advanced_at"] is None
+
+    activity = _post(
+        client,
+        "/api/v1/activity",
+        {"address": created.address, "event_types": ["cycle_started"]},
+        key=reader_key,
+    )
+    assert activity.status_code == 200, activity.content
+    assert activity.json()["events"]
+    assert list_page()["acknowledged_event_position"] is None
+
+    zero = _post(
+        client,
+        "/api/v1/activity/checkpoint",
+        {
+            "address": created.address,
+            "cursor": encode_cursor("activity", tunnel_id=str(created.tunnel.id), position=0),
+        },
+        key=reader_key,
+    )
+    assert zero.status_code == 200, zero.content
+    assert zero.json()["advanced"] is False
+    zero_summary = list_page()
+    assert zero_summary["acknowledged_event_position"] == 0
+    assert zero_summary["last_advanced_at"] is None
+
+    commit = _post(
+        client,
+        "/api/v1/activity/checkpoint",
+        {"address": created.address, "cursor": activity.json()["next_cursor"]},
+        key=reader_key,
+    )
+    assert commit.status_code == 200, commit.content
+    assert commit.json()["advanced"] is True
+    advanced_summary = list_page()
+    assert advanced_summary["acknowledged_event_position"] == commit.json()["position"]
+    assert advanced_summary["last_advanced_at"] == commit.json()["updated_at"]
+
+    repeated = _post(
+        client,
+        "/api/v1/activity/checkpoint",
+        {"address": created.address, "cursor": activity.json()["next_cursor"]},
+        key=reader_key,
+    )
+    assert repeated.status_code == 200, repeated.content
+    assert repeated.json()["advanced"] is False
+    assert list_page()["last_advanced_at"] == advanced_summary["last_advanced_at"]

@@ -1347,6 +1347,8 @@ def _participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[st
                 "mention_count": item.mention_count,
                 "first_sequence": item.first_sequence,
                 "last_sequence": item.last_sequence,
+                "acknowledged_event_position": item.acknowledged_event_position,
+                "last_advanced_at": item.last_advanced_at,
             }
             for item in page.participants
         ],

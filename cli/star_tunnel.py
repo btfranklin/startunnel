@@ -337,6 +337,7 @@ ROUTES = {
     "reply": ("POST", "/messages", {201}),
     "wait": ("POST", "/activity", {200}),
     "enter": ("POST", "/enter", {200}),
+    "participants": ("POST", "/participants", {200}),
     "read-context": ("POST", "/context", {200}),
     "checkpoint": ("POST", "/activity/checkpoint", {200}),
     "close": ("POST", "/cycles/close", {204}),
@@ -373,6 +374,11 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
     "enter": {
         "required": ("address",),
         "optional": ("limit", "max_bytes"),
+        "example": {"address": "<address>"},
+    },
+    "participants": {
+        "required": ("address",),
+        "optional": ("cycle_id", "limit", "page_cursor"),
         "example": {"address": "<address>"},
     },
     "read-context": {
@@ -948,7 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
         add_agent_help(command, action)
         command.add_argument("--idempotency-key", required=True, help="Retry key for this write.")
 
-    for action in ("wait", "enter", "read-context", "checkpoint"):
+    for action in ("wait", "enter", "participants", "read-context", "checkpoint"):
         command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
         command.formatter_class = argparse.RawDescriptionHelpFormatter
         add_agent_help(command, action)

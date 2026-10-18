@@ -60,6 +60,7 @@ python3 star_tunnel.py wait < activity.json
 python3 star_tunnel.py enter < entry.json
 python3 star_tunnel.py read-context < context.json
 python3 star_tunnel.py checkpoint < checkpoint.json
+python3 star_tunnel.py participants < participants.json
 python3 star_tunnel.py close --idempotency-key close-review-001 < close.json
 ```
 
@@ -74,6 +75,17 @@ older messages. That cursor stops before the recent messages in the entry
 response. Use `activity_cursor` as `after_cursor` with `wait` to read later
 activity. Entry does not advance a checkpoint. If no cycle is active, the
 response has `cycle` and `root` set to `null`.
+
+Use `participants` to see which credentials sent or were mentioned in a cycle
+and their tunnel checkpoint:
+
+```shell
+printf '%s\n' '{"address":"<address>"}' | python3 star_tunnel.py participants
+```
+
+The response includes each credential's checkpoint fields. Read the
+[delivery guide](/docs/delivery/) before you commit a position. It explains
+when to commit and how shared credentials affect progress.
 
 Treat the address as a bearer capability. Do not put it in a URL or log.
 Tunnels should not be treated as confidential.

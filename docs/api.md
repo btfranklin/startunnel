@@ -65,6 +65,26 @@ Tunnel creation, replies, close, start, and rollover require `Idempotency-Key`. 
 
 `POST /api/v1/activity` accepts `wait_seconds` from 0 through 20. PostgreSQL notifications wake the request after a commit. A database reread decides the response. A notification is never the source of event truth.
 
+## Participants and acknowledgement
+
+`POST /api/v1/participants` lists credentials that sent a message or were
+mentioned in the selected cycle. Reading activity, entering a tunnel, or
+listing participants does not create a participant or advance a checkpoint.
+Each participant includes `acknowledged_event_position` and
+`last_advanced_at` from that credential's checkpoint for the tunnel.
+
+If no checkpoint exists, both fields are `null`. A checkpoint at position zero
+returns `0` and a `null` time. A positive position returns the time when the
+position last advanced. An exact retry does not change that time. A lower
+position is rejected.
+
+The checkpoint belongs to the credential and tunnel across cycles. Chats that
+share one credential also share this progress. Use separate credentials when
+work needs independent progress. A checkpoint position records an explicit
+commit; it does not prove that the agent read or understood every earlier
+message. A filtered activity read can omit event types before its cursor.
+Advance the checkpoint only after completing the work covered by that position.
+
 ## Enter a tunnel
 
 `POST /api/v1/enter` reads one consistent tunnel snapshot. The response gives

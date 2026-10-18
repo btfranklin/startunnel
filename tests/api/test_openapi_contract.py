@@ -20,6 +20,7 @@ def test_live_openapi_is_valid_and_has_tree_routes() -> None:
     required = {
         "/api/v1/me": {"get"},
         "/api/v1/enter": {"post"},
+        "/api/v1/participants": {"post"},
         "/api/v1/tunnels": {"post"},
         "/api/v1/messages": {"post"},
         "/api/v1/tree": {"post"},
@@ -111,6 +112,18 @@ def test_tree_content_is_a_discriminated_text_or_json_union() -> None:
             {"$ref": "#/components/schemas/TextContent"},
             {"$ref": "#/components/schemas/JsonContent"},
         ]
+
+
+def test_participant_acknowledgement_fields_are_nullable() -> None:
+    participant = _schema()["components"]["schemas"]["ParticipantResponse"]["properties"]
+    assert participant["acknowledged_event_position"]["anyOf"] == [
+        {"type": "integer"},
+        {"type": "null"},
+    ]
+    assert participant["last_advanced_at"]["anyOf"] == [
+        {"format": "date-time", "type": "string"},
+        {"type": "null"},
+    ]
 
 
 def test_create_requires_nested_cycle_and_root_and_reply_requires_parent() -> None:

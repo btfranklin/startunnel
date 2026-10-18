@@ -156,6 +156,14 @@ def run_cli(
             {"status": "active", "recent_messages": []},
         ),
         (
+            "participants",
+            [],
+            {"address": "glyphs", "limit": 100},
+            "/participants",
+            200,
+            {"participants": [], "complete": True},
+        ),
+        (
             "read-context",
             [],
             {"address": "glyphs", "focus_message_id": "focus", "max_items": 10},
@@ -544,6 +552,7 @@ def test_agent_help_fields_and_examples_match_generated_openapi() -> None:
         "reply",
         "wait",
         "enter",
+        "participants",
         "read-context",
         "checkpoint",
         "close",
