@@ -43,9 +43,8 @@ Do not paste the recovery key. Keep this recipient file outside Git.
 ## 2. Install the backup command
 
 The command below makes an online PostgreSQL dump while `web` and
-`maintenance` stay available. It also checks a restore in a temporary database
-on the same PostgreSQL server. This check uses additional disk space and
-database capacity.
+`maintenance` stay available. It records a dump checksum and saves an encrypted
+archive. Routine backup creation does not restore a database.
 
 In the server's root shell, create the command:
 
@@ -66,22 +65,21 @@ output="$backup_root/$(date -u +%Y%m%dT%H%M%SZ).tar.age"
 trap 'rm -rf -- "$work"' EXIT
 test ! -e "$output"
 scripts/backup-startunnel.sh "$work/database.backup"
-scripts/verify-startunnel-restore.sh "$work/database.backup"
 git rev-parse HEAD > "$work/source-commit"
 cp /opt/startunnel/production.env "$work/production.env"
 tar -C "$work" -cf - database.backup source-commit production.env \
   -C /srv/startunnel secrets |
   age -R /srv/startunnel/backup-recipients.txt > "$output.partial"
 mv "$output.partial" "$output"
-printf 'Verified encrypted backup: %s\n' "$output"
+printf 'Created encrypted backup: %s\n' "$output"
 SCRIPT
 chmod 700 /usr/local/sbin/startunnel-backup
 /usr/local/sbin/startunnel-backup
 ```
 
-Expect a successful restore check and an encrypted backup path. Record that
-path. A `.partial` file is not a completed backup. If the command fails, correct
-the failure before retrying.
+Expect a completed encrypted backup path. Record that path. A `.partial` file
+is not a completed backup. If the command fails, correct the failure before
+retrying.
 Do not rotate secrets or update the application while a backup is running.
 
 ## 3. Copy it outside the server and test decryption
@@ -122,7 +120,8 @@ workstation's storage must be encrypted while it holds decrypted data.
 
 ## 4. Set the backup schedule
 
-After the first full check succeeds, install a daily schedule on the server.
+After the first backup and decryption check succeed, install a daily schedule
+on the server.
 This example uses 03:15 in the server's time zone; check `timedatectl` and select
 a time that suits the team:
 
@@ -147,8 +146,26 @@ backup automatic until that transfer is configured and checked.
 
 Start with seven daily and four weekly copies, adjusted to the team's data
 policy and available storage. Remove only dated archives that have a verified
-copy outside the server. Check disk space daily. Repeat the restore check
-after updates, and test full replacement-server recovery periodically.
+copy outside the server. Check disk space daily.
+
+## 5. Run restore drills separately
+
+Test a restore after initial setup, at least once a month, and after database
+changes. Use a separate recovery server when possible. Restore drills use
+additional disk space and database capacity; they do not run in the nightly
+backup command.
+
+Decrypt a recent off-server archive as in step 3. On the recovery server, use
+the matching checkout and its Compose settings, then run:
+
+```shell
+scripts/verify-startunnel-restore.sh /absolute/path/restore-check/database.backup
+```
+
+The command restores into a temporary database and removes that database after
+the check. Record the backup timestamp and the result. Also test the full
+replacement-server recovery below. Keep the restore check required before a
+destructive application upgrade; see [maintenance](maintain.md).
 
 ## Recover on a replacement server
 
