@@ -36,7 +36,6 @@ from .access import (
 )
 from .codec import (
     canonical_address,
-    derive_token,
     display_address,
     encode_token,
 )
@@ -243,45 +242,6 @@ def _content_digest(payload: ValidatedPayload) -> bytes:
     return hashlib.sha256(f"{payload.payload_type}\x00{body}".encode()).digest()
 
 
-def _address_token(*, record: IdempotencyRecord, credential: AgentCredential) -> bytes:
-    nonce = bytes(record.derivation_nonce or b"")
-    if len(nonce) != 32:
-        raise TunnelUnavailable()
-    return derive_token(
-        credential_id=str(credential.id),
-        operation="create_tunnel",
-        idempotency_record_id=str(record.id),
-        idempotency_key_digest=bytes(record.key_digest),
-        derivation_nonce=nonce,
-    )
-
-
-def _allocate_address(
-    *,
-    tunnel: Tunnel,
-    credential: AgentCredential,
-    idempotency_record: IdempotencyRecord,
-) -> str:
-    for _attempt in range(ADDRESS_ALLOCATION_ATTEMPTS):
-        idempotency_record.derivation_nonce = secrets.token_bytes(32)
-        token = _address_token(
-            record=idempotency_record,
-            credential=credential,
-        )
-        address = encode_token(token)
-        try:
-            with transaction.atomic():
-                TunnelAddress.objects.create(
-                    tunnel=tunnel,
-                    address=address,
-                )
-        except IntegrityError:
-            continue
-        idempotency_record.save(update_fields=["derivation_nonce"])
-        return address
-    raise InvalidRequest("StarTunnel could not allocate an address. Try the request again.")
-
-
 def _allocate_random_address(*, tunnel: Tunnel, generation: int) -> tuple[TunnelAddress, str]:
     """Allocate one random current address inside the locked tunnel transaction."""
 
@@ -406,12 +366,15 @@ def create_tunnel(
             raise TunnelUnavailable()
         if not cycle_is_readable(cycle):
             raise CycleUnavailable()
-        address = encode_token(
-            _address_token(
-                record=idempotency.record,
-                credential=credential,
-            )
-        )
+        address_row = TunnelAddress.objects.filter(
+            tunnel=tunnel,
+            generation=1,
+            state=TunnelAddress.State.CURRENT,
+            tunnel__state__in=[Tunnel.State.ACTIVE, Tunnel.State.DORMANT],
+        ).first()
+        if address_row is None:
+            raise TunnelUnavailable()
+        address = address_row.address
         response = idempotency.record.response
         tunnel_state = response.get("tunnel_state")
         cycle_state = response.get("cycle_state")
@@ -465,11 +428,7 @@ def create_tunnel(
         next_cycle_number=2,
         next_event_position=3,
     )
-    address = _allocate_address(
-        tunnel=tunnel,
-        credential=credential,
-        idempotency_record=idempotency.record,
-    )
+    _address_row, address = _allocate_random_address(tunnel=tunnel, generation=1)
     cycle = Cycle.objects.create(
         tunnel=tunnel,
         creator=credential,
@@ -1778,7 +1737,7 @@ def retirement_confirmation(tunnel: Tunnel) -> str:
 
 
 def _rotate_locked_address(
-    *, tunnel: Tunnel, actor: User, expected_address_generation: int, new_address: str | None = None
+    *, tunnel: Tunnel, actor: User, expected_address_generation: int
 ) -> RotatedAddress:
     if tunnel.state == Tunnel.State.RETIRED:
         raise LifecycleConflict()
@@ -1791,15 +1750,7 @@ def _rotate_locked_address(
     current.retirement_reason = "operator_rotation"
     current.save(update_fields=["state", "retired_at", "retirement_reason"])
     generation = current.generation + 1
-    if new_address is None:
-        _row, address = _allocate_random_address(tunnel=tunnel, generation=generation)
-    else:
-        address = new_address
-        TunnelAddress.objects.create(
-            tunnel=tunnel,
-            generation=generation,
-            address=canonical_address(address),
-        )
+    _row, address = _allocate_random_address(tunnel=tunnel, generation=generation)
     event_position = tunnel.next_event_position
     tunnel.next_event_position = event_position + 1
     tunnel.save(update_fields=["next_event_position"])
@@ -1831,14 +1782,12 @@ def rotate_address_as_operator(
     actor: User,
     tunnel_id: UUID,
     expected_address_generation: int,
-    new_address: str | None = None,
 ) -> RotatedAddress:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _rotate_locked_address(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,
-        new_address=new_address,
     )
 
 

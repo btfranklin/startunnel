@@ -214,7 +214,7 @@ The client refuses to overwrite it. If a lost response left no file, repeat the
 exact request with a new private output path. The output path is a local CLI
 option; it is not part of the API request digest.
 
-An exact retry can recover a derived secret while the resource remains valid.
+An exact retry can recover a derived key or stored current address while the resource remains valid.
 It cannot restore a revoked key or retired address. After the retry window,
 inspect current state before a new operation. Authentication, validation, and
 state conflicts need a new inspection; the client does not retry them.

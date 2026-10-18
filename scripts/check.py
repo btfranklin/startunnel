@@ -68,7 +68,6 @@ GATES = [
                 "check-only-secret-that-is-long-enough-and-never-used-outside-this-process"
             ),
             "STARTUNNEL_API_KEY_PEPPER": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-            "STARTUNNEL_ADDRESS_DERIVATION_SECRET": ("AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"),
             "STARTUNNEL_IDEMPOTENCY_SECRET": ("BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ"),
             "STARTUNNEL_METRICS_TOKEN": "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
             "DATABASE_URL": "postgresql://check:check@localhost/check",

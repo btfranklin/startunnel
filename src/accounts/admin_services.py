@@ -25,7 +25,6 @@ from core.audit import admin_audit_context, record_event
 from core.limits import provider
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
-from tunnels.codec import canonical_address, encode_token
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
 from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress
@@ -299,8 +298,6 @@ def _derived_secret(receipt: AdminOperation, kind: str) -> str:
         b"admin-secret:" + kind.encode() + receipt.id.bytes + bytes(receipt.derivation_nonce),
         "sha256",
     )
-    if kind == "address":
-        return encode_token(raw[:16])
     return ("sta_" if kind == "admin_key" else "st_") + base64.urlsafe_b64encode(
         raw
     ).decode().rstrip("=")
@@ -311,21 +308,25 @@ def _replay(receipt: AdminOperation) -> dict[str, Any]:
     if receipt.secret_kind:
         if receipt.secret_resource_id is None:
             raise LifecycleConflict("The operation resource is not available.")
-        secret = _derived_secret(receipt, receipt.secret_kind)
+        secret = ""
         available = False
         if receipt.secret_kind == "admin_key":
+            secret = _derived_secret(receipt, receipt.secret_kind)
             row = AdminCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = row is not None and key_resource(row)["available"]
         elif receipt.secret_kind == "agent_key":
+            secret = _derived_secret(receipt, receipt.secret_kind)
             agent_row = AgentCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = agent_row is not None and agent_row.is_available
         elif receipt.secret_kind == "address":
-            available = TunnelAddress.objects.filter(
+            address_row = TunnelAddress.objects.filter(
                 pk=receipt.secret_resource_id,
                 state=TunnelAddress.State.CURRENT,
                 tunnel__state__in=["active", "dormant"],
-                address=canonical_address(secret),
-            ).exists()
+            ).first()
+            if address_row is not None:
+                secret = address_row.address
+                available = True
         if not available:
             raise LifecycleConflict(
                 "This operation secret is no longer available. Inspect the resource."
@@ -571,7 +572,6 @@ def _perform(
         rotated = rotate_address_as_operator(
             **common,
             expected_address_generation=int(data["expected_address_generation"]),
-            new_address=_derived_secret(receipt, "address"),
         )
         row = TunnelAddress.objects.get(tunnel_id=tunnel_id, generation=rotated.generation)
         receipt.secret_kind = "address"

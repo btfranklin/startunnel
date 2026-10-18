@@ -96,9 +96,6 @@ def main() -> int:
         "STARTUNNEL_ENV": current.get("STARTUNNEL_ENV", "development"),
         "STARTUNNEL_SECRET_KEY": current.get("STARTUNNEL_SECRET_KEY", secrets.token_urlsafe(64)),
         "STARTUNNEL_API_KEY_PEPPER": current.get("STARTUNNEL_API_KEY_PEPPER", random_urlsafe()),
-        "STARTUNNEL_ADDRESS_DERIVATION_SECRET": current.get(
-            "STARTUNNEL_ADDRESS_DERIVATION_SECRET", random_urlsafe()
-        ),
         "STARTUNNEL_IDEMPOTENCY_SECRET": current.get(
             "STARTUNNEL_IDEMPOTENCY_SECRET", random_urlsafe()
         ),
@@ -131,7 +128,6 @@ def main() -> int:
             {
                 "STARTUNNEL_SECRET_KEY": secrets.token_urlsafe(64),
                 "STARTUNNEL_API_KEY_PEPPER": random_urlsafe(),
-                "STARTUNNEL_ADDRESS_DERIVATION_SECRET": random_urlsafe(),
                 "STARTUNNEL_IDEMPOTENCY_SECRET": random_urlsafe(),
                 "STARTUNNEL_METRICS_TOKEN": random_urlsafe(),
             }

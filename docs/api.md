@@ -156,8 +156,8 @@ It works without credentials or a connection. OpenAPI defines types and constrai
 All mutations require `Idempotency-Key`. Receipts are scoped to the admin account,
 so a replacement key can inspect prior work. The exact retry window is 24 hours.
 Changed input with the same key conflicts. After the window, inspect state before
-issuing a new operation. Exact retries can recover nonce-derived keys and rotated
-addresses without plaintext storage. Replays check current authority and resource
+issuing a new operation. Exact retries can recover derived keys and the stored
+current rotated address. Replays check current authority and resource
 state; revoked keys and retired addresses cannot be restored.
 
 Successful mutations return safe state, target references, and an audit receipt.

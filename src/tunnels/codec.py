@@ -6,8 +6,6 @@ import base64
 import hashlib
 import hmac
 
-from django.conf import settings
-
 GLYPH_START = 0x1F700
 GLYPH_END = 0x1F73F
 GLYPH_ALPHABET = tuple(chr(codepoint) for codepoint in range(GLYPH_START, GLYPH_END + 1))
@@ -69,26 +67,3 @@ def display_address(address: str) -> str:
 def address_transcription(address: str) -> str:
     canonical = canonical_address(address)
     return " ".join(f"U+{ord(glyph):05X}" for glyph in canonical)
-
-
-def derive_token(
-    *,
-    credential_id: str,
-    operation: str,
-    idempotency_record_id: str,
-    idempotency_key_digest: bytes,
-    derivation_nonce: bytes,
-) -> bytes:
-    if len(derivation_nonce) != 32:
-        raise ValueError("An address derivation nonce must contain 32 bytes.")
-    material = "\x1f".join(
-        [
-            "startunnel-address",
-            credential_id,
-            operation,
-            idempotency_record_id,
-            idempotency_key_digest.hex(),
-            derivation_nonce.hex(),
-        ]
-    ).encode()
-    return hmac.digest(settings.ADDRESS_DERIVATION_SECRET.encode(), material, "sha256")[:TOKEN_SIZE]

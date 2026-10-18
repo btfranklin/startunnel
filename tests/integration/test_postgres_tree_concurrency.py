@@ -17,7 +17,7 @@ from agents.models import AgentCredential
 from core.limits import Limits
 from tunnels.codec import parse_address
 from tunnels.context import get_context
-from tunnels.errors import CycleClosed, QuotaExceeded
+from tunnels.errors import CycleClosed, InvalidRequest, QuotaExceeded
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 from tunnels.services import (
     PostedReply,
@@ -260,6 +260,39 @@ def test_address_rotation_retries_one_database_collision(
     addresses = list(TunnelAddress.objects.filter(tunnel=created.tunnel).order_by("generation"))
     assert [address.state for address in addresses] == ["retired", "current"]
     assert [row.address for row in addresses] == [created.address, rotated.address]
+
+
+def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential, _ = credential_factory(name="Create collision owner")
+    first = create_tunnel(
+        credential=credential,
+        idempotency_key="create-collision-seed",
+        root_content={"type": "text", "text": "Seed address."},
+    )
+    colliding_token = parse_address(first.address)
+    fresh_token = b"\xfe" * 16
+    generated_tokens = iter((colliding_token, fresh_token))
+    monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: next(generated_tokens))
+    second = create_tunnel(
+        credential=credential,
+        idempotency_key="create-collision-retry",
+        root_content={"type": "text", "text": "Retry address."},
+    )
+    assert second.address != first.address
+    assert second.tunnel.addresses.get().address == second.address
+
+    monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: colliding_token)
+    with pytest.raises(InvalidRequest, match="could not allocate"):
+        create_tunnel(
+            credential=credential,
+            idempotency_key="create-collision-exhausted",
+            root_content={"type": "text", "text": "No available address."},
+        )
+    assert Tunnel.objects.count() == 2
+    assert credential.idempotency_records.count() == 2
 
 
 def test_concurrent_exact_idempotency_retry_creates_one_reply(

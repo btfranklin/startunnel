@@ -16,7 +16,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
       STARTUNNEL_ALLOWED_HOSTS: ${STARTUNNEL_DOMAIN:?Set STARTUNNEL_DOMAIN}
@@ -28,7 +27,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
       - postgres_admin_password
@@ -41,7 +39,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
       STARTUNNEL_ALLOWED_HOSTS: ${STARTUNNEL_DOMAIN:?Set STARTUNNEL_DOMAIN}
@@ -54,7 +51,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
       - postgres_runtime_password
@@ -68,7 +64,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
       STARTUNNEL_ALLOWED_HOSTS: ${STARTUNNEL_DOMAIN:?Set STARTUNNEL_DOMAIN}
@@ -80,7 +75,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
       - postgres_admin_password
@@ -124,8 +118,6 @@ secrets:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_secret_key
   startunnel_api_key_pepper:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_api_key_pepper
-  startunnel_address_derivation_secret:
-    file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_address_derivation_secret
   startunnel_idempotency_secret:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_idempotency_secret
   startunnel_metrics_token:

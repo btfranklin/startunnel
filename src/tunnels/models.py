@@ -299,7 +299,6 @@ class IdempotencyRecord(models.Model):
     request_digest = models.BinaryField(max_length=32)
     response = models.JSONField(default=dict)
     resource_id = models.UUIDField(null=True, blank=True)
-    derivation_nonce = models.BinaryField(max_length=32, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(db_index=True)
 

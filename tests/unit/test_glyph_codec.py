@@ -4,7 +4,6 @@ import json
 import unicodedata
 
 import pytest
-from django.test import override_settings
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -14,7 +13,6 @@ from tunnels.codec import (
     InvalidAddress,
     address_transcription,
     canonical_address,
-    derive_token,
     display_address,
     encode_token,
     parse_address,
@@ -137,33 +135,3 @@ def test_extra_non_whitespace_data_is_rejected(extra: str) -> None:
 def test_token_must_have_exactly_128_bits() -> None:
     with pytest.raises(ValueError, match="16 bytes"):
         encode_token(b"too short")
-
-
-def test_derivation_uses_its_configured_secret() -> None:
-    def derive() -> bytes:
-        return derive_token(
-            credential_id="00000000-0000-0000-0000-000000000001",
-            operation="create_tunnel",
-            idempotency_record_id="00000000-0000-0000-0000-000000000002",
-            idempotency_key_digest=bytes(range(32)),
-            derivation_nonce=bytes(range(32, 64)),
-        )
-
-    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-a"):
-        derived_a = derive()
-    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-b"):
-        assert derive() != derived_a
-    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-a"):
-        assert derive() == derived_a
-
-
-@pytest.mark.parametrize("nonce", [b"", b"short", bytes(31), bytes(33)])
-def test_derivation_rejects_a_nonce_that_is_not_32_bytes(nonce: bytes) -> None:
-    with pytest.raises(ValueError, match="32 bytes"):
-        derive_token(
-            credential_id="00000000-0000-0000-0000-000000000001",
-            operation="create_tunnel",
-            idempotency_record_id="00000000-0000-0000-0000-000000000002",
-            idempotency_key_digest=bytes(32),
-            derivation_nonce=nonce,
-        )

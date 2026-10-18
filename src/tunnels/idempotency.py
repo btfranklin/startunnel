@@ -1,4 +1,4 @@
-"""Durable request idempotency without stored bearer addresses."""
+"""Durable request idempotency with exact request fingerprints."""
 
 from __future__ import annotations
 

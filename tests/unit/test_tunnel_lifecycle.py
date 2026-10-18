@@ -68,7 +68,6 @@ def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
     assert first.tunnel.addresses.get().address == first.address
     record = creator.idempotency_records.get()
     assert first.address not in str(record.response)
-    assert len(bytes(record.derivation_nonce)) == 32
 
     with pytest.raises(IdempotencyConflict):
         create_tunnel(

@@ -31,7 +31,6 @@ CRITICAL_TARGETS = (
             "canonical_address",
             "display_address",
             "address_transcription",
-            "derive_token",
         ),
     ),
     CriticalTarget(
