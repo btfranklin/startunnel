@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from django.db import IntegrityError
@@ -11,7 +12,7 @@ from django.utils import timezone
 
 from tunnels.errors import CycleClosed, IdempotencyConflict, InvalidRequest, TunnelUnavailable
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
-from tunnels.services import close_cycle, create_tunnel, post_reply, read_tree
+from tunnels.services import _resolve_mentions, close_cycle, create_tunnel, post_reply, read_tree
 
 pytestmark = pytest.mark.django_db
 
@@ -379,3 +380,31 @@ def test_lifecycle_rechecks_replay_after_initial_miss(
         ).count()
         == 1
     )
+
+
+def test_all_mentions_are_resolved_in_one_query(
+    credential_factory: Any, django_assert_num_queries: Any
+) -> None:
+    credentials = [credential_factory(name=f"Mention {index}")[0] for index in range(32)]
+    ids = [credential.id for credential in reversed(credentials)]
+    with django_assert_num_queries(1):
+        mentions = _resolve_mentions(mention_ids=ids, maximum=32)
+    assert [mention.id for mention in mentions] == sorted(ids)
+    assert {mention.name for mention in mentions} == {credential.name for credential in credentials}
+
+
+@pytest.mark.parametrize("unavailable", ["revoked_at", "suspended_at", "expires_at", "missing"])
+def test_mention_batch_rejects_any_unavailable_credential(
+    unavailable: str, credential_factory: Any, django_assert_num_queries: Any
+) -> None:
+    available, _ = credential_factory()
+    other, _ = credential_factory()
+    missing_id = uuid4()
+    if unavailable != "missing":
+        setattr(other, unavailable, timezone.now() - timedelta(seconds=1))
+        other.save(update_fields=[unavailable])
+    with django_assert_num_queries(1), pytest.raises(InvalidRequest, match="not available"):
+        _resolve_mentions(
+            mention_ids=[available.id, missing_id if unavailable == "missing" else other.id],
+            maximum=32,
+        )

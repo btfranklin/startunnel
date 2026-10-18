@@ -286,9 +286,8 @@ def _resolve_mentions(*, mention_ids: list[UUID], maximum: int) -> list[AgentCre
     _validate_mention_ids(mention_ids, maximum=maximum)
     if not mention_ids:
         return []
-    query = AgentCredential.objects.filter(id__in=mention_ids)
-    rows = list(query.order_by("id"))
-    if len(rows) != len(mention_ids) or any(not credential_is_active(row) for row in rows):
+    rows = list(AgentCredential.objects.available().filter(id__in=mention_ids).order_by("id"))
+    if len(rows) != len(mention_ids):
         raise InvalidRequest("One mentioned agent is not available.")
     return rows
 
