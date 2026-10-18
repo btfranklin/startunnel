@@ -13,13 +13,15 @@ printf 'Paste the StarTunnel URL: '
 IFS= read -r STARTUNNEL_BASE_URL
 export STARTUNNEL_BASE_URL
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+python3 star_tunnel.py install
+export PATH="$HOME/.local/bin:$PATH"
 printf 'Paste the sender key: '
 IFS= read -r -s STARTUNNEL_SENDER_KEY
 printf '\nPaste the receiver key: '
 IFS= read -r -s STARTUNNEL_RECEIVER_KEY
 printf '\n'
 export STARTUNNEL_SENDER_KEY STARTUNNEL_RECEIVER_KEY
-python3 star_tunnel.py tutorial
+startunnel tutorial
 ```
 
 The URL must include the scheme and host port. The client reads these three

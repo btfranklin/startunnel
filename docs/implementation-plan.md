@@ -57,10 +57,11 @@ retained exact-commit evidence without rebuilding. Generated release summaries
 are optional; reviewed deployment notes remain authoritative.
 See [operations](operations.md#production) for deployment.
 
-The agent client is a downloadable Python script. There is no standalone
-package-manager release or automatic update check. After a server upgrade,
-users download the matching script from the running instance. Release notes
-and the upgrade helper state this separate team action. See
+The agent client is a standalone Python script. Linux and macOS users can
+install it as `startunnel` on `PATH`. There is no package-manager release or
+automatic update check. After a server upgrade, users download and install
+the matching script from the instance. This work is unreleased after v0.1.0.
+See
 [the client guide](../cli/README.md#update-the-client).
 
 The [Beacon example](../examples/python/beacon_discovery.py) uses the actual

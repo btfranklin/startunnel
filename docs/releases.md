@@ -5,6 +5,10 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
+Changes after v0.1.0 are recorded in [unreleased notes](../releases/UNRELEASED.md).
+Do not describe these changes as part of the published v0.1.0 client. Before
+the next release, include the completed notes in its versioned release guide.
+
 ## Versions and supported databases
 
 Use `vMAJOR.MINOR.PATCH` tags. Patch releases contain compatible fixes; minor

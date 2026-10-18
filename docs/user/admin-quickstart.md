@@ -40,14 +40,16 @@ or private network. Use HTTPS for public access.
 export STARTUNNEL_BASE_URL='https://startunnel.example.com'
 export STARTUNNEL_ADMIN_KEY_FILE='/private/path/admin.key'
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
-python3 star_tunnel.py admin me
-python3 star_tunnel.py admin capabilities
-python3 star_tunnel.py admin schema
-python3 star_tunnel.py admin status
-python3 star_tunnel.py admin doctor
+python3 star_tunnel.py install
+export PATH="$HOME/.local/bin:$PATH"
+startunnel admin me
+startunnel admin capabilities
+startunnel admin schema
+startunnel admin status
+startunnel admin doctor
 ```
 
-After a server upgrade, repeat the download command above, then run `admin me`
+After a server upgrade, repeat the download and installation above, then run `admin me`
 and `admin doctor` again. The server does not update your local script. Keep
 your existing key.
 
@@ -69,11 +71,11 @@ request failure, and `2` for an argument error. A failed required health check
 makes `admin doctor` exit with failure.
 
 ```shell
-python3 star_tunnel.py admin accounts list
-python3 star_tunnel.py admin keys list
-python3 star_tunnel.py admin agents list
-python3 star_tunnel.py admin tunnels list
-python3 star_tunnel.py admin audit list
+startunnel admin accounts list
+startunnel admin keys list
+startunnel admin agents list
+startunnel admin tunnels list
+startunnel admin audit list
 ```
 
 Tunnel lists and inspection include the stored current `address`. A retired
@@ -86,15 +88,15 @@ when `password` is omitted or empty. Address rotation returns the new address
 in `resource.address`.
 
 ```shell
-python3 star_tunnel.py admin accounts create --idempotency-key create-second-admin --secret-output /private/path/second-admin.key <<'JSON'
+startunnel admin accounts create --idempotency-key create-second-admin --secret-output /private/path/second-admin.key <<'JSON'
 {"username":"second-admin","key_name":"automation"}
 JSON
 
-python3 star_tunnel.py admin agents create --idempotency-key issue-work-agent --secret-output /private/path/work-agent.key <<'JSON'
+startunnel admin agents create --idempotency-key issue-work-agent --secret-output /private/path/work-agent.key <<'JSON'
 {"name":"work-agent"}
 JSON
 
-python3 star_tunnel.py admin accounts create --idempotency-key create-browser-admin <<'JSON'
+startunnel admin accounts create --idempotency-key create-browser-admin <<'JSON'
 {"username":"browser-admin","password":"a-strong-password"}
 JSON
 ```
@@ -111,8 +113,8 @@ The mutation response has `resource.id`, `operation.id`, and
 `operation.audit_event_id`. Use those values to verify the change:
 
 ```shell
-python3 star_tunnel.py admin operations get OPERATION_ID
-python3 star_tunnel.py admin audit list --target-id RESOURCE_ID --limit 100
+startunnel admin operations get OPERATION_ID
+startunnel admin audit list --target-id RESOURCE_ID --limit 100
 ```
 
 Replace the uppercase placeholders with IDs from the response. The receipt's
@@ -124,7 +126,7 @@ outcome. Audit records include browser and server actions as well as API actions
 ## Command coverage
 
 Use stable IDs from inspection. All commands below start with
-`python3 star_tunnel.py admin`. Each write needs JSON on stdin and an
+`startunnel admin`. Each write needs JSON on stdin and an
 `--idempotency-key` with 8 to 128 printable ASCII characters.
 
 | Command group | Read commands | Write commands |
@@ -159,7 +161,7 @@ For your own key rotation, obtain your admin ID from `admin me`. Replace
 `ADMIN_ID` below with that ID, and use a new output file:
 
 ```shell
-python3 star_tunnel.py admin keys create --idempotency-key rotate-admin-key-001 --secret-output /private/path/replacement.key <<'JSON'
+startunnel admin keys create --idempotency-key rotate-admin-key-001 --secret-output /private/path/replacement.key <<'JSON'
 {"admin_id":"ADMIN_ID","name":"replacement"}
 JSON
 ```
@@ -177,7 +179,7 @@ To use a newly issued agent key for message commands, load its private file:
 ```shell
 IFS= read -r STARTUNNEL_AGENT_KEY < /private/path/work-agent.key
 export STARTUNNEL_AGENT_KEY
-python3 star_tunnel.py me
+startunnel me
 ```
 
 The message CLI reads `STARTUNNEL_AGENT_KEY`. An admin key cannot replace it.

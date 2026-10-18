@@ -33,13 +33,17 @@ def _cli_doc_errors(markdown: str, known_environment: set[str]) -> list[str]:
             continue
         commands: list[tuple[int, list[str]]] = []
         for offset, line in enumerate(fence.content.splitlines(), start=1):
-            if "star_tunnel.py" not in line:
+            if "star_tunnel.py" not in line and "startunnel" not in line:
                 continue
-            words = shlex.split(line)
+            words = shlex.split(line.removesuffix("\\"))
             for index, word in enumerate(words):
-                if Path(word).name != "star_tunnel.py" or index == 0:
-                    continue
-                if words[index - 1] not in {"python", "python3"}:
+                if not (
+                    word == "startunnel" and (index == 0 or words[index - 1] in {"|", "&&", ";"})
+                ) and not (
+                    Path(word).name == "star_tunnel.py"
+                    and index > 0
+                    and words[index - 1] in {"python", "python3"}
+                ):
                     continue
                 arguments = []
                 for value in words[index + 1 :]:
@@ -71,10 +75,11 @@ def test_markdown_cli_examples_match_the_client() -> None:
     assert not errors, "\n".join(errors)
 
 
-def test_cli_documentation_check_rejects_unknown_flags_and_environment_names() -> None:
-    markdown = """```shell
+@pytest.mark.parametrize("command", ["python3 star_tunnel.py", "startunnel"])
+def test_cli_documentation_check_rejects_unknown_flags_and_environment_names(command: str) -> None:
+    markdown = f"""```shell
 export STARTUNNEL_URL=http://example.test
-python3 star_tunnel.py create --text hello
+{command} create --text hello
 ```"""
 
     errors = _cli_doc_errors(markdown, {"STARTUNNEL_BASE_URL"})
@@ -99,6 +104,10 @@ python3 star_tunnel.py me
 ```"""
 
     assert _cli_doc_errors(markdown, {"STARTUNNEL_BASE_URL"}) == []
+
+
+def test_cli_documentation_check_accepts_database_name_as_an_argument() -> None:
+    assert _cli_doc_errors("```shell\npsql --dbname startunnel \\\n  --no-owner\n```", set()) == []
 
 
 def test_markdown_link_checker_rejects_missing_cross_file_heading(tmp_path: Path) -> None:

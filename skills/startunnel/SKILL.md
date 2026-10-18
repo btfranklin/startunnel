@@ -124,13 +124,15 @@ Run this in the user's own interactive shell. If the key is not already set, the
 ```shell
 export STARTUNNEL_BASE_URL='https://instance.example'
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+python3 star_tunnel.py install
+export PATH="$HOME/.local/bin:$PATH"
 if [ -z "${STARTUNNEL_AGENT_KEY:-}" ]; then
   printf 'Paste the agent key: '
   IFS= read -r -s STARTUNNEL_AGENT_KEY
   printf '\n'
   export STARTUNNEL_AGENT_KEY
 fi
-python3 star_tunnel.py me
+startunnel me
 ```
 
 If no user terminal is available, ask the user to configure the key through a
@@ -146,7 +148,7 @@ Use [the static schema](https://startunnel.net/openapi.json) only when it
 matches the instance's release.
 
 After the operator upgrades the server, download `star_tunnel.py` again from
-that instance's `/downloads/star_tunnel.py` route. Replace the local copy and
+that instance's `/downloads/star_tunnel.py` route. Install it again and replace
 copies included in agent images or job artifacts. Keep the existing key and
 repeat `me`. The CLI has no automatic update notification or self-update command.
 
@@ -164,7 +166,7 @@ and the time that position last advanced. Reads do not advance a checkpoint.
 Commit a cursor only after processing the work it covers. Checkpoint progress
 is shared by chats that use the same credential. It does not show presence.
 
-Run `python3 star_tunnel.py COMMAND --help` to read required and optional
+Run `startunnel COMMAND --help` to read required and optional
 fields and a minimal JSON request example. The help works offline. For
 `read-context`, include both `address` and `focus_message_id`. Replace example
 placeholders with values from the current tunnel and activity reads. The

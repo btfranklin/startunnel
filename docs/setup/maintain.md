@@ -136,12 +136,15 @@ application no longer stores a per-message content digest.
    There is no automatic rollback. After an interrupted attempt, check the
    printed snapshot, configuration, migrations, and service state. Retry from
    the old configuration only if the database and writers remain unchanged.
-6. Tell each CLI user to replace their downloaded client with the script from
-   the upgraded instance. On each client machine, in its client directory:
+6. Tell each CLI user to install the client from the upgraded instance. The
+   command installation is unreleased work after v0.1.0. Existing script users
+   must perform this initial installation on each CLI machine:
 
    ```shell
    curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
-   python3 star_tunnel.py --help
+   python3 star_tunnel.py install
+   export PATH="$HOME/.local/bin:$PATH"
+   startunnel --help
    ```
 
    Use that instance's URL in `STARTUNNEL_BASE_URL`. Update copies in agent

@@ -579,9 +579,11 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
         "json",
         "math",
         "os",
+        "pathlib",
         "re",
         "sys",
         "stat",
+        "tempfile",
         "time",
         "typing",
         "urllib",
@@ -596,6 +598,93 @@ def _load_cli_module() -> Any:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Executable installation requires Linux or macOS.")
+def test_install_produces_a_standalone_command_and_replaces_an_existing_copy(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    command = directory / "startunnel"
+    command.write_text("old client", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment["PATH"] = str(directory) + os.pathsep + environment.get("PATH", "")
+    installed = subprocess.run(
+        [sys.executable, str(CLI), "install", "--bin-dir", str(directory)],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stderr
+    assert installed.stderr == ""
+    assert json.loads(installed.stdout) == {
+        "command_path": str(command),
+        "bin_dir": str(directory),
+        "on_path": True,
+    }
+    assert command.read_bytes() == CLI.read_bytes()
+    assert command.stat().st_mode & 0o777 == 0o755
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    help_result = subprocess.run(
+        ["startunnel", "--help"],
+        cwd=unrelated,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    assert help_result.returncode == 0, help_result.stderr
+    assert help_result.stderr == ""
+    assert "--help" in help_result.stdout
+    assert list(directory.iterdir()) == [command]
+
+
+def test_install_defaults_to_local_bin_without_instance_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli = _load_cli_module()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.delenv("STARTUNNEL_BASE_URL", raising=False)
+    monkeypatch.delenv("STARTUNNEL_AGENT_KEY", raising=False)
+    assert cli.main(["install"]) == 0
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert json.loads(output.out) == {
+        "command_path": str(tmp_path / ".local/bin/startunnel"),
+        "bin_dir": str(tmp_path / ".local/bin"),
+        "on_path": False,
+    }
+
+
+@pytest.mark.parametrize("operation", ["write", "replace"])
+def test_install_failure_preserves_existing_command_and_removes_temporary_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+) -> None:
+    cli = _load_cli_module()
+    command = tmp_path / "startunnel"
+    command.write_bytes(b"existing executable")
+
+    def fail(*args: object) -> None:
+        del args
+        raise OSError("private filesystem detail")
+
+    monkeypatch.setattr(cli.os, "fchmod" if operation == "write" else "replace", fail)
+    assert cli.main(["install", "--bin-dir", str(tmp_path)]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert json.loads(output.err)["error"]["code"] == "installation_failed"
+    assert "private filesystem detail" not in output.err
+    assert command.read_bytes() == b"existing executable"
+    assert list(tmp_path.iterdir()) == [command]
 
 
 def _resolve_schema(schema: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:

@@ -14,6 +14,7 @@ import math
 import os
 import stat
 import sys
+import tempfile
 import time
 import uuid
 from collections.abc import Sequence
@@ -21,6 +22,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException, HTTPMessage
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlencode, urlsplit, urlunsplit
@@ -31,6 +33,7 @@ REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
 
 SAFE_ERROR_MESSAGES = {
+    "installation_failed": "The command could not be installed. Check directory permissions.",
     "secret_output_failed": "The private secret file could not be created or written.",
     "health_check_failed": "A required instance health check failed.",
     "configuration_error": "Check the required environment settings.",
@@ -94,6 +97,43 @@ class NoRedirectHandler(HTTPRedirectHandler):
     ) -> None:
         del req, fp, code, msg, headers, newurl
         return None
+
+
+def replace_executable(path: Path, content: bytes) -> None:
+    """Replace an executable after the complete file is ready."""
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".startunnel-", delete=False
+        ) as file:
+            temporary_path = Path(file.name)
+            file.write(content)
+            os.fchmod(file.fileno(), 0o755)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def install_command(bin_dir: str) -> dict[str, Any]:
+    """Install this client as the startunnel command on Linux or macOS."""
+
+    try:
+        if os.name != "posix":
+            raise CliError("installation_failed")
+        directory = Path(bin_dir).expanduser().resolve()
+        path = directory / "startunnel"
+        content = Path(__file__).read_bytes()
+        directory.mkdir(parents=True, exist_ok=True)
+        replace_executable(path, content)
+        on_path = any(
+            Path(item or ".").expanduser().resolve() == directory
+            for item in os.environ.get("PATH", "").split(os.pathsep)
+        )
+    except (OSError, ValueError) as error:
+        raise CliError("installation_failed") from error
+    return {"command_path": str(path), "bin_dir": str(directory), "on_path": on_path}
 
 
 def validate_base_url(value: str) -> str:
@@ -994,6 +1034,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
+    install = subparsers.add_parser("install", help="Install the startunnel command on PATH.")
+    install.add_argument("--bin-dir", default="~/.local/bin", help="Command directory.")
     add_admin_parser(subparsers)
     me = subparsers.add_parser("me", help="Show the current agent identity and limits.")
     me.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -1043,7 +1085,9 @@ def print_error(error: CliError) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         arguments = build_parser().parse_args(argv)
-        if arguments.action == "admin":
+        if arguments.action == "install":
+            result = install_command(arguments.bin_dir)
+        elif arguments.action == "admin":
             result = run_admin(arguments)
         else:
             result = run_tutorial() if arguments.action == "tutorial" else run_action(arguments)

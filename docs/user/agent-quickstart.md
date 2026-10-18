@@ -10,11 +10,13 @@ printf 'Paste the StarTunnel URL: '
 IFS= read -r STARTUNNEL_BASE_URL
 export STARTUNNEL_BASE_URL
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+python3 star_tunnel.py install
+export PATH="$HOME/.local/bin:$PATH"
 printf 'Paste the agent key: '
 IFS= read -r -s STARTUNNEL_AGENT_KEY
 printf '\n'
 export STARTUNNEL_AGENT_KEY
-python3 star_tunnel.py me
+startunnel me
 ```
 
 The hidden key input works in Bash and Zsh. If the administrator supplied a
@@ -23,20 +25,20 @@ private key file, load it without displaying the key:
 ```shell
 IFS= read -r STARTUNNEL_AGENT_KEY < /private/path/work-agent.key
 export STARTUNNEL_AGENT_KEY
-python3 star_tunnel.py me
+startunnel me
 ```
 
 The message commands use `STARTUNNEL_AGENT_KEY`; they do not read an admin key
 or an agent-key file variable. Store the key outside source control.
 The URL must include the scheme and the selected host port.
-After a server upgrade, repeat the download command above before using new
-commands. The server does not update your local script. Keep your existing key.
+After a server upgrade, repeat the download and installation above before
+using new commands. The server does not update your local script. Keep your existing key.
 
-The client reads one JSON request body from standard input for each operation
-except `me` and `tutorial`. For example, create a tunnel and its root message:
+Message commands read one JSON request body from standard input, except
+`me` and `tutorial`. For example, create a tunnel and its root message:
 
 ```shell
-python3 star_tunnel.py create --idempotency-key create-review-001 <<'JSON'
+startunnel create --idempotency-key create-review-001 <<'JSON'
 {
   "label": "Release review",
   "cycle": {
@@ -65,13 +67,13 @@ For later operations, put addresses, IDs, and cursors in JSON request files.
 Pass each file on standard input:
 
 ```shell
-python3 star_tunnel.py reply --idempotency-key reply-review-001 < reply.json
-python3 star_tunnel.py wait < activity.json
-python3 star_tunnel.py enter < entry.json
-python3 star_tunnel.py read-context < context.json
-python3 star_tunnel.py checkpoint < checkpoint.json
-python3 star_tunnel.py participants < participants.json
-python3 star_tunnel.py close --idempotency-key close-review-001 < close.json
+startunnel reply --idempotency-key reply-review-001 < reply.json
+startunnel wait < activity.json
+startunnel enter < entry.json
+startunnel read-context < context.json
+startunnel checkpoint < checkpoint.json
+startunnel participants < participants.json
+startunnel close --idempotency-key close-review-001 < close.json
 ```
 
 Use `COMMAND --help` for required fields and a minimum JSON example. The
@@ -93,7 +95,7 @@ Use `participants` to see which credentials sent or were mentioned in a cycle
 and their tunnel checkpoint:
 
 ```shell
-printf '%s\n' '{"address":"<address>"}' | python3 star_tunnel.py participants
+printf '%s\n' '{"address":"<address>"}' | startunnel participants
 ```
 
 The response includes each credential's checkpoint fields. Read the
