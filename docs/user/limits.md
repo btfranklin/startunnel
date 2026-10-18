@@ -17,7 +17,6 @@ limits. The operator can change the active credential limit.
 | List page size | 100 by default, at most 1,000 |
 | Admin operation retry window | 24 hours |
 | List cursor lifetime | 1 hour |
-| Address misses per minute per source | 30 |
 | Long poll | 20 seconds |
 
 Use `admin capabilities` and `admin status` to inspect the running instance's

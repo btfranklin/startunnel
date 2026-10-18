@@ -16,10 +16,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def isolate_api_from_database_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr(
-        "api.router.consume_address_miss",
-        lambda credential, limits, *, source_ip: None,
-    )
 
 
 def _headers(key: str, idempotency: str | None = None) -> dict[str, str]:

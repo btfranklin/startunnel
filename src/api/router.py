@@ -7,7 +7,6 @@ import json
 from typing import Any
 from uuid import UUID
 
-from asgiref.sync import sync_to_async
 from django.db import InterfaceError, OperationalError
 from django.http import HttpRequest, HttpResponse
 from ninja import HeaderEx, NinjaAPI, P, Router, Status
@@ -20,7 +19,6 @@ from core.cursors import cursor_uuid as _cursor_uuid
 from core.cursors import decode_cursor as _decoded_cursor
 from core.cursors import encode_cursor as _cursor
 from core.limits import provider
-from core.security import client_ip
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
@@ -57,7 +55,6 @@ from tunnels.services import (
 from .admin import router as admin_router
 from .auth import agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
-from .rate_limits import consume_address_miss
 from .schemas import (
     ActivityRequest,
     ActivityResponse,
@@ -213,10 +210,6 @@ def interface_error_handler(request: HttpRequest, error: InterfaceError) -> Http
 
 def _credential(request: HttpRequest) -> AgentCredential:
     return request.auth  # type: ignore[no-any-return,attr-defined]
-
-
-def _record_miss(request: HttpRequest, credential: AgentCredential) -> None:
-    consume_address_miss(credential, provider.for_instance(), source_ip=client_ip(request))
 
 
 def _activity_cursor(tunnel: Tunnel, position: int, *, issued_at: int | None = None) -> str:
@@ -473,20 +466,16 @@ def _post_reply(
     idempotency_key: str,
 ) -> dict[str, Any]:
     credential = _credential(request)
-    try:
-        posted = post_reply(
-            credential=credential,
-            idempotency_key=idempotency_key,
-            address=payload.address,
-            parent_id=payload.parent_id,
-            content=payload.content.model_dump(mode="json"),
-            mentions=payload.mentions,
-            correlation_id=payload.correlation_id,
-            session=payload.session,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    posted = post_reply(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        parent_id=payload.parent_id,
+        content=payload.content.model_dump(mode="json"),
+        mentions=payload.mentions,
+        correlation_id=payload.correlation_id,
+        session=payload.session,
+    )
     return _posted_reply_response(posted)
 
 
@@ -552,18 +541,14 @@ def _tree_cursor_values(payload: TreeRequest) -> PageCursor:
 def _tree(request: HttpRequest, payload: TreeRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _tree_cursor_values(payload)
-    try:
-        page = read_tree(
-            credential=credential,
-            address=payload.address,
-            cycle_id=cursor.cycle_id,
-            limit=payload.limit,
-            after_sequence=cursor.after_sequence,
-            snapshot_sequence=cursor.snapshot_sequence,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = read_tree(
+        credential=credential,
+        address=payload.address,
+        cycle_id=cursor.cycle_id,
+        limit=payload.limit,
+        after_sequence=cursor.after_sequence,
+        snapshot_sequence=cursor.snapshot_sequence,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -610,16 +595,12 @@ def read_tunnel_tree(request: HttpRequest, payload: TreeRequest) -> dict[str, An
 
 def _message_read(request: HttpRequest, payload: MessageReadRequest) -> dict[str, Any]:
     credential = _credential(request)
-    try:
-        message = get_message(
-            credential=credential,
-            address=payload.address,
-            message_id=payload.message_id,
-            cycle_id=payload.cycle_id,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    message = get_message(
+        credential=credential,
+        address=payload.address,
+        message_id=payload.message_id,
+        cycle_id=payload.cycle_id,
+    )
     return {
         "message": message_payload(message),
         "child_count": message.replies.count(),
@@ -642,16 +623,12 @@ def read_tunnel_message(request: HttpRequest, payload: MessageReadRequest) -> di
 
 def _branch(request: HttpRequest, payload: BranchRequest) -> dict[str, Any]:
     credential = _credential(request)
-    try:
-        messages = get_branch(
-            credential=credential,
-            address=payload.address,
-            message_id=payload.leaf_id,
-            cycle_id=payload.cycle_id,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    messages = get_branch(
+        credential=credential,
+        address=payload.address,
+        message_id=payload.leaf_id,
+        cycle_id=payload.cycle_id,
+    )
     if not messages:
         raise InvalidRequest("The branch is not available.")
     return {
@@ -739,19 +716,15 @@ def _reply_page_response(page: ReplyPage) -> dict[str, Any]:
 def _replies(request: HttpRequest, payload: RepliesRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _reply_cursor_values(payload)
-    try:
-        page = list_replies(
-            credential=credential,
-            address=payload.address,
-            message_id=payload.message_id,
-            cycle_id=cursor.cycle_id,
-            limit=payload.limit,
-            after_sequence=cursor.after_sequence,
-            snapshot_sequence=cursor.snapshot_sequence,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = list_replies(
+        credential=credential,
+        address=payload.address,
+        message_id=payload.message_id,
+        cycle_id=cursor.cycle_id,
+        limit=payload.limit,
+        after_sequence=cursor.after_sequence,
+        snapshot_sequence=cursor.snapshot_sequence,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -846,20 +819,16 @@ def _subtree_response(page: SubtreePage, *, max_depth: int) -> dict[str, Any]:
 def _subtree(request: HttpRequest, payload: SubtreeRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _subtree_cursor_values(payload)
-    try:
-        page = get_subtree(
-            credential=credential,
-            address=payload.address,
-            cycle_id=cursor.cycle_id,
-            message_id=payload.message_id,
-            max_depth=payload.max_depth,
-            limit=payload.limit,
-            after_sequence=cursor.after_sequence,
-            snapshot_sequence=cursor.snapshot_sequence,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = get_subtree(
+        credential=credential,
+        address=payload.address,
+        cycle_id=cursor.cycle_id,
+        message_id=payload.message_id,
+        max_depth=payload.max_depth,
+        limit=payload.limit,
+        after_sequence=cursor.after_sequence,
+        snapshot_sequence=cursor.snapshot_sequence,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -939,18 +908,14 @@ def _leaves_response(page: LeafPage) -> dict[str, Any]:
 def _leaves(request: HttpRequest, payload: LeavesRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _leaves_cursor_values(payload)
-    try:
-        page = list_leaves(
-            credential=credential,
-            address=payload.address,
-            cycle_id=cursor.cycle_id,
-            limit=payload.limit,
-            after_sequence=cursor.after_sequence,
-            snapshot_sequence=cursor.snapshot_sequence,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = list_leaves(
+        credential=credential,
+        address=payload.address,
+        cycle_id=cursor.cycle_id,
+        limit=payload.limit,
+        after_sequence=cursor.after_sequence,
+        snapshot_sequence=cursor.snapshot_sequence,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -982,18 +947,14 @@ async def _activity(request: HttpRequest, payload: ActivityRequest) -> dict[str,
     after_position: int | None = None
     if payload.after_cursor:
         expected_tunnel_id, after_position = _activity_cursor_values(payload.after_cursor)
-    try:
-        page = await read_activity_async(
-            credential=credential,
-            address=payload.address,
-            after_position=after_position,
-            wait_seconds=payload.wait_seconds,
-            limit=payload.limit,
-            event_types=tuple(payload.event_types) if payload.event_types is not None else None,
-        )
-    except TunnelUnavailable:
-        await sync_to_async(_record_miss, thread_sensitive=True)(request, credential)
-        raise
+    page = await read_activity_async(
+        credential=credential,
+        address=payload.address,
+        after_position=after_position,
+        wait_seconds=payload.wait_seconds,
+        limit=payload.limit,
+        event_types=tuple(payload.event_types) if payload.event_types is not None else None,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=expected_tunnel_id,
@@ -1021,16 +982,12 @@ async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -
 def _checkpoint(request: HttpRequest, payload: CheckpointRequest) -> dict[str, Any]:
     credential = _credential(request)
     expected_tunnel_id, position = _activity_cursor_values(payload.cursor)
-    try:
-        checkpoint, advanced = commit_checkpoint(
-            credential=credential,
-            address=payload.address,
-            position=position,
-            expected_tunnel_id=expected_tunnel_id,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    checkpoint, advanced = commit_checkpoint(
+        credential=credential,
+        address=payload.address,
+        position=position,
+        expected_tunnel_id=expected_tunnel_id,
+    )
     return {
         "cursor": _activity_cursor(checkpoint.tunnel, checkpoint.last_event_position),
         "position": checkpoint.last_event_position,
@@ -1085,25 +1042,21 @@ def _context_cursor_values(payload: ContextRequest) -> ContextCursor:
 def _context(request: HttpRequest, payload: ContextRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _context_cursor_values(payload)
-    try:
-        view = get_context(
-            credential=credential,
-            address=payload.address,
-            cycle_id=cursor.cycle_id,
-            focus_message_id=payload.focus_message_id,
-            snapshot_sequence=cursor.snapshot_sequence,
-            activity_position=cursor.activity_position,
-            include_branch=payload.include_branch,
-            include_direct_replies=payload.include_direct_replies,
-            include_recent_activity=payload.include_recent_activity,
-            referenced_message_ids=tuple(payload.referenced_message_ids),
-            after_activity_position=cursor.after_position,
-            max_items=payload.max_items,
-            max_bytes=payload.max_bytes,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    view = get_context(
+        credential=credential,
+        address=payload.address,
+        cycle_id=cursor.cycle_id,
+        focus_message_id=payload.focus_message_id,
+        snapshot_sequence=cursor.snapshot_sequence,
+        activity_position=cursor.activity_position,
+        include_branch=payload.include_branch,
+        include_direct_replies=payload.include_direct_replies,
+        include_recent_activity=payload.include_recent_activity,
+        referenced_message_ids=tuple(payload.referenced_message_ids),
+        after_activity_position=cursor.after_position,
+        max_items=payload.max_items,
+        max_bytes=payload.max_bytes,
+    )
     _require_cursor_tunnel(
         tunnel=view.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -1154,16 +1107,12 @@ def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> dict[s
 )
 def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> dict[str, Any]:
     credential = _credential(request)
-    try:
-        view = enter_tunnel(
-            credential=credential,
-            address=payload.address,
-            limit=payload.limit,
-            max_bytes=payload.max_bytes,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    view = enter_tunnel(
+        credential=credential,
+        address=payload.address,
+        limit=payload.limit,
+        max_bytes=payload.max_bytes,
+    )
     return entry_payload(view)
 
 
@@ -1208,27 +1157,23 @@ def _search_page_values(payload: SearchRequest) -> SearchCursor:
 def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _search_page_values(payload)
-    try:
-        page = search_messages(
-            credential=credential,
-            address=payload.address,
-            query=payload.query,
-            cycle_id=cursor.cycle_id,
-            sender_id=payload.sender_id,
-            mentioned_agent_id=payload.mentioned_agent_id,
-            correlation_id=payload.correlation_id,
-            branch_root_id=payload.branch_root_id,
-            sequence_after=payload.sequence_after,
-            sequence_before=payload.sequence_before,
-            snapshot_sequence=cursor.snapshot_sequence,
-            after_rank=cursor.after_rank,
-            after_sequence=cursor.after_sequence,
-            after_message_id=cursor.after_message_id,
-            limit=payload.limit,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = search_messages(
+        credential=credential,
+        address=payload.address,
+        query=payload.query,
+        cycle_id=cursor.cycle_id,
+        sender_id=payload.sender_id,
+        mentioned_agent_id=payload.mentioned_agent_id,
+        correlation_id=payload.correlation_id,
+        branch_root_id=payload.branch_root_id,
+        sequence_after=payload.sequence_after,
+        sequence_before=payload.sequence_before,
+        snapshot_sequence=cursor.snapshot_sequence,
+        after_rank=cursor.after_rank,
+        after_sequence=cursor.after_sequence,
+        after_message_id=cursor.after_message_id,
+        limit=payload.limit,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -1314,19 +1259,15 @@ def _participant_page_values(payload: ParticipantsRequest) -> ParticipantCursor:
 def _participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[str, Any]:
     credential = _credential(request)
     cursor = _participant_page_values(payload)
-    try:
-        page = list_participants(
-            credential=credential,
-            address=payload.address,
-            cycle_id=cursor.cycle_id,
-            snapshot_sequence=cursor.snapshot_sequence,
-            after_first_sequence=cursor.after_first_sequence,
-            after_credential_id=cursor.after_credential_id,
-            limit=payload.limit,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = list_participants(
+        credential=credential,
+        address=payload.address,
+        cycle_id=cursor.cycle_id,
+        snapshot_sequence=cursor.snapshot_sequence,
+        after_first_sequence=cursor.after_first_sequence,
+        after_credential_id=cursor.after_credential_id,
+        limit=payload.limit,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
@@ -1377,14 +1318,10 @@ def list_tunnel_participants(request: HttpRequest, payload: ParticipantsRequest)
 
 def _tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> dict[str, Any]:
     credential = _credential(request)
-    try:
-        status = get_tunnel_status(
-            credential=credential,
-            address=payload.address,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    status = get_tunnel_status(
+        credential=credential,
+        address=payload.address,
+    )
     tunnel = status.tunnel
     return {
         "id": tunnel.id,
@@ -1424,17 +1361,13 @@ def _cycle_list(request: HttpRequest, payload: CycleListRequest) -> dict[str, An
         before_number = _cursor_int(decoded, "before_number")
         expected_tunnel_id = _cursor_binding(decoded)
     credential = _credential(request)
-    try:
-        page = list_cycles(
-            credential=credential,
-            address=payload.address,
-            limit=payload.limit,
-            before_number=before_number,
-            snapshot_number=snapshot_number,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    page = list_cycles(
+        credential=credential,
+        address=payload.address,
+        limit=payload.limit,
+        before_number=before_number,
+        snapshot_number=snapshot_number,
+    )
     _require_cursor_tunnel(
         tunnel=page.tunnel,
         expected_tunnel_id=expected_tunnel_id,
@@ -1476,22 +1409,18 @@ def _start_cycle(
 ) -> dict[str, Any]:
     credential = _credential(request)
     root = payload.cycle.root
-    try:
-        started = start_cycle(
-            credential=credential,
-            idempotency_key=idempotency_key,
-            address=payload.address,
-            expected_address_generation=payload.expected_address_generation,
-            cycle_label=payload.cycle.label,
-            expires_in_seconds=payload.cycle.expires_in_seconds,
-            root_content=root.content.model_dump(mode="json"),
-            root_mentions=root.mentions,
-            root_correlation_id=root.correlation_id,
-            root_session=root.session,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    started = start_cycle(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        expected_address_generation=payload.expected_address_generation,
+        cycle_label=payload.cycle.label,
+        expires_in_seconds=payload.cycle.expires_in_seconds,
+        root_content=root.content.model_dump(mode="json"),
+        root_mentions=root.mentions,
+        root_correlation_id=root.correlation_id,
+        root_session=root.session,
+    )
     return _started_cycle_response(started)
 
 
@@ -1524,23 +1453,19 @@ def _rollover_cycle(
 ) -> dict[str, Any]:
     credential = _credential(request)
     root = payload.cycle.root
-    try:
-        started = rollover_cycle(
-            credential=credential,
-            idempotency_key=idempotency_key,
-            address=payload.address,
-            expected_cycle_id=payload.expected_cycle_id,
-            expected_address_generation=payload.expected_address_generation,
-            cycle_label=payload.cycle.label,
-            expires_in_seconds=payload.cycle.expires_in_seconds,
-            root_content=root.content.model_dump(mode="json"),
-            root_mentions=root.mentions,
-            root_correlation_id=root.correlation_id,
-            root_session=root.session,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    started = rollover_cycle(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        expected_cycle_id=payload.expected_cycle_id,
+        expected_address_generation=payload.expected_address_generation,
+        cycle_label=payload.cycle.label,
+        expires_in_seconds=payload.cycle.expires_in_seconds,
+        root_content=root.content.model_dump(mode="json"),
+        root_mentions=root.mentions,
+        root_correlation_id=root.correlation_id,
+        root_session=root.session,
+    )
     return _started_cycle_response(started)
 
 
@@ -1572,16 +1497,12 @@ def _close_cycle(
     idempotency_key: str,
 ) -> HttpResponse:
     credential = _credential(request)
-    try:
-        close_cycle(
-            credential=credential,
-            idempotency_key=idempotency_key,
-            address=payload.address,
-            expected_cycle_id=payload.expected_cycle_id,
-        )
-    except TunnelUnavailable:
-        _record_miss(request, credential)
-        raise
+    close_cycle(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        expected_cycle_id=payload.expected_cycle_id,
+    )
     return HttpResponse(status=204)
 
 

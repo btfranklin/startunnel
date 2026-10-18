@@ -19,16 +19,6 @@ def consume_api_operation(credential: AgentCredential, limits: Limits) -> None:
     )
 
 
-def consume_address_miss(credential: AgentCredential, limits: Limits, *, source_ip: str) -> None:
-    ip_digest = hashlib.sha256(source_ip.encode()).hexdigest()
-    _consume(
-        key=f"miss:{credential.id}:{ip_digest}",
-        limit=limits.address_misses_per_minute,
-        window_seconds=60,
-        rule="address miss",
-    )
-
-
 def consume_login_attempt(*, source_ip: str, username: str) -> None:
     source_digest = hashlib.sha256(source_ip.encode()).hexdigest()
     username_digest = hashlib.sha256(username.casefold().encode()).hexdigest()

@@ -18,10 +18,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def isolate_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr(
-        "api.router.consume_address_miss",
-        lambda credential, limits, *, source_ip: None,
-    )
 
 
 def _post(client: Client, path: str, body: dict[str, Any], *, key: str) -> Any:

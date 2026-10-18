@@ -20,7 +20,7 @@ from tunnels.services import close_cycle, create_tunnel
 
 
 @pytest.mark.django_db(transaction=True)
-def test_async_activity_missing_address_preserves_error_and_records_miss(
+def test_async_activity_missing_address_preserves_error_and_primary_charge(
     credential_factory: Any,
 ) -> None:
     _, key = credential_factory()
@@ -33,8 +33,7 @@ def test_async_activity_missing_address_preserves_error_and_records_miss(
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "tunnel_unavailable"
-    # Authentication and the failed address each consume one separate bucket.
-    assert RateLimitBucket.objects.count() == 2
+    assert RateLimitBucket.objects.count() == 1
     assert all(len(bucket.accepted_at_ms) == 1 for bucket in RateLimitBucket.objects.all())
 
 

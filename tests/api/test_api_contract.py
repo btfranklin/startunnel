@@ -21,10 +21,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def isolate_api_from_database_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr(
-        "api.router.consume_address_miss",
-        lambda credential, limits, *, source_ip: None,
-    )
 
 
 def _auth(key: str) -> dict[str, str]:
@@ -225,6 +221,43 @@ def test_creation_uses_each_agents_normal_request_limit(
     assert limited.headers["Retry-After"]
     _create_global(client, second_key, "normal-limit-second")
     assert Tunnel.objects.count() == 2
+
+
+def test_address_misses_use_only_each_agents_normal_request_limit(
+    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api.rate_limits import consume_api_operation
+    from core.limits import provider
+    from tunnels.services import create_tunnel, rotate_address_as_operator
+
+    first, first_key = credential_factory()
+    _, second_key = credential_factory()
+    created = create_tunnel(
+        credential=first,
+        idempotency_key="address-miss-limit-create",
+        root_content={"type": "text", "text": "A root."},
+    )
+    rotate_address_as_operator(
+        actor=first.created_by,
+        tunnel_id=created.tunnel.id,
+        expected_address_generation=1,
+    )
+    absent_address = encode_token(bytes(16))
+    assert absent_address != created.address
+    limits = replace(provider.for_instance(), api_operations_per_minute=35, api_burst=100)
+    monkeypatch.setattr(provider, "for_instance", lambda: limits)
+    monkeypatch.setattr("api.auth.consume_api_operation", consume_api_operation)
+
+    for index in range(35):
+        address = created.address if index % 2 else absent_address
+        response = _post(client, "/api/v1/enter", {"address": address}, key=first_key)
+        _assert_safe_error(response, status=404, code="tunnel_unavailable")
+
+    limited = _post(client, "/api/v1/enter", {"address": absent_address}, key=first_key)
+    _assert_safe_error(limited, status=429, code="rate_limited")
+    assert limited.headers["Retry-After"]
+    other = _post(client, "/api/v1/enter", {"address": absent_address}, key=second_key)
+    _assert_safe_error(other, status=404, code="tunnel_unavailable")
 
 
 def test_create_replay_keeps_the_original_wire_state_after_later_activity(

@@ -27,7 +27,6 @@ class Limits:
     cursor_lifetime_seconds: int = 3_600
     api_operations_per_minute: int = 120
     api_burst: int = 30
-    address_misses_per_minute: int = 30
 
 
 class LimitProvider(Protocol):
