@@ -33,68 +33,30 @@ This document reports the implemented product. It is not a future roadmap.
 - Maintenance deletes content and keeps a minimal cycle tombstone.
 - The web role cannot perform retained-content deletion.
 
-## Delivery gates
+## Browser administration
 
-A release requires:
+The browser supports local password login, admin and agent key controls,
+account state changes, tunnel lifecycle controls, and audit inspection.
+Product forms call the same domain services as the admin API and CLI.
+Browser rows show current tunnel addresses. The browser password form keeps
+its current session after a successful password change.
 
-1. `pdm run check`.
-2. Current generated OpenAPI.
-3. Fresh zero migration.
-4. Current PostgreSQL guards on a fresh database.
-5. The isolated canonical and PostgreSQL lanes.
-6. Browser proof for local login and administration.
-7. Example and agent exchange proof.
-8. Backup and restore proof.
-9. Idle CPU, wakeup, memory, startup, and recovery evidence.
-10. Architecture, security, code-quality, and user-interface review with all blocking findings resolved.
+## Validation and delivery
 
-## Release work
+Use [testing](testing.md) for the required checks and focused proof commands.
+Use [release policy](releases.md) for candidate selection, validation,
+promotion, and recovery. A manual CI run on `main` selects a distribution
+candidate. Normal pushes run the development checks.
 
-Source publication is separate from a production release. The dated image
-security assessment records an earlier image. The release validation workflow
-must pass for the exact candidate digest before release promotion.
-
-Production deployment requires an application image pinned by digest. The
-versioned release workflow supplies that image after candidate validation.
-See [operations](operations.md#production).
+Release validation tests one immutable application image. Promotion uses its
+retained exact-commit evidence without rebuilding. Generated release summaries
+are optional; reviewed deployment notes remain authoritative.
+See [operations](operations.md#production) for deployment.
 
 The agent client is a downloadable Python script. There is no standalone
 package-manager release. See [the client guide](../cli/README.md).
 
-## Versioned release delivery
-
-Release source is committed directly to `main`. The CI workflow now builds a
-single candidate runtime image after the normal gates and validates its exact
-digest through security, isolated system, and load checks. Version tags promote
-retained successful exact-commit CI artifacts to draft releases without
-rebuilding. Draft recovery preserves image identity and rejects published
-releases. Release Notes Scribe supplies summaries; reviewed deployment notes
-remain authoritative. Perfect Doc checks offline Markdown structure in the aggregate check.
-
-Local verification passed all 17 fast gates: 728 tests passed, one was skipped,
-and coverage was 90.93%. The isolated PostgreSQL lane passed 45 tests, including
-concurrent admin access changes. The restored initial-baseline proof passed
-with a real PostgreSQL dump and restore. Perfect Doc, generated OpenAPI, and the
-website build passed.
-
-Local verification and hosted candidate evidence are separate. On 2026-10-09,
-[exact-commit CI](https://github.com/btfranklin/startunnel/actions/runs/38003471206)
-passed for source `581349f578602798411b7a115c7581d05faf14f6`, including security,
-system, and load checks on one immutable image. The `v0.1.0` tag was restored
-and the replacement draft was created. Publication and instance deployment
-remain separate steps. See [release policy](releases.md) for the procedure.
-
-## Agent administration evidence
-
-The isolated browser lane passed all 19 tests in Chromium, Firefox, and WebKit.
-It proved key-only bootstrap, the full unattended CLI administration sequence,
-message exchange, lifecycle controls, key replacement, revocation, audit and
-receipt verification, no-JavaScript key controls, and desktop and mobile layout.
-The browser password form also preserved its current session after a service
-operation. Browser rows show current tunnel addresses. Screenshots from this lane
-use disposable browser-test data.
-
-Source implementation and local tests do not prove installed runtime. The
-hosted evidence above applies to its exact commit and image digest. These
-documents can advance ahead of that candidate; a later release must validate
-its own source and image. No production upgrade or live deployment is claimed.
+Local test results, hosted candidate evidence, and installed runtime are
+separate. [Dated candidate evidence](security.md#candidate-validation-2026-10-09)
+applies only to its recorded source commit and image. Each later candidate
+requires its own validation. Publication does not deploy an instance.
