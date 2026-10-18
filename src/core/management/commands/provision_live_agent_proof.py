@@ -23,52 +23,19 @@ _CREDENTIAL_NAMES = (
     "Live proof receiver",
     "Live proof concurrent receiver",
 )
-_MOUNT_ESCAPES = {
-    r"\040": " ",
-    r"\011": "\t",
-    r"\012": "\n",
-    r"\134": "\\",
-}
-
-
-def _decode_mount_path(value: str) -> str:
-    for encoded, decoded in _MOUNT_ESCAPES.items():
-        value = value.replace(encoded, decoded)
-    return value
-
-
-def _tmpfs_mount_for(path: Path) -> Path | None:
-    """Return the containing tmpfs mount, or None when it cannot be proved."""
-
-    mount_info = Path("/proc/self/mountinfo")
-    if not mount_info.is_file():
-        return None
-    matches: list[Path] = []
-    for line in mount_info.read_text(encoding="utf-8").splitlines():
-        try:
-            left, right = line.split(" - ", 1)
-            mount_path = Path(_decode_mount_path(left.split()[4])).resolve()
-            filesystem_type = right.split()[0]
-        except IndexError, ValueError, OSError:
-            continue
-        if filesystem_type == "tmpfs" and (path == mount_path or path.is_relative_to(mount_path)):
-            matches.append(mount_path)
-    return max(matches, key=lambda candidate: len(candidate.parts), default=None)
 
 
 def _validate_output_path(raw_path: str) -> Path:
     output_path = Path(raw_path)
     if not output_path.is_absolute():
-        raise CommandError("--output must be an absolute path on a tmpfs mount.")
+        raise CommandError("--output must be an absolute path.")
     try:
         parent = output_path.parent.resolve(strict=True)
     except OSError as error:
         raise CommandError("The output directory does not exist.") from error
     output_path = parent / output_path.name
     if output_path.exists() or output_path.is_symlink():
-        raise CommandError("The output file already exists. Use a new tmpfs path.")
-    if _tmpfs_mount_for(parent) is None:
-        raise CommandError("The output directory is not on a verified tmpfs mount.")
+        raise CommandError("The output file already exists. Use a new path.")
     return output_path
 
 
@@ -160,5 +127,5 @@ class Command(BaseCommand):
                 AgentCredential.objects.filter(id__in=issued_ids).update(revoked_at=timezone.now())
             raise
         self.stdout.write(
-            self.style.SUCCESS("Live-agent credentials are ready in a protected tmpfs file.")
+            self.style.SUCCESS("Live-agent credentials are ready in a mode-0600 file.")
         )

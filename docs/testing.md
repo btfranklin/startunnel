@@ -6,6 +6,10 @@ The runner discards ambient application and Compose settings. It supplies its
 own files, project, and test database URLs. It checks the actual Docker endpoint
 and refuses existing project resources.
 
+Compose runners provide a tmpfs at `/tmp` for fixture outputs. Direct local
+provisioning commands can use a chosen existing directory. They still create a
+new mode-0600 file and refuse an existing output path.
+
 Run the local aggregate check as well as the canonical container lane. Compose
 configuration tests require the host Docker CLI and skip inside test containers
 that do not have it. Test containers do not receive the host Docker socket.

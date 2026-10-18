@@ -20,67 +20,32 @@ from core import limits as instance_limits
 from tunnels.services import retire_tunnels_for_credentials
 
 _FIXTURE_PREFIX = "load-profile"
-_MOUNT_ESCAPES = {
-    r"\040": " ",
-    r"\011": "\t",
-    r"\012": "\n",
-    r"\134": "\\",
-}
 
 
-def _decode_mount_path(value: str) -> str:
-    for encoded, decoded in _MOUNT_ESCAPES.items():
-        value = value.replace(encoded, decoded)
-    return value
-
-
-def _tmpfs_mount_for(path: Path) -> Path | None:
-    """Return the containing tmpfs mount when Linux can prove it."""
-
-    mount_info = Path("/proc/self/mountinfo")
-    if not mount_info.is_file():
-        return None
-    matches: list[Path] = []
-    for line in mount_info.read_text(encoding="utf-8").splitlines():
-        try:
-            left, right = line.split(" - ", 1)
-            mount_path = Path(_decode_mount_path(left.split()[4])).resolve()
-            filesystem_type = right.split()[0]
-        except IndexError, ValueError, OSError:
-            continue
-        if filesystem_type == "tmpfs" and (path == mount_path or path.is_relative_to(mount_path)):
-            matches.append(mount_path)
-    return max(matches, key=lambda candidate: len(candidate.parts), default=None)
-
-
-def _validated_new_tmpfs_path(raw_path: str) -> Path:
+def _validated_new_output_path(raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
-        raise CommandError("--output must be an absolute path on a tmpfs mount.")
+        raise CommandError("--output must be an absolute path.")
     try:
         parent = path.parent.resolve(strict=True)
     except OSError as error:
         raise CommandError("The output directory does not exist.") from error
     path = parent / path.name
     if path.exists() or path.is_symlink():
-        raise CommandError("The output file already exists. Use a new tmpfs path.")
-    if _tmpfs_mount_for(parent) is None:
-        raise CommandError("The output directory is not on a verified tmpfs mount.")
+        raise CommandError("The output file already exists. Use a new path.")
     return path
 
 
-def _validated_existing_tmpfs_path(raw_path: str) -> Path:
+def _validated_existing_manifest_path(raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
-        raise CommandError("--cleanup-manifest must be an absolute path on a tmpfs mount.")
+        raise CommandError("--cleanup-manifest must be an absolute path.")
     try:
         path = path.resolve(strict=True)
     except OSError as error:
         raise CommandError("The load credential manifest does not exist.") from error
     if not path.is_file():
         raise CommandError("The load credential manifest must be a regular file.")
-    if _tmpfs_mount_for(path.parent) is None:
-        raise CommandError("The load credential manifest is not on a verified tmpfs mount.")
     return path
 
 
@@ -196,7 +161,7 @@ class Command(BaseCommand):
                 "Use local DEBUG settings and set STARTUNNEL_LOAD_TESTS=1 for the load proof."
             )
         if cleanup_path := options.get("cleanup_manifest"):
-            manifest = _validated_existing_tmpfs_path(str(cleanup_path))
+            manifest = _validated_existing_manifest_path(str(cleanup_path))
             run_id = _load_run_id(manifest)
             counts = _remove_run(run_id)
             manifest.unlink()
@@ -211,7 +176,7 @@ class Command(BaseCommand):
 
         credentials = cast(int, options["credentials"])
         _validate_counts(credentials=credentials)
-        output_path = _validated_new_tmpfs_path(str(options["output"]))
+        output_path = _validated_new_output_path(str(options["output"]))
         try:
             with transaction.atomic():
                 document = _provision(

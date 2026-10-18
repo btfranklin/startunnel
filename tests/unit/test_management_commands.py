@@ -257,15 +257,14 @@ def test_live_proof_replaces_prior_fixture_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_LIVE_AGENT_TESTS", "1")
-    monkeypatch.setattr(
-        provision_live_agent_proof,
-        "_validate_output_path",
-        lambda raw_path: Path(raw_path),
-    )
     first_path = tmp_path / "first.env"
     output = StringIO()
     call_command("provision_live_agent_proof", output=str(first_path), stdout=output)
     assert first_path.stat().st_mode & 0o777 == 0o600
+    first_contents = first_path.read_bytes()
+    with pytest.raises(CommandError, match="already exists"):
+        call_command("provision_live_agent_proof", output=str(first_path), stdout=StringIO())
+    assert first_path.read_bytes() == first_contents
     names = {line.partition("=")[0] for line in first_path.read_text(encoding="utf-8").splitlines()}
     assert names == {
         "STARTUNNEL_SENDER_KEY",
@@ -283,19 +282,15 @@ def test_live_proof_replaces_prior_fixture_credentials(
         idempotency_key="live-proof-old-tunnel",
         root_content={"type": "text", "text": "Old fixture."},
     )
-    call_command(
-        "provision_live_agent_proof",
-        output=str(tmp_path / "second.env"),
-        stdout=StringIO(),
-    )
+    second_path = tmp_path / "second.env"
+    call_command("provision_live_agent_proof", output=str(second_path), stdout=StringIO())
+    assert second_path.stat().st_mode & 0o777 == 0o600
     assert not AgentCredential.objects.filter(pk__in=old_ids, revoked_at__isnull=True).exists()
     assert Tunnel.objects.get().state == Tunnel.State.RETIRED
     assert user.created_agent_credentials.filter(revoked_at__isnull=True).count() == 3
 
 
-def test_live_proof_output_validation_and_mount_parser(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_live_proof_output_validation(tmp_path: Path) -> None:
     with pytest.raises(CommandError, match="absolute"):
         provision_live_agent_proof._validate_output_path("relative.env")
     with pytest.raises(CommandError, match="does not exist"):
@@ -304,17 +299,32 @@ def test_live_proof_output_validation_and_mount_parser(
     existing.write_text("x", encoding="utf-8")
     with pytest.raises(CommandError, match="already exists"):
         provision_live_agent_proof._validate_output_path(str(existing))
-    monkeypatch.setattr(provision_live_agent_proof, "_tmpfs_mount_for", lambda path: None)
-    with pytest.raises(CommandError, match="verified tmpfs"):
-        provision_live_agent_proof._validate_output_path(str(tmp_path / "new"))
-    monkeypatch.setattr(provision_live_agent_proof, "_tmpfs_mount_for", lambda path: tmp_path)
-    assert (
-        provision_live_agent_proof._validate_output_path(str(tmp_path / "new")) == tmp_path / "new"
-    )
-    assert (
-        provision_live_agent_proof._decode_mount_path(r"/safe\040space\134slash")
-        == "/safe space\\slash"
-    )
+    link = tmp_path / "linked.env"
+    link.symlink_to(existing)
+    with pytest.raises(CommandError, match="already exists"):
+        provision_live_agent_proof._validate_output_path(str(link))
+    candidate = tmp_path / "new.env"
+    assert provision_live_agent_proof._validate_output_path(str(candidate)) == candidate
+
+
+def test_credential_output_writers_are_private_and_exclusive(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    provision_load_profile._write_manifest(manifest, {"run_id": "safe"})
+    assert manifest.stat().st_mode & 0o777 == 0o600
+    manifest_contents = manifest.read_bytes()
+    with pytest.raises(FileExistsError):
+        provision_load_profile._write_manifest(manifest, {"run_id": "changed"})
+    assert manifest.read_bytes() == manifest_contents
+
+    environment = tmp_path / "proof.env"
+    provision_live_agent_proof._write_environment(environment, {"STARTUNNEL_AGENT_KEY": "safe"})
+    assert environment.stat().st_mode & 0o777 == 0o600
+    environment_contents = environment.read_bytes()
+    with pytest.raises(FileExistsError):
+        provision_live_agent_proof._write_environment(
+            environment, {"STARTUNNEL_AGENT_KEY": "changed"}
+        )
+    assert environment.read_bytes() == environment_contents
 
 
 @override_settings(DEBUG=True)
@@ -323,7 +333,6 @@ def test_live_proof_removes_partial_output_after_failure(
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_LIVE_AGENT_TESTS", "1")
     path = tmp_path / "failed.env"
-    monkeypatch.setattr(provision_live_agent_proof, "_validate_output_path", lambda raw: Path(raw))
 
     def fail_write(target: Path, values: dict[str, str]) -> None:
         del values
@@ -352,18 +361,21 @@ def test_load_fixture_count_respects_instance_limit(settings: Any) -> None:
         provision_load_profile._validate_counts(credentials=2)
 
 
-def test_load_manifest_paths_and_parser_fail_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_manifest_paths_and_parser_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(CommandError, match="absolute"):
-        provision_load_profile._validated_new_tmpfs_path("relative.json")
+        provision_load_profile._validated_new_output_path("relative.json")
     candidate = tmp_path / "new.json"
-    monkeypatch.setattr(provision_load_profile, "_tmpfs_mount_for", lambda path: tmp_path)
-    assert provision_load_profile._validated_new_tmpfs_path(str(candidate)) == candidate
+    assert provision_load_profile._validated_new_output_path(str(candidate)) == candidate
+    output_link = tmp_path / "new-link.json"
+    output_link.symlink_to(candidate)
+    with pytest.raises(CommandError, match="already exists"):
+        provision_load_profile._validated_new_output_path(str(output_link))
     with pytest.raises(CommandError, match="absolute"):
-        provision_load_profile._validated_existing_tmpfs_path("relative.json")
+        provision_load_profile._validated_existing_manifest_path("relative.json")
     with pytest.raises(CommandError, match="does not exist"):
-        provision_load_profile._validated_existing_tmpfs_path(str(candidate))
+        provision_load_profile._validated_existing_manifest_path(str(candidate))
+    with pytest.raises(CommandError, match="regular file"):
+        provision_load_profile._validated_existing_manifest_path(str(tmp_path))
     manifest = tmp_path / "manifest.json"
     run_id = uuid4()
     manifest.write_text(
@@ -379,7 +391,9 @@ def test_load_manifest_paths_and_parser_fail_closed(
     os.chmod(manifest, 0o400)
     linked_manifest = tmp_path / "manifest-link.json"
     linked_manifest.symlink_to(manifest)
-    assert provision_load_profile._validated_existing_tmpfs_path(str(linked_manifest)) == manifest
+    assert (
+        provision_load_profile._validated_existing_manifest_path(str(linked_manifest)) == manifest
+    )
     assert provision_load_profile._load_run_id(manifest) == run_id
     manifest.chmod(0o600)
     manifest.write_text('{"run_id":"bad"}', encoding="utf-8")
@@ -394,10 +408,6 @@ def test_load_fixture_command_provisions_and_cleans_up(
     credential_factory: Any,
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_LOAD_TESTS", "1")
-    monkeypatch.setattr(provision_load_profile, "_validated_new_tmpfs_path", lambda raw: Path(raw))
-    monkeypatch.setattr(
-        provision_load_profile, "_validated_existing_tmpfs_path", lambda raw: Path(raw)
-    )
     path = tmp_path / "load.json"
     output = StringIO()
     call_command(
@@ -407,6 +417,16 @@ def test_load_fixture_command_provisions_and_cleans_up(
         stdout=output,
     )
     document = json.loads(path.read_text(encoding="utf-8"))
+    assert path.stat().st_mode & 0o777 == 0o600
+    original_contents = path.read_bytes()
+    with pytest.raises(CommandError, match="already exists"):
+        call_command(
+            "provision_load_profile",
+            output=str(path),
+            credentials=3,
+            stdout=StringIO(),
+        )
+    assert path.read_bytes() == original_contents
     assert document["credential_count"] == 3
     assert "st_" not in output.getvalue()
     run_id = UUID(document["run_id"])
