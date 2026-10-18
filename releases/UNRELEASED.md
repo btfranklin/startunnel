@@ -99,3 +99,5 @@ rejected values. Error codes and exit statuses are unchanged.
 Agent commands use the shared transport timeout and their existing route entry
 directly. Tutorial response checks keep their type checks without unused labels.
 Contract and failure tests now cover admin query fields and tutorial cleanup.
+The aggregate gate checks CLI types and runs a dependency-free client smoke
+suite. CI also runs that suite on Linux and Windows with Python 3.10 and 3.14.

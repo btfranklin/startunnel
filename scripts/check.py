@@ -132,6 +132,12 @@ GATES = [
         "Run the failing npm subcommand and correct the asset manifest or source.",
     ),
     Gate(
+        "Standalone CLI",
+        (sys.executable, "tests/cli_standalone.py"),
+        "cli/README.md",
+        "Run `pdm run python tests/cli_standalone.py` and correct the client behavior.",
+    ),
+    Gate(
         "Fast automated tests",
         (
             "pytest",

@@ -72,6 +72,8 @@ The installed file still needs Python 3.10 or later. Other platforms can run
 the downloaded file with their Python executable, for example
 `python star_tunnel.py COMMAND` on Windows with Python 3.10 or later.
 No package manager or repository checkout is required.
+CI runs the standalone client without project packages on Linux and Windows
+with Python 3.10 and 3.14. See [testing](../docs/testing.md#local-gates).
 
 ## Update the client
 

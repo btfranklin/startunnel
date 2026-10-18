@@ -19,6 +19,25 @@ env:
   PDM_CHECK_UPDATE: "false"
 
 jobs:
+  standalone-cli:
+    name: CLI (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run without project dependencies
+        run: python tests/cli_standalone.py
+
   canonical:
     name: Canonical locked gate
     runs-on: ubuntu-latest
@@ -121,7 +140,7 @@ jobs:
   release-candidate:
     name: Validate the distribution image
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: [canonical, postgres, external-proofs, browser]
+    needs: [canonical, standalone-cli, postgres, external-proofs, browser]
     permissions:
       contents: read
       packages: write

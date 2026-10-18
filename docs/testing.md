@@ -34,6 +34,19 @@ CLI contract tests compare agent and admin operations with OpenAPI, including
 admin query fields. Tutorial failure tests check cycle cleanup and reuse of the
 close idempotency key after an uncertain result.
 
+The aggregate gate also runs the dependency-free client smoke suite and checks
+CLI types. Run the smoke suite directly with:
+
+```shell
+python3 tests/cli_standalone.py
+```
+
+It runs a copied client outside the checkout against a local synthetic HTTP
+server. CI runs it without project packages on Linux and Windows with Python
+3.10 and 3.14. These jobs check real runtimes; the existing AST check separately
+checks Python 3.10 syntax. The isolated examples lane proves the installed
+client against the application and PostgreSQL.
+
 ## Documentation structure
 
 Install the published [Perfect Doc native executable](https://github.com/btfranklin/perfect-doc/releases/tag/v0.1.0)

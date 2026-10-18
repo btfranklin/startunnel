@@ -55,6 +55,8 @@ commands do not check for updates. There is no package-manager release.
    The existing route, example, template, and browser checks remain in place.
    Perfect Doc does not grade prose or execute documented commands.
 3. Normal pushes run source, PostgreSQL, agent, example, and browser checks.
+   They also run the standalone CLI on Linux and Windows with Python 3.10 and
+   3.14, without project dependencies.
    When the commit is ready for release, select **Run workflow** for `ci.yml`
    on `main`, or run `gh workflow run ci.yml --ref main`. This manual run checks
    the selected commit and builds one Linux amd64 `runtime` image under a

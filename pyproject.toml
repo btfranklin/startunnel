@@ -46,6 +46,7 @@ src = ["src", "tests", "examples"]
 
 [tool.ruff.per-file-target-version]
 "cli/*.py" = "py310"
+"tests/cli_standalone.py" = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "DJ", "RUF"]
