@@ -1,4 +1,4 @@
-"""Compare baseline and candidate runtime resources in disposable Compose stacks."""
+"""Measure runtime resources in disposable Compose stacks."""
 
 from __future__ import annotations
 
@@ -580,7 +580,7 @@ def _baseline_worktree(ref: str) -> Iterator[Path]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline-ref", default="HEAD", help="Baseline Git ref (default: HEAD).")
+    parser.add_argument("--baseline-ref", help="Optional Git ref for a baseline comparison.")
     parser.add_argument("--warmup-seconds", type=int, default=120)
     parser.add_argument("--idle-seconds", type=int, default=600)
     parser.add_argument("--sample-seconds", type=int, default=60)
@@ -601,7 +601,7 @@ def _write_report(report: dict[str, Any]) -> Path:
     output = (
         ROOT
         / "artifacts"
-        / ("resource-comparison-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+        / ("resource-measurement-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -641,13 +641,16 @@ def main(argv: list[str] | None = None) -> int:
             "load_operations": arguments.load_operations,
             "deletion_timeout_seconds": arguments.deletion_timeout_seconds,
         }
-        with termination_signals(), _baseline_worktree(arguments.baseline_ref) as baseline_root:
-            baseline = _measure_stack(
-                baseline_root,
-                generated_project_name("resource-baseline"),
-                "baseline",
-                **common,
-            )
+        baseline = None
+        with termination_signals():
+            if arguments.baseline_ref:
+                with _baseline_worktree(arguments.baseline_ref) as baseline_root:
+                    baseline = _measure_stack(
+                        baseline_root,
+                        generated_project_name("resource-baseline"),
+                        "baseline",
+                        **common,
+                    )
             candidate = _measure_stack(
                 ROOT,
                 generated_project_name("resource-candidate"),
@@ -655,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
                 **common,
             )
         report: dict[str, Any] = {
-            "schema": "startunnel-resource-comparison",
+            "schema": "startunnel-resource-measurement",
             "created_at": datetime.now(UTC).isoformat(),
             "host": {
                 "system": platform.system(),
@@ -701,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(f"Resource targets were missed. Safe report: {report_path}", file=sys.stderr)
             return 1
-        print(f"Resource comparison passed. Safe report: {report_path}")
+        print(f"Resource measurement passed. Safe report: {report_path}")
     except (
         ValueError,
         subprocess.SubprocessError,
@@ -709,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
         IsolationError,
         LaneError,
     ) as error:
-        print(f"Resource comparison failed: {error}", file=sys.stderr)
+        print(f"Resource measurement failed: {error}", file=sys.stderr)
         return 1
     return 0
 

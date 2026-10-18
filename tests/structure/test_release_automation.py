@@ -1231,3 +1231,68 @@ def test_manual_release_workflow_limits_provider_settings_to_live_proof_step() -
     )
     assert workflow.count("--project-name") == runner_count
     assert "docker compose" not in workflow
+
+
+@pytest.mark.parametrize(
+    ("baseline_ref", "candidate_cpu", "expected_status"),
+    [(None, 0.1, 0), ("main", 0.1, 0), (None, 2.0, 1)],
+)
+def test_resource_measurement_runs_only_requested_stacks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    baseline_ref: str | None,
+    candidate_cpu: float,
+    expected_status: int,
+) -> None:
+    measured: list[str] = []
+    baseline_events: list[str] = []
+    reports: list[dict[str, Any]] = []
+
+    @contextmanager
+    def baseline_checkout(ref: str) -> Iterator[Path]:
+        assert ref == baseline_ref
+        baseline_events.append("open")
+        try:
+            yield tmp_path / "baseline"
+        finally:
+            baseline_events.append("close")
+
+    def measure(root: Path, project: str, label: str, **kwargs: Any) -> dict[str, Any]:
+        measured.append(label)
+        assert root == (tmp_path / "baseline" if label == "baseline" else resource_runner.ROOT)
+        if label == "candidate" and baseline_ref:
+            assert baseline_events == ["open", "close"]
+        return {
+            "idle": {
+                "cpu_percent_of_one_core": candidate_cpu,
+                "actual_seconds": 600,
+                "health_probe_executions": {},
+                "maintenance_delta": None,
+            },
+            "memory": {"stable": True},
+            "deletion": {"passed": True},
+            "ready_seconds": 5,
+        }
+
+    def report(document: dict[str, Any]) -> Path:
+        reports.append(document)
+        return tmp_path / "report.json"
+
+    monkeypatch.setattr(resource_runner, "assert_local_docker", lambda environment: None)
+    monkeypatch.setattr(
+        "scripts.run_resource_measurement.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "synthetic-version\n"),
+    )
+    monkeypatch.setattr(resource_runner, "_baseline_worktree", baseline_checkout)
+    monkeypatch.setattr(resource_runner, "_measure_stack", measure)
+    monkeypatch.setattr(resource_runner, "_write_report", report)
+    previous_umask = os.umask(0o077)
+    try:
+        arguments = ["--baseline-ref", baseline_ref] if baseline_ref else []
+        assert resource_runner.main(arguments) == expected_status
+    finally:
+        os.umask(previous_umask)
+    assert measured == (["baseline", "candidate"] if baseline_ref else ["candidate"])
+    assert reports[0]["method"]["baseline_ref"] == baseline_ref
+    assert (reports[0]["baseline"] is not None) == bool(baseline_ref)
+    assert reports[0]["acceptance"]["candidate_idle_cpu_below_one_percent"] == (candidate_cpu < 1.0)

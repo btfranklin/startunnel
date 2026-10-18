@@ -120,12 +120,12 @@ Use the isolated idle measurement lane after a fresh build:
 pdm run python scripts/run_isolated_test_lane.py resources
 ```
 
-The lane checks out `HEAD` in a temporary detached worktree as its baseline.
-It compares that committed state with the current working tree. For a different
-baseline, run `pdm run python scripts/run_resource_measurement.py --baseline-ref REF`.
-It builds the baseline and candidate, runs both with one Uvicorn worker and no
-development reloader, and removes both stacks and their volumes. It uses only
-internal clients. The report is in `artifacts/resource-comparison-*.json`.
+The lane measures the current working tree. For a comparison, run
+`pdm run python scripts/run_resource_measurement.py --baseline-ref REF`.
+This option also checks out and measures the selected baseline in a temporary
+detached worktree. Each stack uses one Uvicorn worker and no development
+reloader. The lane removes its stacks and volumes. It uses only internal
+clients. The report is in `artifacts/resource-measurement-*.json`.
 
 1. Warm the stack for two minutes.
 2. Measure idle CPU and wakeups for ten minutes.
