@@ -27,7 +27,7 @@ from tunnels.errors import (
     TunnelUnavailable,
 )
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
-from tunnels.services import create_tunnel, post_reply, rotate_address_as_operator
+from tunnels.services import create_tunnel, post_reply, rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -182,9 +182,7 @@ def test_async_helpers_revalidate_revocation_and_address_rotation(
         _confirm_activity_page_for_async(page=revoked, credential=reader, address=created.address)
 
     actor = user_factory()
-    rotate_address_as_operator(
-        actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
-    )
+    rotate_address_as_admin(actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1)
     with pytest.raises(TunnelUnavailable):
         _confirm_activity_page_for_async(page=page, credential=creator, address=created.address)
 

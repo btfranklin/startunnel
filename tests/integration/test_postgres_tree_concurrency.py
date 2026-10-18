@@ -28,7 +28,7 @@ from tunnels.services import (
     list_leaves,
     list_replies,
     post_reply,
-    rotate_address_as_operator,
+    rotate_address_as_admin,
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -234,7 +234,7 @@ def test_address_rotation_retries_one_database_collision(
     generated_tokens = iter((parse_address(created.address), b"\xff" * 16))
     monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: next(generated_tokens))
 
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=credential.created_by,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,

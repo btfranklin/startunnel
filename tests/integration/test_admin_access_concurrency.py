@@ -21,7 +21,7 @@ from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminOperation, User
 from tunnels.errors import IdempotencyConflict, InvalidCredential
 from tunnels.models import AuditEvent, Cycle
-from tunnels.services import close_cycle_as_operator, create_tunnel
+from tunnels.services import close_cycle_as_admin, create_tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -66,9 +66,9 @@ def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
 
     def close_after_both_arrive(*args: Any, **kwargs: Any) -> None:
         both_in_domain.wait(timeout=15)
-        close_cycle_as_operator(*args, **kwargs)
+        close_cycle_as_admin(*args, **kwargs)
 
-    monkeypatch.setattr("accounts.admin_services.close_cycle_as_operator", close_after_both_arrive)
+    monkeypatch.setattr("accounts.admin_services.close_cycle_as_admin", close_after_both_arrive)
 
     def close(tunnel_id: UUID, cycle_id: UUID, key: str) -> dict[str, Any]:
         close_old_connections()

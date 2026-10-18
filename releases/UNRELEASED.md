@@ -149,5 +149,12 @@ coverage and requires complete critical coverage. New tests check deep subtree
 pages, forced close/post and expiry/post lock orders, and physical deletion of
 a branched message history.
 
+## Shared cycle services
+
+Initial and later cycles now share root and event construction. Create, start,
+and rollover retries use the same typed snapshot validation. Admin domain
+functions use consistent `as_admin` names. Admin cycle and address actions share
+a tunnel lock check.
+
 The cycle directory now returns only its usable page cursor. The unused
 `snapshot_cursor` field is removed.

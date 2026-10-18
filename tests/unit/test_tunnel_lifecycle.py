@@ -80,13 +80,29 @@ def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tunnel_state", "unknown"),
+        ("cycle_state", "unknown"),
+        ("message_count", None),
+        ("message_count", False),
+        ("message_count", 0),
+        ("content_bytes", None),
+        ("content_bytes", False),
+        ("content_bytes", -1),
+        ("event_position", None),
+        ("event_position", False),
+        ("event_position", 0),
+    ],
+)
 def test_create_replay_rejects_an_invalid_historical_response(
-    credential_factory: Any,
+    credential_factory: Any, field: str, value: Any
 ) -> None:
     creator, _ = credential_factory()
     _create(creator, key="create-invalid-response")
     record = creator.idempotency_records.get()
-    record.response = {**record.response, "message_count": False}
+    record.response = {**record.response, field: value}
     record.save(update_fields=["response"])
 
     with pytest.raises(TunnelUnavailable):

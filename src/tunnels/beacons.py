@@ -412,7 +412,7 @@ def withdraw_beacon(
 
 
 @transaction.atomic
-def withdraw_beacon_as_operator(*, actor: User, beacon_id: UUID) -> dict[str, Any]:
+def withdraw_beacon_as_admin(*, actor: User, beacon_id: UUID) -> dict[str, Any]:
     """Withdraw one Beacon after the caller has checked admin-credential access."""
 
     if not User.objects.filter(pk=actor.pk, is_active=True).exists():

@@ -88,7 +88,7 @@ def test_account_creation_rejects_case_only_username_collision(
 def test_admin_tunnel_reads_return_the_stored_current_address(
     client: Any, user_factory: Any, credential_factory: Any
 ) -> None:
-    from tunnels.services import create_tunnel, rotate_address_as_operator
+    from tunnels.services import create_tunnel, rotate_address_as_admin
 
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -101,7 +101,7 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     )
     path = f"/api/v1/admin/tunnels/{created.tunnel.id}"
     assert client.get(path, **headers).json()["address"] == created.address
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
     )
     listed = client.get("/api/v1/admin/tunnels", **headers).json()["items"]

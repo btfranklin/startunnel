@@ -264,11 +264,11 @@ def test_admin_actions_do_not_extend_expired_history(
     actor = created.tunnel.creator.created_by
     with time_machine.travel(expiry + timedelta(seconds=61), tick=False):
         if action == "close":
-            services.close_cycle_as_operator(
+            services.close_cycle_as_admin(
                 actor=actor, tunnel_id=created.tunnel.id, expected_cycle_id=created.cycle.id
             )
         else:
-            services.retire_tunnel_as_operator(
+            services.retire_tunnel_as_admin(
                 actor=actor,
                 tunnel_id=created.tunnel.id,
                 expected_address_generation=1,
@@ -287,11 +287,11 @@ def test_reply_replay_checks_current_tunnel_access(credential_factory: Any, acti
     created, _ = _conversation(credential_factory, f"reply-access-{action}")
     actor = created.tunnel.creator.created_by
     if action == "rotate":
-        services.rotate_address_as_operator(
+        services.rotate_address_as_admin(
             actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
         )
     else:
-        services.retire_tunnel_as_operator(
+        services.retire_tunnel_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,
@@ -374,11 +374,11 @@ def test_cycle_control_replays_check_current_address(
     retry()
     retry()
     if access_change == "rotate":
-        services.rotate_address_as_operator(
+        services.rotate_address_as_admin(
             actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
         )
     else:
-        services.retire_tunnel_as_operator(
+        services.retire_tunnel_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,

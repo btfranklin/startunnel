@@ -12,7 +12,7 @@ from django.urls import reverse
 from accounts.models import User
 from agents.models import AgentCredential
 from tunnels.models import TunnelAddress
-from tunnels.services import create_tunnel, rotate_address_as_operator
+from tunnels.services import create_tunnel, rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -61,7 +61,7 @@ def test_tunnel_inspection_shows_stored_data_but_rejects_changes(
     created = create_tunnel(
         credential=credential, idempotency_key="inspection-create", root_content=content
     )
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=administrator, tunnel_id=created.tunnel.pk, expected_address_generation=1
     )
     address = TunnelAddress.objects.get(tunnel=created.tunnel, state="current")

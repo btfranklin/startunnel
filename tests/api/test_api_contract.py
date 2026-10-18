@@ -228,7 +228,7 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
 ) -> None:
     from api.rate_limits import consume_api_operation
     from core import limits as instance_limits
-    from tunnels.services import create_tunnel, rotate_address_as_operator
+    from tunnels.services import create_tunnel, rotate_address_as_admin
 
     first, first_key = credential_factory()
     _, second_key = credential_factory()
@@ -237,7 +237,7 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
         idempotency_key="address-miss-limit-create",
         root_content={"type": "text", "text": "A root."},
     )
-    rotate_address_as_operator(
+    rotate_address_as_admin(
         actor=first.created_by,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,

@@ -11,7 +11,7 @@ from django.utils import timezone
 from tunnels.entry import enter_tunnel
 from tunnels.errors import InvalidCredential, InvalidRequest, TunnelUnavailable
 from tunnels.models import ActivityCheckpoint, Cycle
-from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_operator
+from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -88,7 +88,7 @@ def test_entry_follows_a_replacement_cycle(credential_factory: Any, user_factory
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    start_cycle_as_operator(
+    start_cycle_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,

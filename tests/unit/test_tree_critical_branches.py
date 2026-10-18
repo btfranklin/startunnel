@@ -24,14 +24,14 @@ from tunnels.models import Cycle, Message, Tunnel
 from tunnels.services import (
     _close_locked_cycle,
     close_cycle,
-    close_cycle_as_operator,
+    close_cycle_as_admin,
     create_tunnel,
     get_message,
     list_replies,
     post_reply,
     read_tree,
-    rollover_cycle_as_operator,
-    start_cycle_as_operator,
+    rollover_cycle_as_admin,
+    start_cycle_as_admin,
 )
 
 pytestmark = pytest.mark.django_db
@@ -307,23 +307,23 @@ def test_operator_can_close_start_and_roll_over_instance_cycle(
     actor = user_factory()
     created = _create(credential, "critical-operator-lifecycle")
     with pytest.raises(LifecycleConflict):
-        close_cycle_as_operator(
+        close_cycle_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_cycle_id=uuid4(),
         )
-    close_cycle_as_operator(
+    close_cycle_as_admin(
         actor=actor,
         tunnel_id=created.tunnel.id,
         expected_cycle_id=created.cycle.id,
     )
-    started = start_cycle_as_operator(
+    started = start_cycle_as_admin(
         actor=actor,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
         root_content={"type": "text", "text": "Second cycle."},
     )
-    rolled = rollover_cycle_as_operator(
+    rolled = rollover_cycle_as_admin(
         actor=actor,
         tunnel_id=created.tunnel.id,
         expected_cycle_id=started.cycle.id,
@@ -342,13 +342,13 @@ def test_inactive_operator_cannot_control_or_find_tunnel(
     actor.is_active = False
     actor.save(update_fields=["is_active"])
     with pytest.raises(TunnelUnavailable):
-        close_cycle_as_operator(
+        close_cycle_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_cycle_id=created.cycle.id,
         )
     with pytest.raises(TunnelUnavailable):
-        start_cycle_as_operator(
+        start_cycle_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,

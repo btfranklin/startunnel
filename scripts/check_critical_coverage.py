@@ -41,6 +41,8 @@ CRITICAL_TARGETS = (
         "src/tunnels/services.py",
         (
             "_normalize_correlation_id",
+            "_open_cycle",
+            "_read_cycle_snapshot",
             "create_tunnel",
             "post_reply",
             "read_tree",

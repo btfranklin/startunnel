@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import secrets
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -167,6 +168,40 @@ class StartedCycle:
     content_bytes: int
     event_position: int
     replay: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CycleSnapshot:
+    cycle_state: str
+    message_count: int
+    content_bytes: int
+    event_position: int
+
+
+def _read_cycle_snapshot(response: Mapping[str, Any]) -> CycleSnapshot:
+    cycle_state = response.get("cycle_state")
+    message_count = response.get("message_count")
+    content_bytes = response.get("content_bytes")
+    event_position = response.get("event_position")
+    if (
+        cycle_state not in Cycle.State.values
+        or not isinstance(message_count, int)
+        or isinstance(message_count, bool)
+        or message_count < 1
+        or not isinstance(content_bytes, int)
+        or isinstance(content_bytes, bool)
+        or content_bytes < 0
+        or not isinstance(event_position, int)
+        or isinstance(event_position, bool)
+        or event_position < 1
+    ):
+        raise TunnelUnavailable()
+    return CycleSnapshot(
+        cycle_state=cycle_state,
+        message_count=message_count,
+        content_bytes=content_bytes,
+        event_position=event_position,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,24 +405,9 @@ def create_tunnel(
         address = address_row.address
         response = idempotency.record.response
         tunnel_state = response.get("tunnel_state")
-        cycle_state = response.get("cycle_state")
-        message_count = response.get("message_count")
-        content_bytes = response.get("content_bytes")
-        event_position = response.get("event_position")
-        if (
-            tunnel_state not in Tunnel.State.values
-            or cycle_state not in Cycle.State.values
-            or not isinstance(message_count, int)
-            or isinstance(message_count, bool)
-            or message_count < 1
-            or not isinstance(content_bytes, int)
-            or isinstance(content_bytes, bool)
-            or content_bytes < 0
-            or not isinstance(event_position, int)
-            or isinstance(event_position, bool)
-            or event_position < 1
-        ):
+        if tunnel_state not in Tunnel.State.values:
             raise TunnelUnavailable()
+        snapshot = _read_cycle_snapshot(response)
         return CreatedTunnel(
             tunnel=tunnel,
             address=address,
@@ -395,10 +415,10 @@ def create_tunnel(
             cycle=cycle,
             root=root,
             tunnel_state=tunnel_state,
-            cycle_state=cycle_state,
-            message_count=message_count,
-            content_bytes=content_bytes,
-            event_position=event_position,
+            cycle_state=snapshot.cycle_state,
+            message_count=snapshot.message_count,
+            content_bytes=snapshot.content_bytes,
+            event_position=snapshot.event_position,
             replay=True,
         )
     _lock_instance_tunnel_quota()
@@ -420,50 +440,19 @@ def create_tunnel(
         next_event_position=3,
     )
     _address_row, address = _allocate_random_address(tunnel=tunnel, generation=1)
-    cycle = Cycle.objects.create(
+    opened = _open_cycle(
         tunnel=tunnel,
-        creator=credential,
+        credential=credential,
         number=1,
+        start_position=1,
         label=normalized_cycle_label,
-        state=Cycle.State.ACTIVE,
-        next_sequence=2,
         expires_at=now + timedelta(seconds=seconds),
-        retention_seconds=settings.STARTUNNEL_HISTORY_RETENTION_SECONDS,
-    )
-    transaction.on_commit(notify_maintenance)
-    root = _create_message(
-        tunnel=tunnel,
-        cycle=cycle,
-        sender=credential,
-        parent=None,
-        sequence=1,
         payload=root_payload,
-        correlation_id=correlation,
+        correlation=correlation,
+        mentions=mentions,
         session=session,
     )
-    _store_mentions(root, mentions)
-    cycle.root_message = root
-    cycle.message_count = 1
-    cycle.content_bytes = root.byte_count
-    cycle.save(update_fields=["root_message", "message_count", "content_bytes"])
-    TunnelEvent.objects.bulk_create(
-        [
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                position=1,
-                event_type=TunnelEvent.Type.CYCLE_STARTED,
-            ),
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                message=root,
-                position=2,
-                event_type=TunnelEvent.Type.MESSAGE_POSTED,
-            ),
-        ]
-    )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
+    cycle, root = opened.cycle, opened.root
     finish_idempotency(
         idempotency.record,
         response={
@@ -1129,6 +1118,75 @@ def _prepare_cycle_root(
     return seconds, label, payload, correlation, mention_ids
 
 
+def _open_cycle(
+    *,
+    tunnel: Tunnel,
+    credential: AgentCredential,
+    number: int,
+    start_position: int,
+    expires_at: datetime,
+    label: str,
+    payload: ValidatedPayload,
+    correlation: str,
+    mentions: list[AgentCredential],
+    session: str | None = None,
+) -> StartedCycle:
+    message_position = start_position + 1
+    cycle = Cycle.objects.create(
+        tunnel=tunnel,
+        creator=credential,
+        number=number,
+        label=label,
+        state=Cycle.State.ACTIVE,
+        next_sequence=2,
+        expires_at=expires_at,
+        retention_seconds=settings.STARTUNNEL_HISTORY_RETENTION_SECONDS,
+    )
+    transaction.on_commit(notify_maintenance)
+    root = _create_message(
+        tunnel=tunnel,
+        cycle=cycle,
+        sender=credential,
+        parent=None,
+        sequence=1,
+        payload=payload,
+        correlation_id=correlation,
+        session=session,
+    )
+    _store_mentions(root, mentions)
+    cycle.root_message = root
+    cycle.message_count = 1
+    cycle.content_bytes = root.byte_count
+    cycle.save(update_fields=["root_message", "message_count", "content_bytes"])
+    TunnelEvent.objects.bulk_create(
+        [
+            TunnelEvent(
+                tunnel=tunnel,
+                cycle=cycle,
+                position=start_position,
+                event_type=TunnelEvent.Type.CYCLE_STARTED,
+            ),
+            TunnelEvent(
+                tunnel=tunnel,
+                cycle=cycle,
+                message=root,
+                position=message_position,
+                event_type=TunnelEvent.Type.MESSAGE_POSTED,
+            ),
+        ]
+    )
+    notify(ACTIVITY_CHANNEL, str(tunnel.id))
+    return StartedCycle(
+        tunnel=tunnel,
+        cycle=cycle,
+        root=root,
+        cycle_state=Cycle.State.ACTIVE,
+        message_count=1,
+        content_bytes=root.byte_count,
+        event_position=message_position,
+    )
+
+
 def _start_cycle_locked(
     *,
     tunnel: Tunnel,
@@ -1149,74 +1207,33 @@ def _start_cycle_locked(
     now = timezone.now()
     number = tunnel.next_cycle_number
     start_position = tunnel.next_event_position
-    message_position = start_position + 1
-    cycle = Cycle.objects.create(
-        tunnel=tunnel,
-        creator=credential,
-        number=number,
-        label=label,
-        state=Cycle.State.ACTIVE,
-        next_sequence=2,
-        expires_at=now + timedelta(seconds=seconds),
-        retention_seconds=settings.STARTUNNEL_HISTORY_RETENTION_SECONDS,
-    )
-    transaction.on_commit(notify_maintenance)
-    root = _create_message(
-        tunnel=tunnel,
-        cycle=cycle,
-        sender=credential,
-        parent=None,
-        sequence=1,
-        payload=payload,
-        correlation_id=correlation,
-        session=session,
-    )
-    _store_mentions(root, mentions)
-    cycle.root_message = root
-    cycle.message_count = 1
-    cycle.content_bytes = root.byte_count
-    cycle.save(update_fields=["root_message", "message_count", "content_bytes"])
     tunnel.state = Tunnel.State.ACTIVE
     tunnel.dormant_at = None
     tunnel.next_cycle_number = number + 1
-    tunnel.next_event_position = message_position + 1
+    tunnel.next_event_position = start_position + 2
     tunnel.save(update_fields=["state", "dormant_at", "next_cycle_number", "next_event_position"])
-    TunnelEvent.objects.bulk_create(
-        [
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                position=start_position,
-                event_type=TunnelEvent.Type.CYCLE_STARTED,
-            ),
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                message=root,
-                position=message_position,
-                event_type=TunnelEvent.Type.MESSAGE_POSTED,
-            ),
-        ]
+    opened = _open_cycle(
+        tunnel=tunnel,
+        credential=credential,
+        number=number,
+        start_position=start_position,
+        expires_at=now + timedelta(seconds=seconds),
+        label=label,
+        payload=payload,
+        correlation=correlation,
+        mentions=mentions,
+        session=session,
     )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
     record_event(
         actor_credential=credential if actor_user is None else None,
         actor_user=actor_user,
         action="cycle.started",
         target_type="cycle",
-        target_id=cycle.id,
+        target_id=opened.cycle.id,
         request_id=current_request_id(),
         metadata={"number": number},
     )
-    return StartedCycle(
-        tunnel=tunnel,
-        cycle=cycle,
-        root=root,
-        cycle_state=Cycle.State.ACTIVE,
-        message_count=1,
-        content_bytes=root.byte_count,
-        event_position=message_position,
-    )
+    return opened
 
 
 def _replayed_cycle(
@@ -1234,33 +1251,17 @@ def _replayed_cycle(
     )
     if cycle is None or not cycle_is_readable(cycle):
         raise CycleUnavailable()
-    event_position = record.response.get("event_position")
-    cycle_state = record.response.get("cycle_state")
-    message_count = record.response.get("message_count")
-    content_bytes = record.response.get("content_bytes")
-    if (
-        not isinstance(event_position, int)
-        or isinstance(event_position, bool)
-        or event_position < 1
-        or cycle_state not in Cycle.State.values
-        or not isinstance(message_count, int)
-        or isinstance(message_count, bool)
-        or message_count < 1
-        or not isinstance(content_bytes, int)
-        or isinstance(content_bytes, bool)
-        or content_bytes < 0
-    ):
-        raise TunnelUnavailable()
+    snapshot = _read_cycle_snapshot(record.response)
     if cycle.root_message is None:
         raise TunnelUnavailable()
     return StartedCycle(
         tunnel=tunnel,
         cycle=cycle,
         root=cycle.root_message,
-        cycle_state=cycle_state,
-        message_count=message_count,
-        content_bytes=content_bytes,
-        event_position=event_position,
+        cycle_state=snapshot.cycle_state,
+        message_count=snapshot.message_count,
+        content_bytes=snapshot.content_bytes,
+        event_position=snapshot.event_position,
         replay=True,
     )
 
@@ -1612,17 +1613,8 @@ def close_cycle(
 
 
 @transaction.atomic
-def close_cycle_as_operator(*, actor: User, tunnel_id: UUID, expected_cycle_id: UUID) -> None:
-    if not User.objects.filter(pk=actor.pk, is_active=True).exists():
-        raise TunnelUnavailable()
-    tunnel = (
-        Tunnel.objects.select_for_update(of=("self",))
-        .select_related("creator")
-        .filter(pk=tunnel_id)
-        .first()
-    )
-    if not tunnel:
-        raise TunnelUnavailable()
+def close_cycle_as_admin(*, actor: User, tunnel_id: UUID, expected_cycle_id: UUID) -> None:
+    tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
     cycle = (
         Cycle.objects.select_for_update().filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
     )
@@ -1631,7 +1623,7 @@ def close_cycle_as_operator(*, actor: User, tunnel_id: UUID, expected_cycle_id: 
     _close_locked_cycle(tunnel=tunnel, cycle=cycle, reason="instance_operator", actor_user=actor)
 
 
-def _locked_operator_tunnel(*, actor: User, tunnel_id: UUID) -> Tunnel:
+def _locked_admin_tunnel(*, actor: User, tunnel_id: UUID) -> Tunnel:
     if not User.objects.filter(pk=actor.pk, is_active=True).exists():
         raise TunnelUnavailable()
     tunnel = (
@@ -1693,7 +1685,7 @@ def _start_cycle_as_admin_locked(
 
 
 @transaction.atomic
-def start_cycle_as_operator(
+def start_cycle_as_admin(
     *,
     actor: User,
     tunnel_id: UUID,
@@ -1703,7 +1695,7 @@ def start_cycle_as_operator(
     expires_in_seconds: int | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
+    tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _start_cycle_as_admin_locked(
         tunnel=tunnel,
         actor=actor,
@@ -1717,7 +1709,7 @@ def start_cycle_as_operator(
 
 
 @transaction.atomic
-def rollover_cycle_as_operator(
+def rollover_cycle_as_admin(
     *,
     actor: User,
     tunnel_id: UUID,
@@ -1728,7 +1720,7 @@ def rollover_cycle_as_operator(
     expires_in_seconds: int | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
+    tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _start_cycle_as_admin_locked(
         tunnel=tunnel,
         actor=actor,
@@ -1804,13 +1796,13 @@ def _rotate_locked_address(
 
 
 @transaction.atomic
-def rotate_address_as_operator(
+def rotate_address_as_admin(
     *,
     actor: User,
     tunnel_id: UUID,
     expected_address_generation: int,
 ) -> RotatedAddress:
-    tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
+    tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _rotate_locked_address(
         tunnel=tunnel,
         actor=actor,
@@ -1883,14 +1875,14 @@ def _retire_as_admin_locked(
 
 
 @transaction.atomic
-def retire_tunnel_as_operator(
+def retire_tunnel_as_admin(
     *,
     actor: User,
     tunnel_id: UUID,
     expected_address_generation: int,
     confirmation: str,
 ) -> None:
-    tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
+    tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
     _retire_as_admin_locked(
         tunnel=tunnel,
         actor=actor,

@@ -29,10 +29,10 @@ from tunnels.services import (
     close_cycle,
     create_tunnel,
     post_reply,
-    retire_tunnel_as_operator,
+    retire_tunnel_as_admin,
     retirement_confirmation,
-    rotate_address_as_operator,
-    start_cycle_as_operator,
+    rotate_address_as_admin,
+    start_cycle_as_admin,
 )
 
 pytestmark = pytest.mark.django_db
@@ -267,7 +267,7 @@ def test_new_cycle_can_publish_a_new_beacon(credential_factory: Any, user_factor
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    started = start_cycle_as_operator(
+    started = start_cycle_as_admin(
         actor=user_factory(),
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
@@ -351,7 +351,7 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
     assert BoardState.objects.get(pk=1).position == 1
     operator = user_factory(username="beacon-address-operator")
 
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
@@ -361,7 +361,7 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
     assert page.items[0]["address"] != created.address
     assert BoardState.objects.get(pk=1).position == 2
 
-    retire_tunnel_as_operator(
+    retire_tunnel_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=2,

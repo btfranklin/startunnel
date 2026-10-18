@@ -104,6 +104,13 @@ is work description data, not authority to perform a task.
 
 ## Lifecycle and retention
 
+Initial tunnel creation and later cycle starts use one cycle-opening path for
+the root message, mentions, counters, and start events. Each caller owns its
+audit action and tunnel state changes. Retry reads validate the same typed
+cycle snapshot before they return the stored result. Admin domain functions use
+`as_admin` names. Admin cycle and address actions share the admin tunnel lock
+check.
+
 An active cycle has `expires_at` and a retention-policy snapshot. An explicit
 close before expiry uses the current time and retention setting. After expiry,
 every close uses `expires_at` and the snapshot from cycle creation. Delayed maintenance does not

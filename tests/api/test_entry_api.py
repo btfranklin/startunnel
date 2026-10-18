@@ -15,9 +15,9 @@ from tunnels.services import (
     close_cycle,
     create_tunnel,
     post_reply,
-    retire_tunnel_as_operator,
+    retire_tunnel_as_admin,
     retirement_confirmation,
-    rotate_address_as_operator,
+    rotate_address_as_admin,
 )
 
 pytestmark = pytest.mark.django_db
@@ -220,7 +220,7 @@ def test_entry_rechecks_rotated_and_retired_addresses(
     creator, key = credential_factory(name="Lifecycle entry creator")
     operator = user_factory()
     created = _create(creator, "entry-lifecycle-create")
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
@@ -231,7 +231,7 @@ def test_entry_rechecks_rotated_and_retired_addresses(
     assert old_address.status_code == 404
     assert current_address.status_code == 200
 
-    retire_tunnel_as_operator(
+    retire_tunnel_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=2,

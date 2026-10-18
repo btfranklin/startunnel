@@ -18,9 +18,9 @@ from tunnels.services import (
     close_cycle,
     create_tunnel,
     post_reply,
-    retire_tunnel_as_operator,
+    retire_tunnel_as_admin,
     rollover_cycle,
-    rotate_address_as_operator,
+    rotate_address_as_admin,
     start_cycle,
 )
 
@@ -210,7 +210,7 @@ def test_rotation_racing_post_commits_before_rotation_or_fails_cleanly(
         try:
             actor = User.objects.get(pk=creator.created_by_id)
             barrier.wait(timeout=15)
-            rotate_address_as_operator(
+            rotate_address_as_admin(
                 actor=actor,
                 tunnel_id=created.tunnel.id,
                 expected_address_generation=1,
@@ -275,7 +275,7 @@ def test_retirement_racing_start_always_ends_retired(credential_factory: Any) ->
         try:
             actor = User.objects.get(pk=creator.created_by_id)
             barrier.wait(timeout=15)
-            retire_tunnel_as_operator(
+            retire_tunnel_as_admin(
                 actor=actor,
                 tunnel_id=created.tunnel.id,
                 expected_address_generation=1,

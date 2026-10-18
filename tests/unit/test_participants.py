@@ -14,7 +14,7 @@ from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
 from tunnels.models import ActivityCheckpoint
 from tunnels.participants import list_participants
-from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_operator
+from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -165,7 +165,7 @@ def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    replacement = start_cycle_as_operator(
+    replacement = start_cycle_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,

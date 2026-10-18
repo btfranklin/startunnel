@@ -19,7 +19,7 @@ from agents.models import AgentCredential
 from site_app.views import _authenticated_user
 from tunnels.errors import InvalidRequest, QuotaExceeded, TunnelUnavailable
 from tunnels.models import Tunnel
-from tunnels.services import create_tunnel, rollover_cycle_as_operator
+from tunnels.services import create_tunnel, rollover_cycle_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -130,7 +130,7 @@ def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
         for cycle_number in range(2, 13):
             session = f"session-{tunnel_index}-{cycle_number}"
             sessions.append(session)
-            result = rollover_cycle_as_operator(
+            result = rollover_cycle_as_admin(
                 actor=actor,
                 tunnel_id=created.tunnel.id,
                 expected_cycle_id=current_cycle.id,

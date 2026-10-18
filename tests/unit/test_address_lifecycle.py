@@ -11,8 +11,8 @@ from tunnels.services import (
     create_tunnel,
     get_tunnel_status,
     post_reply,
-    retire_tunnel_as_operator,
-    rotate_address_as_operator,
+    retire_tunnel_as_admin,
+    rotate_address_as_admin,
 )
 
 pytestmark = pytest.mark.django_db
@@ -33,7 +33,7 @@ def test_any_active_admin_can_rotate_an_address(credential_factory: Any, user_fa
     administrator = user_factory()
     created = _create(creator)
 
-    rotated = rotate_address_as_operator(
+    rotated = rotate_address_as_admin(
         actor=administrator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
@@ -70,7 +70,7 @@ def test_create_retry_never_returns_rotated_or_retired_address(
     creator, _ = credential_factory()
     administrator = user_factory()
     created = _create(creator)
-    rotate_address_as_operator(
+    rotate_address_as_admin(
         actor=administrator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
@@ -79,7 +79,7 @@ def test_create_retry_never_returns_rotated_or_retired_address(
         _create(creator)
     assert created.tunnel.addresses.count() == 2
 
-    retire_tunnel_as_operator(
+    retire_tunnel_as_admin(
         actor=administrator,
         tunnel_id=created.tunnel.id,
         confirmation=created.tunnel.label,
@@ -96,7 +96,7 @@ def test_rotation_rejects_stale_generation_and_inactive_admin(
     administrator = user_factory()
     created = _create(creator)
     with pytest.raises(LifecycleConflict):
-        rotate_address_as_operator(
+        rotate_address_as_admin(
             actor=administrator,
             tunnel_id=created.tunnel.id,
             expected_address_generation=2,
@@ -104,7 +104,7 @@ def test_rotation_rejects_stale_generation_and_inactive_admin(
     administrator.is_active = False
     administrator.save(update_fields=["is_active"])
     with pytest.raises(TunnelUnavailable):
-        rotate_address_as_operator(
+        rotate_address_as_admin(
             actor=administrator,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,
@@ -138,14 +138,14 @@ def test_retirement_requires_confirmation_and_closes_the_cycle(
     administrator = user_factory()
     created = _create(creator)
     with pytest.raises(InvalidRequest, match="confirmation"):
-        retire_tunnel_as_operator(
+        retire_tunnel_as_admin(
             actor=administrator,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,
             confirmation="wrong value",
         )
 
-    retire_tunnel_as_operator(
+    retire_tunnel_as_admin(
         actor=administrator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,

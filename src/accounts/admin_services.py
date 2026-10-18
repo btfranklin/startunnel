@@ -27,17 +27,17 @@ from core.audit import admin_audit_context, record_event
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
-from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_operator
+from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_admin
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
 from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
 from tunnels.services import (
-    close_cycle_as_operator,
-    retire_tunnel_as_operator,
+    close_cycle_as_admin,
+    retire_tunnel_as_admin,
     retirement_confirmation,
-    rollover_cycle_as_operator,
-    rotate_address_as_operator,
-    start_cycle_as_operator,
+    rollover_cycle_as_admin,
+    rotate_address_as_admin,
+    start_cycle_as_admin,
 )
 
 from .admin_access import (
@@ -587,12 +587,12 @@ def _perform(
         return agent_resource(agent), "agent_credential", agent.id
     if operation == "beacons.withdraw":
         beacon_id = _id(data, "beacon_id")
-        resource = withdraw_beacon_as_operator(actor=actor, beacon_id=beacon_id)
+        resource = withdraw_beacon_as_admin(actor=actor, beacon_id=beacon_id)
         return resource, "beacon", beacon_id
     tunnel_id = _id(data, "tunnel_id")
     common: dict[str, Any] = {"actor": actor, "tunnel_id": tunnel_id}
     if operation == "tunnels.close":
-        close_cycle_as_operator(**common, expected_cycle_id=_id(data, "expected_cycle_id"))
+        close_cycle_as_admin(**common, expected_cycle_id=_id(data, "expected_cycle_id"))
     elif operation in {"tunnels.start", "tunnels.rollover"}:
         arguments = {
             **common,
@@ -603,18 +603,16 @@ def _perform(
             "expires_in_seconds": data.get("expires_in_seconds"),
         }
         if operation == "tunnels.rollover":
-            rollover_cycle_as_operator(
-                **arguments, expected_cycle_id=_id(data, "expected_cycle_id")
-            )
+            rollover_cycle_as_admin(**arguments, expected_cycle_id=_id(data, "expected_cycle_id"))
         else:
-            start_cycle_as_operator(**arguments)
+            start_cycle_as_admin(**arguments)
     elif operation == "tunnels.rotate":
-        rotate_address_as_operator(
+        rotate_address_as_admin(
             **common,
             expected_address_generation=int(data["expected_address_generation"]),
         )
     elif operation == "tunnels.retire":
-        retire_tunnel_as_operator(
+        retire_tunnel_as_admin(
             **common,
             confirmation=str(data.get("confirmation", "")),
             expected_address_generation=int(data["expected_address_generation"]),

@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 from django.test import Client
 
-from tunnels.services import rotate_address_as_operator
+from tunnels.services import rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -255,7 +255,7 @@ def test_start_replay_keeps_its_original_response_until_address_rotation(
     original["idempotent_replay"] = True
     assert replay_body == original
 
-    rotate_address_as_operator(
+    rotate_address_as_admin(
         actor=coordinator.created_by,
         tunnel_id=UUID(created["tunnel"]["id"]),
         expected_address_generation=1,
@@ -277,7 +277,7 @@ def test_every_lifecycle_read_and_write_with_a_retired_address_is_unavailable(
     coordinator, coordinator_key = credential_factory()
     created = _create(client, coordinator_key)
     retired_address = created["tunnel"]["address"]
-    rotate_address_as_operator(
+    rotate_address_as_admin(
         actor=coordinator.created_by,
         tunnel_id=UUID(created["tunnel"]["id"]),
         expected_address_generation=1,

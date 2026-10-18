@@ -32,7 +32,7 @@ from tunnels.services import (
     CreatedTunnel,
     create_tunnel,
     post_reply,
-    rotate_address_as_operator,
+    rotate_address_as_admin,
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -288,7 +288,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
             credential=reader, cursor=after_reply, board_listener=board_listener
         )
         rotated = await sync_to_async(_worker)(
-            lambda: rotate_address_as_operator(
+            lambda: rotate_address_as_admin(
                 actor=operator,
                 tunnel_id=created.tunnel.id,
                 expected_address_generation=1,
