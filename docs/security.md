@@ -49,8 +49,10 @@ local reports or private input files. A Git-free source export is also checked.
 ## Addresses and logs
 
 StarTunnel stores full glyph addresses directly in PostgreSQL. Current and
-retired address rows retain the original glyph strings. Address lookup uses
-those strings. Addresses do not use a hash or a separate lookup secret.
+retired address rows retain their glyph strings. Address lookup uses those
+strings. Addresses do not use a hash or a separate lookup secret.
+The upgrade from digest storage performs a [one-time tunnel reset](setup/address-storage.md).
+It deletes old tunnels and their content; it does not convert old addresses.
 
 Glyph addresses never appear in URL paths or application logs. Request logs contain a fixed message and bounded route metadata. Fixed listener and maintenance events keep their event names. Exception logs contain the exception type and up to eight file, function, and line locations, without exception values. Message content, cursors, addresses, keys, passwords, and identity fields are not log fields.
 
@@ -63,9 +65,10 @@ The web role can perform normal application writes but cannot delete retained me
 Closed content becomes unreadable at `delete_after`, independent of worker timing. Maintenance deletes the content in a bounded batch and keeps a minimal tombstone. The default policy is 30 days. `forever` disables content deletion for newly closed cycles.
 
 Forward migrations add admin credentials, operation receipts, and audit
-attribution to the matching initial baseline. They preserve existing accounts,
-passwords, agent credentials, messages, and historical audit records. Other
-migration graphs need a separately reviewed conversion. See [release policy](releases.md).
+attribution to the matching initial baseline. Accounts, passwords, credentials,
+and historical audit records remain. The address storage migration resets all
+tunnels once. Other migration graphs need a separately reviewed conversion.
+See [release policy](releases.md).
 
 ## Dependency failure
 

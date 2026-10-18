@@ -76,9 +76,10 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
-For a database that still stores address digests, first follow the
-[address storage conversion](address-storage.md). That conversion needs the
-original addresses and a brief writer stop during the schema migration.
+For a database that still stores address digests, this upgrade performs a
+[one-time tunnel reset](address-storage.md). It deletes all existing tunnels
+and their message data. Accounts and credentials remain. Read that notice and
+make a verified backup before applying the update. No conversion file is needed.
 
 1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
    Read its notes, configuration changes, database compatibility, and rollback

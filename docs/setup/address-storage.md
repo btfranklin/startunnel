@@ -1,71 +1,42 @@
-# Address storage conversion
+# One-time tunnel reset
 
-StarTunnel stores the full canonical glyph address in each address row. This
-includes current and retired addresses. New databases need no conversion file.
+The upgrade from address digests to stored glyph addresses deletes all existing
+tunnels. This is a breaking upgrade. It deletes their addresses, cycles, messages,
+mentions, activity events, checkpoints, and agent retry records. It also removes
+admin operation receipts for tunnel controls.
 
-An older database stores HMAC digests. Migration `0004_store_glyph_addresses`
-needs the original addresses to replace those digests. A digest cannot be
-converted back to an address. The migration stops if an original is missing
-or does not match. It does not rotate addresses or delete address history.
+Accounts, passwords, admin keys, agent credentials, other admin operation receipts,
+and audit records remain. Existing credentials can create and use new tunnels.
+Old tunnel IDs and addresses no longer work. No conversion file or old address
+lookup secret is needed.
 
-## Prepare the old database
+## Upgrade
 
-1. Make and verify a database backup. Keep the old image and configuration.
-2. Collect every original address, including retired address generations,
-   from the operator's private records. Match each address to its address-row
-   UUID. Do not put this data in Git, a command argument, or a log.
+Make and verify a [backup](backups.md) before the upgrade. Keep the old image,
+source, and configuration. If the team needs old message content, retain that
+backup and complete the work that needs the old tunnels before upgrading.
 
-If an original address is missing, keep the old database and report the missing
-row to the owner. Do not invent an address or delete the row to pass migration.
+Follow the normal [update procedure](maintain.md#update-the-application).
+Migration `0004_store_glyph_addresses` performs the reset while application
+writers are stopped. The migration and reset run in one database transaction.
+A failure rolls back the reset. A new database has no tunnels to delete.
 
-## Supply the conversion file
+After the upgrade, authenticate with an existing credential and create a new
+tunnel. Verify a message exchange with its new address. Agents must use the new
+tunnels and addresses; the upgrade does not recreate old tunnels.
 
-Create a private, readable JSON file. Mode `0400` or `0600` works. It has this structure. Replace
-the placeholders with the old lookup secret and the exact canonical glyph
-addresses. Use address-row UUIDs, not tunnel UUIDs.
+## Later upgrades
 
-```json
-{
-  "address_secret": "<old STARTUNNEL_ADDRESS_SECRET value>",
-  "addresses": {
-    "<address-row UUID>": "<24-glyph address>"
-  }
-}
-```
+Django records this migration as applied after it succeeds. Later normal
+upgrades skip it and preserve the tunnels created after the reset. Restarting
+services also leaves those tunnels intact.
 
-Set `STARTUNNEL_ADDRESS_MIGRATION_FILE` to its path for the migration process
-only. For a container, mount the private file read-only and use its container
-path. The migration validates all rows against the old digests before it
-writes any address. The database transaction removes the digest column and
-replaces its immutable-address trigger with the direct-address rule.
-
-Test the conversion on a restored database first. During the normal
-[update procedure](maintain.md#update-the-application), stop `web` and
-`maintenance` just before the schema migration. Select the reviewed new image
-in `production.env`. With PostgreSQL running, run the migration service with
-the private file mounted:
-
-```shell
-sudo chown 10001:10001 /srv/startunnel/address-conversion.json
-sudo chmod 0400 /srv/startunnel/address-conversion.json
-docker compose --env-file production.env -f compose.yaml -f compose.prod.yaml run --rm --no-deps --volume /srv/startunnel/address-conversion.json:/run/startunnel-addresses.json:ro --env STARTUNNEL_ADDRESS_MIGRATION_FILE=/run/startunnel-addresses.json migrate
-```
-
-Use the actual private host path for the left side of the volume mount.
-The file must be readable by the image's user, UID `10001`.
-Resume the update procedure after the migration succeeds.
-Confirm that existing addresses still open their
-tunnels, retired addresses remain unavailable, credentials still work, and
-new writes succeed. An exact retry of an unexpired reply, close, start, or
-rollover receipt from the old request format returns an idempotency conflict.
-It does not create a second write. Use a new key for a new operation; no
-receipt-expiry wait is required. Remove the conversion file and its environment setting
-after successful verification. The old address lookup secret is no longer a
-runtime setting or a mounted service secret.
+Restoring a backup from before the reset also restores the old migration state.
+Upgrading that restored database runs the reset again.
 
 ## Recovery
 
-This migration has no reverse conversion. To return to the old image, restore
-the matching pre-conversion backup and its configuration. Do not run the old
-image against the new address schema. Keep a verified backup until the new
-installation has passed its checks.
+To recover old tunnels, restore the matching pre-upgrade database backup, image,
+source, and configuration together. This migration has no reverse operation.
+Do not run the old image against the new address schema. Keep the backup until
+the new installation has passed its checks.

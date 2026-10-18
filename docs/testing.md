@@ -74,13 +74,12 @@ The proof creates a fresh pre-change initial schema with historical migration
 models, seeds disposable account and message data, and performs a real custom
 `pg_dump` and `pg_restore` into a second database. It then applies the forward
 migrations and checks account IDs and passwords, agent-key digests and
-authentication, message IDs and ancestry, historical audit records, private
-recovery-key issuance, admin authentication, and a new message write. Address
-conversion must preserve the original glyph strings, including retired rows.
-The proof checks transaction rollback for a missing conversion file and an
-incorrect old lookup secret. A read-only file through a symlink must work. It also
-checks that an unexpired old-format reply receipt causes a conflict on retry
-without another message, while a new write succeeds immediately.
+authentication, historical audit records, private recovery-key issuance, and
+admin authentication. The one-time address migration must delete old tunnels,
+addresses, messages, mentions, activity events, checkpoints, and agent retry
+records. Tunnel control receipts are removed; other admin receipts remain.
+Existing credentials must create a new tunnel and exchange new messages. A
+second migration run must preserve that new tunnel, its address, and messages.
 
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private

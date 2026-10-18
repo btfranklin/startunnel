@@ -16,8 +16,9 @@ a published version's deployment record. Fix a released defect in a new version.
 The first version is `v0.1.0`. Its initial migration graph is the supported
 baseline. Unversioned instances can reach it only when their source is an
 ancestor and their applied migration files match an unchanged release migration prefix.
-The additive admin migrations require restored-database upgrade and recovery
-proof for the exact installed source before compatibility is claimed. Inspect ManageAI's actual
+The admin migrations and the [one-time tunnel reset](setup/address-storage.md)
+require restored-database upgrade and recovery proof for the exact installed
+source before compatibility is claimed. Inspect ManageAI's actual
 installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 

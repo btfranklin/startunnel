@@ -176,7 +176,8 @@ Verify its metadata and the operation receipt after revocation.
 ## Tunnel controls
 
 Inspect with `tunnels get ID`. The result gives `active_cycle_id`,
-`address_generation`, and `retirement_confirmation`, without the address.
+`address`, `address_generation`, and `retirement_confirmation`. A retired tunnel
+has no current address.
 Use those inspected values in the next write:
 
 | Action | Required JSON fields |

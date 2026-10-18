@@ -41,7 +41,9 @@ def baseline(snapshot_path: Path) -> None:
     address_model = apps.get_model("tunnels", "TunnelAddress")
     cycle_model = apps.get_model("tunnels", "Cycle")
     message_model = apps.get_model("tunnels", "Message")
+    mention_model = apps.get_model("tunnels", "MessageMention")
     event_model = apps.get_model("tunnels", "TunnelEvent")
+    checkpoint_model = apps.get_model("tunnels", "ActivityCheckpoint")
     idempotency_model = apps.get_model("tunnels", "IdempotencyRecord")
     audit_model = apps.get_model("tunnels", "AuditEvent")
     password = secrets.token_urlsafe(32)
@@ -56,18 +58,18 @@ def baseline(snapshot_path: Path) -> None:
         )
         tunnel = tunnel_model.objects.create(creator=credential, label="Migration proof")
         address_token = secrets.token_bytes(16)
-        address_secret = secrets.token_urlsafe(32)
+        digest_secret = secrets.token_bytes(32)
         address = encode_token(address_token)
         address_row = address_model.objects.create(
             tunnel=tunnel,
             generation=2,
-            address_digest=hmac.digest(address_secret.encode(), address_token, "sha256"),
+            address_digest=hmac.digest(digest_secret, address_token, "sha256"),
         )
         retired_token = secrets.token_bytes(16)
         retired_address = encode_token(retired_token)
-        retired_row = address_model.objects.create(
+        address_model.objects.create(
             tunnel=tunnel,
-            address_digest=hmac.digest(address_secret.encode(), retired_token, "sha256"),
+            address_digest=hmac.digest(digest_secret, retired_token, "sha256"),
             state="retired",
             retired_at=timezone.now(),
             retirement_reason="operator_rotation",
@@ -115,28 +117,18 @@ def baseline(snapshot_path: Path) -> None:
                 position=position,
                 event_type=event_type,
             )
+        mention_model.objects.create(
+            message=messages[1], credential=credential, display_name=credential.name
+        )
+        checkpoint_model.objects.create(tunnel=tunnel, credential=credential, last_event_position=3)
         old_reply_key = "upgrade-proof-old-reply"
-        old_request_data = {
-            "address_digest": hmac.digest(address_secret.encode(), address_token, "sha256").hex(),
-            "parent_id": str(messages[0].pk),
-            "content": {"type": "text", "text": "Reply retained"},
-            "mentions": [],
-            "correlation_id": "",
-        }
-        old_request = json.dumps(
-            old_request_data,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode()
-        reply_receipt = idempotency_model.objects.create(
+        idempotency_model.objects.create(
             credential=credential,
             operation="post_reply",
             key_digest=hmac.digest(
                 settings.IDEMPOTENCY_SECRET.encode(), old_reply_key.encode(), "sha256"
             ),
-            request_digest=hashlib.sha256(old_request).digest(),
+            request_digest=hashlib.sha256(b"old reply request").digest(),
             response={
                 "message_id": str(messages[1].pk),
                 "cycle_id": str(cycle.pk),
@@ -153,6 +145,44 @@ def baseline(snapshot_path: Path) -> None:
             target_id=user.pk,
             metadata={"historical": True},
         )
+    admin_baseline = [
+        ("accounts", "0002_admincredential_adminoperation"),
+        ("agents", "0001_initial"),
+        ("core", "0001_initial"),
+        ("tunnels", "0001_initial"),
+    ]
+    executor = MigrationExecutor(connection)
+    executor.migrate(admin_baseline)
+    admin_apps = executor.loader.project_state(admin_baseline).apps
+    admin_key_model = admin_apps.get_model("accounts", "AdminCredential")
+    admin_operation_model = admin_apps.get_model("accounts", "AdminOperation")
+    admin_key = "sta_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+    with transaction.atomic():
+        admin_credential = admin_key_model.objects.create(
+            owner_id=user.pk,
+            name="upgrade-admin-key",
+            display_prefix=admin_key[:12],
+            key_digest=hmac.digest(settings.API_KEY_PEPPER.encode(), admin_key.encode(), "sha256"),
+        )
+        kept_operation = admin_operation_model.objects.create(
+            owner_id=user.pk,
+            operation="keys.create",
+            key_digest=hashlib.sha256(b"keep admin receipt").digest(),
+            request_digest=hashlib.sha256(b"keep admin request").digest(),
+            derivation_nonce=secrets.token_bytes(32),
+            response={"resource": {"id": str(admin_credential.pk)}},
+            expires_at=timezone.now() + timedelta(hours=24),
+        )
+        removed_operation = admin_operation_model.objects.create(
+            owner_id=user.pk,
+            operation="tunnels.rotate",
+            key_digest=hashlib.sha256(b"remove tunnel receipt").digest(),
+            request_digest=hashlib.sha256(b"remove tunnel request").digest(),
+            derivation_nonce=secrets.token_bytes(32),
+            secret_resource_id=address_row.pk,
+            response={"resource": {"id": str(tunnel.pk)}},
+            expires_at=timezone.now() + timedelta(hours=24),
+        )
     snapshot_path.write_text(
         json.dumps(
             {
@@ -162,20 +192,11 @@ def baseline(snapshot_path: Path) -> None:
                 "credential_id": str(credential.pk),
                 "agent_key": agent_key,
                 "key_digest": bytes(credential.key_digest).hex(),
-                "tunnel_id": str(tunnel.pk),
-                "address_id": str(address_row.pk),
-                "retired_address_id": str(retired_row.pk),
-                "address_secret": address_secret,
-                "addresses": {
-                    str(address_row.pk): address,
-                    str(retired_row.pk): retired_address,
-                },
-                "cycle_id": str(cycle.pk),
-                "root_id": str(messages[0].pk),
-                "reply_id": str(messages[1].pk),
-                "reply_receipt_id": str(reply_receipt.pk),
-                "old_reply_key": old_reply_key,
-                "old_reply_digest": bytes(reply_receipt.request_digest).hex(),
+                "old_addresses": [address, retired_address],
+                "admin_key": admin_key,
+                "admin_credential_id": str(admin_credential.pk),
+                "kept_admin_operation_id": str(kept_operation.pk),
+                "removed_admin_operation_id": str(removed_operation.pk),
                 "audit_id": str(audit.pk),
             }
         ),
@@ -192,136 +213,98 @@ def upgraded(snapshot_path: Path) -> None:
     from django.core.management import call_command
     from django.db import connection
     from django.db.migrations.executor import MigrationExecutor
-    from django.utils import timezone
 
     from accounts.admin_access import authenticate_admin_key
-    from accounts.models import User
+    from accounts.admin_services import list_admin_resources
+    from accounts.models import AdminCredential, AdminOperation, User
     from agents.models import AgentCredential
     from agents.services import authenticate_key
     from tunnels.access import resolve_tunnel
-    from tunnels.errors import IdempotencyConflict, TunnelUnavailable
+    from tunnels.errors import TunnelUnavailable
     from tunnels.models import (
+        ActivityCheckpoint,
         AuditEvent,
         Cycle,
         IdempotencyRecord,
         Message,
+        MessageMention,
+        Tunnel,
         TunnelAddress,
         TunnelEvent,
     )
-    from tunnels.services import post_reply
+    from tunnels.services import create_tunnel, post_reply
 
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)
-    assert not any(
-        app in {"accounts", "tunnels"} and name.startswith("0002")
-        for app, name in executor.loader.applied_migrations
-    )
+    assert ("tunnels", "0004_store_glyph_addresses") not in executor.loader.applied_migrations
+    executor.migrate(executor.loader.graph.leaf_nodes())
 
-    def rejected_conversion(message: str) -> None:
-        try:
-            candidate = MigrationExecutor(connection)
-            candidate.migrate(candidate.loader.graph.leaf_nodes())
-        except RuntimeError as error:
-            assert message in str(error)
-        else:
-            raise AssertionError("An incomplete address conversion was accepted.")
-        with connection.cursor() as cursor:
-            columns = {
-                column.name
-                for column in connection.introspection.get_table_description(
-                    cursor, "tunnels_tunneladdress"
-                )
-            }
-        assert "address_digest" in columns and "address" not in columns
-
-    os.environ.pop("STARTUNNEL_ADDRESS_MIGRATION_FILE", None)
-    rejected_conversion("Supply a readable")
-    os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"] = str(snapshot_path)
-    original = snapshot_path.read_text(encoding="utf-8")
-    wrong = dict(expected, address_secret="incorrect-proof-secret")
-    snapshot_path.write_text(json.dumps(wrong), encoding="utf-8")
-    rejected_conversion("Supply a readable")
-    snapshot_path.write_text(original, encoding="utf-8")
-    snapshot_path.chmod(0o400)
-    linked_snapshot = snapshot_path.with_name(snapshot_path.name + ".link")
-    linked_snapshot.symlink_to(snapshot_path)
-    os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"] = str(linked_snapshot)
-    try:
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes())
-    finally:
-        os.environ.pop("STARTUNNEL_ADDRESS_MIGRATION_FILE", None)
     user = User.objects.get(pk=expected["user_id"])
     assert user.password == expected["password_hash"] and user.check_password(expected["password"])
     credential = AgentCredential.objects.get(pk=expected["credential_id"])
     assert bytes(credential.key_digest).hex() == expected["key_digest"]
-    assert str(authenticate_key(expected["agent_key"]).pk) == expected["credential_id"]
-    address = expected["addresses"][expected["address_id"]]
-    assert TunnelAddress.objects.get(pk=expected["address_id"]).address == address
-    assert str(resolve_tunnel(credential=credential, address=address).pk) == expected["tunnel_id"]
-    retired_address = expected["addresses"][expected["retired_address_id"]]
-    retired = TunnelAddress.objects.get(pk=expected["retired_address_id"])
-    assert retired.address == retired_address and retired.state == "retired"
-    assert retired.generation == 1 and retired.retirement_reason == "operator_rotation"
-    try:
-        resolve_tunnel(credential=credential, address=retired_address)
-    except TunnelUnavailable:
-        pass
-    else:
-        raise AssertionError("A retired address became available after conversion.")
-    root = Message.objects.get(pk=expected["root_id"])
-    reply = Message.objects.get(pk=expected["reply_id"])
-    cycle = Cycle.objects.get(pk=expected["cycle_id"])
-    assert str(cycle.tunnel_id) == expected["tunnel_id"]
-    assert cycle.root_message_id == root.pk and cycle.next_sequence == 3
-    assert root.text_payload == "Root retained" and root.parent_id is None
-    assert reply.text_payload == "Reply retained" and reply.parent_id == root.pk
-    assert root.sequence == 1 and reply.sequence == 2 and reply.depth == 1
-    assert root.session is None and reply.session is None
-    assert root.sender_name == reply.sender_name == credential.name
-    receipt = IdempotencyRecord.objects.get(pk=expected["reply_receipt_id"])
-    assert receipt.expires_at > timezone.now()
-    assert bytes(receipt.request_digest).hex() == expected["old_reply_digest"]
-    assert receipt.resource_id == reply.pk
-    assert receipt.response["message_id"] == str(reply.pk)
-    try:
-        post_reply(
-            credential=credential,
-            idempotency_key=expected["old_reply_key"],
-            address=address,
-            parent_id=root.pk,
-            content={"type": "text", "text": "Reply retained"},
-        )
-    except IdempotencyConflict:
-        pass
-    else:
-        raise AssertionError("An old-format reply receipt replayed after conversion.")
-    assert Message.objects.filter(cycle=cycle).count() == 2
-    assert TunnelEvent.objects.filter(tunnel_id=expected["tunnel_id"]).count() == 3
-    labeled = post_reply(
-        credential=credential,
-        idempotency_key="upgrade-proof-new-reply",
-        address=address,
-        parent_id=reply.pk,
-        content={"type": "text", "text": "Post-upgrade reply"},
-        session="upgrade-proof",
-    ).message
-    cycle.refresh_from_db()
-    assert labeled.sequence == 3 and labeled.session == "upgrade-proof"
-    assert cycle.next_sequence == 4 and cycle.message_count == 3
-    assert Message.objects.filter(cycle=cycle).count() == 3
-    assert TunnelEvent.objects.filter(tunnel_id=expected["tunnel_id"]).count() == 4
+    assert authenticate_key(expected["agent_key"]).pk == credential.pk
+    admin_credential = AdminCredential.objects.get(pk=expected["admin_credential_id"])
+    assert authenticate_admin_key(expected["admin_key"]).pk == admin_credential.pk
+    assert AdminOperation.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
+    assert not AdminOperation.objects.filter(pk=expected["removed_admin_operation_id"]).exists()
+
+    for model in (
+        Tunnel,
+        TunnelAddress,
+        Cycle,
+        Message,
+        MessageMention,
+        TunnelEvent,
+        ActivityCheckpoint,
+        IdempotencyRecord,
+    ):
+        assert model.objects.count() == 0, model.__name__
+    for old_address in expected["old_addresses"]:
+        try:
+            resolve_tunnel(credential=credential, address=old_address)
+        except TunnelUnavailable:
+            pass
+        else:
+            raise AssertionError("An old glyph address remained available after the reset.")
+
     audit = AuditEvent.objects.get(pk=expected["audit_id"])
     assert audit.action == "human.created" and audit.metadata == {"historical": True}
     assert audit.actor_user_id == user.pk and audit.actor_admin_credential_id is None
     assert audit.channel == ""
+
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="upgrade-proof-new-tunnel",
+        root_content={"type": "text", "text": "Fresh root"},
+    )
+    inspected = list_admin_resources("tunnels", actor=user)["items"]
+    assert len(inspected) == 1 and inspected[0]["address"] == created.address
+    assert resolve_tunnel(credential=credential, address=created.address).pk == created.tunnel.pk
+    reply = post_reply(
+        credential=credential,
+        idempotency_key="upgrade-proof-new-reply",
+        address=created.address,
+        parent_id=created.root.pk,
+        content={"type": "text", "text": "Fresh reply"},
+    ).message
+    assert reply.parent_id == created.root.pk
+    assert Message.objects.filter(cycle=created.cycle).count() == 2
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
+    assert ("tunnels", "0004_store_glyph_addresses") in executor.loader.applied_migrations
+    assert Tunnel.objects.count() == 1
+    assert TunnelAddress.objects.get(tunnel=created.tunnel).address == created.address
+    assert Message.objects.filter(cycle=created.cycle).count() == 2
+    assert Message.objects.get(pk=reply.pk).text_payload == "Fresh reply"
+
     recovery_path = snapshot_path.parent / "recovery.key"
     call_command("recover_instance_admin", user.username, key_file=str(recovery_path), verbosity=0)
     assert recovery_path.stat().st_mode & 0o777 == 0o600
     recovered = authenticate_admin_key(recovery_path.read_text().strip())
     assert recovered.owner_id == user.pk
     assert AuditEvent.objects.filter(action="admin.recovered", channel="server").exists()
-    assert Message.objects.get(pk=labeled.pk).session == "upgrade-proof"
     connection.close()
 
 
@@ -440,12 +423,13 @@ def main() -> int:
                     "checks": [
                         "password and account ID",
                         "agent digest and authentication",
-                        "original glyph address storage and access",
-                        "address conversion refusal and transaction rollback",
-                        "message tree and IDs",
+                        "one-time tunnel data reset",
+                        "old glyph addresses unavailable",
+                        "new tunnel and reply remain after a repeat migration",
+                        "admin credentials and non-tunnel receipts retained",
+                        "tunnel admin receipts removed",
                         "historical audit",
                         "private recovery key and admin authentication",
-                        "new message write",
                     ],
                     "disposable_volumes_removed": True,
                     "limits": (

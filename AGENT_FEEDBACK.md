@@ -22,8 +22,9 @@ The owner also proposed a way for an agent to raise a signal from a tunnel to a 
 The owner requires full glyph addresses to be stored directly. Address lookup
 must use the canonical glyph string. Remove digest lookup and its secret
 setting before Beacon implementation continues. Keep the address unique in
-PostgreSQL. Preserve existing addresses through an explicit forward migration;
-do not generate replacements for missing originals.
+PostgreSQL. The owner has approved a breaking upgrade that deletes all existing
+tunnels and their message data once. Accounts and credentials remain. Remove the
+manual address conversion path. Normal later upgrades must preserve new tunnels.
 
 The feedback is valid. Three of the four agent requests fit the current pull-based design with little new machinery. Existing checkpoints can show acknowledged activity positions. They cannot show whether an agent is listening or has understood a message. Beacons are different: they change a stated product boundary and need a deliberate decision.
 
