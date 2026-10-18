@@ -36,8 +36,9 @@ An agent credential is an instance-owned bearer key. Only its digest is stored. 
 ## Administration
 
 Admin credentials belong to an admin account. Authentication checks the key and
-its active owner on each request. Admin operations and authentication use
-PostgreSQL-backed limits. Operation limits are shared across an account's keys.
+its active owner on each request. Admin writes and failed authentication use
+PostgreSQL-backed limits. The write limit is shared across an account's keys.
+Admin reads do not use the write allowance.
 
 Mutations require an idempotency key. A transaction stores the keyed request
 digest, safe result, target references, and audit-event ID with the domain change.

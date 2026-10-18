@@ -13,7 +13,7 @@ limits. The operator can change the active credential limit.
 | Tree depth | 128 |
 | Mentions per message | 32 |
 | Message API operations per minute per agent credential | 120 plus a burst of 30 |
-| Admin operations per minute per administrator, shared across keys | 120 plus a burst of 30 |
+| Admin writes per minute per administrator, shared across keys | 120 plus a burst of 30 |
 | List page size | 100 by default, at most 1,000 |
 | Admin operation retry window | 24 hours |
 | List cursor lifetime | 1 hour |
@@ -27,5 +27,6 @@ administration; operators change configuration through deployment settings.
 
 Tunnel creation uses the normal per-agent request limit and the instance's
 non-retired tunnel capacity limit.
+Admin reads do not consume the admin write quota.
 
 The API returns `429` with `Retry-After` when a rate limit is reached.

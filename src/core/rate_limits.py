@@ -109,7 +109,7 @@ def _consume(
 
 
 def consume_admin_operation(admin_id: object) -> None:
-    """Share an administrator's operation quota across all interfaces and keys."""
+    """Share an administrator's write quota across all interfaces and keys."""
     from .limits import provider
 
     limits = provider.for_instance()

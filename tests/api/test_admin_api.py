@@ -125,7 +125,7 @@ def test_admin_api_rejects_agent_keys_and_missing_idempotency(
     assert response.status_code == 400
 
 
-def test_admin_api_owner_shared_rate_limit(
+def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
     client: Any, user_factory: Any, monkeypatch: Any
 ) -> None:
     from dataclasses import replace
@@ -137,5 +137,20 @@ def test_admin_api_owner_shared_rate_limit(
     _, second = issue_admin_key(owner=actor, name="second")
     limits = replace(provider.for_instance(), api_operations_per_minute=1)
     monkeypatch.setattr(provider, "for_instance", lambda: limits)
-    assert client.get("/api/v1/admin/me", HTTP_AUTHORIZATION="Bearer " + first).status_code == 200
-    assert client.get("/api/v1/admin/me", HTTP_AUTHORIZATION="Bearer " + second).status_code == 429
+    for secret in (first, second):
+        assert (
+            client.get("/api/v1/admin/me", HTTP_AUTHORIZATION="Bearer " + secret).status_code == 200
+        )
+    for index, secret in enumerate((first, second)):
+        response = client.post(
+            "/api/v1/admin/agents/create",
+            data=json.dumps({"name": f"worker-{index}"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION="Bearer " + secret,
+            HTTP_IDEMPOTENCY_KEY=f"shared-admin-write-{index}",
+        )
+        assert response.status_code == (200 if index == 0 else 429)
+    assert (
+        client.get("/api/v1/admin/status", HTTP_AUTHORIZATION="Bearer " + second).status_code == 200
+    )
+    assert AdminOperation.objects.count() == 1

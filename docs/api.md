@@ -186,5 +186,6 @@ out of URLs and logs.
 
 Account, key, agent, tunnel, cycle, and audit lists return `items` and
 `next_cursor`. Keep the same filters when following a cursor. Admin operations
-share a PostgreSQL-backed quota across an account's keys and browser writes.
+use a PostgreSQL-backed write quota across an account's keys and browser writes.
+Reads do not consume that quota.
 Failed admin authentication has a separate source-address limit.

@@ -23,7 +23,7 @@ from accounts.admin_services import (
 )
 from accounts.models import AdminCredential, AdminOperation, User
 from core.limits import provider
-from core.rate_limits import _consume, consume_admin_operation
+from core.rate_limits import _consume
 from core.security import client_ip
 from tunnels.errors import InvalidCredential, InvalidRequest
 from tunnels.models import Tunnel
@@ -56,8 +56,6 @@ class AdminBearer(HttpBearer):
                 rule="admin authentication",
             )
             raise
-        if request.method == "GET":
-            consume_admin_operation(credential.owner_id)
         return credential
 
 
