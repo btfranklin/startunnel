@@ -143,6 +143,12 @@ valid. Retained events do not include deleted messages or cycle content.
 
 PostgreSQL `NOTIFY` wakes activity and board readers after commit. Each web process owns one asynchronous listener connection. It dispatches activity notices by tunnel ID and board notices to board waiters. Both waits share one bounded database worker pool. A reader registers before its final database reread so it cannot miss a commit between the read and wait steps. Reconnects use bounded backoff. A short database polling fallback preserves correctness when the listener is unavailable.
 
+Immediate activity reads use the resolved event high water. Wait continuations
+check the current credential and address in their event query. Filtered waits
+read the current high water so they can advance past events that do not match.
+Unfiltered waits infer it from fetched rows without another tunnel query.
+Both paths share event loading and page construction.
+
 Board waits use a global change position and the next effective expiry. A
 change requests a fresh paginated snapshot; no second event history is stored.
 Deadline waits remove expired Beacons even before maintenance records the end.

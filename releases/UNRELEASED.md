@@ -205,3 +205,6 @@ The cycle directory now returns only its usable page cursor. The unused
 
 Agent API routes now construct typed responses directly. Tree traversal uses
 one cursor parser with the same request bindings and error codes.
+
+Immediate activity reads and wait continuations now share event queries and
+page construction. Each path keeps its authorization and cursor rules.

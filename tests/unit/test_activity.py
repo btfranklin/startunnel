@@ -17,6 +17,7 @@ from tunnels.activity import (
     _begin_activity_wait_for_async,
     _confirm_activity_page_for_async,
     _continue_activity_wait_for_async,
+    _read_activity_once_for_async,
     commit_checkpoint,
     read_activity_async,
 )
@@ -68,6 +69,79 @@ def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
     )
     assert filtered.events == ()
     assert filtered.next_position == filtered.high_water_position == 2
+
+
+@pytest.mark.parametrize(
+    (
+        "event_types",
+        "expected_positions",
+        "expected_next",
+        "expected_more",
+        "read_queries",
+        "continued_high_water",
+    ),
+    [
+        (None, [3], 3, True, 1, 4),
+        ((TunnelEvent.Type.MESSAGE_POSTED,), [3], 3, True, 2, 5),
+        ((TunnelEvent.Type.CYCLE_CLOSED,), [], 5, False, 2, 5),
+    ],
+)
+def test_activity_workers_keep_cursor_progress_and_query_bounds(
+    credential_factory: Any,
+    django_assert_num_queries: Any,
+    event_types: tuple[str, ...] | None,
+    expected_positions: list[int],
+    expected_next: int,
+    expected_more: bool,
+    read_queries: int,
+    continued_high_water: int,
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator, "activity-worker-pages")
+    _reply(created, creator, "activity-worker-first")
+    _reply(created, creator, "activity-worker-second")
+    _reply(created, creator, "activity-worker-third")
+
+    with django_assert_num_queries(3):
+        immediate = _read_activity_once_for_async(
+            credential=creator,
+            address=created.address,
+            after_position=2,
+            limit=1,
+            event_types=event_types,
+        )
+    with django_assert_num_queries(read_queries):
+        continued = _continue_activity_wait_for_async(
+            tunnel=created.tunnel,
+            credential=creator,
+            address=created.address,
+            after_position=2,
+            limit=1,
+            event_types=event_types,
+        )
+
+    for page in (immediate, continued):
+        assert [event.position for event in page.events] == expected_positions
+        assert page.start_position == 2
+        assert page.next_position == expected_next
+        assert page.has_more is expected_more
+    assert immediate.high_water_position == 5
+    assert continued.high_water_position == continued_high_water
+    assert not immediate.authorization_confirmed
+    assert continued.authorization_confirmed is bool(expected_positions)
+
+    with django_assert_num_queries(read_queries):
+        empty = _continue_activity_wait_for_async(
+            tunnel=created.tunnel,
+            credential=creator,
+            address=created.address,
+            after_position=5,
+            limit=1,
+            event_types=event_types,
+        )
+    assert empty.events == ()
+    assert empty.next_position == empty.high_water_position == 5
+    assert not empty.has_more and not empty.authorization_confirmed
 
 
 @pytest.mark.django_db(transaction=True)
@@ -185,6 +259,15 @@ def test_async_helpers_revalidate_revocation_and_address_rotation(
 
     actor = user_factory()
     rotate_address_as_admin(actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1)
+    rotated = _continue_activity_wait_for_async(
+        tunnel=created.tunnel,
+        credential=creator,
+        address=created.address,
+        after_position=2,
+        limit=100,
+        event_types=None,
+    )
+    assert rotated.events == () and not rotated.authorization_confirmed
     with pytest.raises(TunnelUnavailable):
         _confirm_activity_page_for_async(page=page, credential=creator, address=created.address)
 

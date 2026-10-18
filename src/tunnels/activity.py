@@ -98,12 +98,19 @@ def _read_activity_once_for_async(
             limit=limit,
             event_types=event_types,
         )
-        return _read_activity_for_known_tunnel(
+        query = _activity_query(
             tunnel=start.tunnel,
             after_position=start.position,
-            limit=limit,
             event_types=event_types,
-            initial_high_water=start.high_water_position,
+        ).filter(position__lte=start.high_water_position)
+        rows = _activity_rows(query, limit=limit)
+        return _activity_page(
+            tunnel=start.tunnel,
+            rows=rows,
+            after_position=start.position,
+            limit=limit,
+            high_water_position=start.high_water_position,
+            authorization_confirmed=False,
         )
     finally:
         connection.close()
@@ -167,68 +174,39 @@ def _begin_activity_wait_for_async(
         connection.close()
 
 
-def _read_activity_for_known_tunnel(
+def _activity_query(
     *,
     tunnel: Tunnel,
     after_position: int,
-    limit: int,
     event_types: tuple[str, ...] | None,
-    initial_high_water: int | None,
-    credential: AgentCredential | None = None,
-    address: str | None = None,
-) -> ActivityPage:
-    """Read events without resolving the same address again during a wait."""
-
-    high_water = initial_high_water
-    if high_water is None and event_types is not None:
-        next_position = (
-            Tunnel.objects.filter(pk=tunnel.pk)
-            .values_list("next_event_position", flat=True)
-            .first()
-        )
-        if next_position is None:
-            raise InvalidRequest("The tunnel changed during the activity read.")
-        high_water = max(next_position - 1, 0)
-        if after_position > high_water:
-            raise InvalidRequest("The activity position is not valid for this tunnel.")
-
+) -> QuerySet[TunnelEvent]:
     query = TunnelEvent.objects.select_related(
         "cycle", "message", "message__cycle", "message__sender"
     ).filter(tunnel=tunnel, position__gt=after_position)
-    if high_water is not None:
-        query = query.filter(position__lte=high_water)
     if event_types is not None:
         query = query.filter(event_type__in=event_types)
-    authorization_checked = False
-    if credential is not None and address is not None:
-        authorization_checked = True
-        canonical = canonical_address(address)
-        query = (
-            query.annotate(
-                credential_is_active=Exists(active_credential_query(credential=credential)),
-                address_is_current=Exists(
-                    address_query(address=canonical).filter(tunnel_id=OuterRef("tunnel_id"))
-                ),
-            )
-            .filter(
-                credential_is_active=True,
-                address_is_current=True,
-            )
-            .exclude(tunnel__state=Tunnel.State.RETIRED)
-        )
-    rows = _activity_rows(query, limit=limit)
-    if high_water is None:
-        high_water = rows[-1].position if rows else after_position
+    return query
+
+
+def _activity_page(
+    *,
+    tunnel: Tunnel,
+    rows: list[TunnelEvent],
+    after_position: int,
+    limit: int,
+    high_water_position: int,
+    authorization_confirmed: bool,
+) -> ActivityPage:
     has_more = len(rows) > limit
     page = tuple(rows[:limit])
     return ActivityPage(
         tunnel=tunnel,
         events=page,
         start_position=after_position,
-        next_position=(page[-1].position if has_more and page else high_water),
-        high_water_position=high_water,
+        next_position=(page[-1].position if has_more and page else high_water_position),
+        high_water_position=high_water_position,
         has_more=has_more,
-        authorization_confirmed=authorization_checked and bool(rows),
+        authorization_confirmed=authorization_confirmed,
     )
 
 
@@ -244,14 +222,47 @@ def _continue_activity_wait_for_async(
     """Read one wait continuation and return its connection to the pool."""
 
     try:
-        return _read_activity_for_known_tunnel(
+        query = _activity_query(
             tunnel=tunnel,
             after_position=after_position,
-            limit=limit,
             event_types=event_types,
-            initial_high_water=None,
-            credential=credential,
-            address=address,
+        )
+        if event_types is not None:
+            next_position = (
+                Tunnel.objects.filter(pk=tunnel.pk)
+                .values_list("next_event_position", flat=True)
+                .first()
+            )
+            if next_position is None:
+                raise InvalidRequest("The tunnel changed during the activity read.")
+            high_water = max(next_position - 1, 0)
+            if after_position > high_water:
+                raise InvalidRequest("The activity position is not valid for this tunnel.")
+            query = query.filter(position__lte=high_water)
+        canonical = canonical_address(address)
+        query = (
+            query.annotate(
+                credential_is_active=Exists(active_credential_query(credential=credential)),
+                address_is_current=Exists(
+                    address_query(address=canonical).filter(tunnel_id=OuterRef("tunnel_id"))
+                ),
+            )
+            .filter(
+                credential_is_active=True,
+                address_is_current=True,
+            )
+            .exclude(tunnel__state=Tunnel.State.RETIRED)
+        )
+        rows = _activity_rows(query, limit=limit)
+        if event_types is None:
+            high_water = rows[-1].position if rows else after_position
+        return _activity_page(
+            tunnel=tunnel,
+            rows=rows,
+            after_position=after_position,
+            limit=limit,
+            high_water_position=high_water,
+            authorization_confirmed=bool(rows),
         )
     finally:
         connection.close()
