@@ -52,7 +52,7 @@ If there are no tested predecessors, leave the list empty and document why.
    image with development settings and isolated test data. Test-helper images
    are separate builds; they are not the release artifact. The runners verify
    that web, migration, and maintenance services used the candidate image.
-5. CI retains `release-candidate` for 14 days. This artifact contains the image
+5. CI retains `release-candidate` for 90 days. This artifact contains the image
    digest, exact source commit, planned version, safe validation reports, and
    evidence checksums. Only a complete successful manual run on `main` is eligible
    for promotion. A candidate from a failed or incomplete run is not a release.

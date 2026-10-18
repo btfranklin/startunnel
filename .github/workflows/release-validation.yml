@@ -103,7 +103,7 @@ jobs:
           overwrite: true
           path: artifacts/security/
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 90
 
   system:
     name: Isolated clean-stack system proof
@@ -138,7 +138,7 @@ jobs:
           overwrite: true
           path: artifacts/system-proof-*.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
 
   full-load:
     name: Isolated fixed load proof
@@ -178,7 +178,7 @@ jobs:
             artifacts/load-profile-*.json
             artifacts/validated-load-image.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
 
   live-agents:
     name: Opt-in live-agent proof
