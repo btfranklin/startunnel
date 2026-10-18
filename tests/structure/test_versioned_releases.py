@@ -209,6 +209,8 @@ def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
         "bad-image",
         "migration-failure",
         "wrong-compose-image",
+        "absent-web",
+        "mismatched-web",
         "custom-preview",
         "custom-apply",
     ],
@@ -259,9 +261,10 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
                 rendered = old_image
             return json.dumps({"services": {"web": {"image": rendered}}})
         if "ps" in command:
-            return "container-id"
+            assert command[-3:] == ["--all", "--quiet", "web"]
+            return "" if mode == "absent-web" else "container-id"
         if command[:2] == ["docker", "inspect"]:
-            return old_image
+            return "other-image" if mode == "mismatched-web" else old_image
         if command[:3] == ["docker", "image", "inspect"]:
             if command[3] == old_image:
                 return json.dumps({"org.opencontainers.image.revision": "d" * 40})
@@ -277,9 +280,25 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     if mode not in ("preview", "custom-preview", "no-backup"):
         args.append("--backup-verified")
     assert upgrade.main(args) == (
-        0 if mode in ("preview", "apply", "apply-link", "custom-preview", "custom-apply") else 2
+        0
+        if mode
+        in (
+            "preview",
+            "apply",
+            "apply-link",
+            "absent-web",
+            "custom-preview",
+            "custom-apply",
+        )
+        else 2
     )
-    mutated = mode in ("apply", "apply-link", "migration-failure", "custom-apply")
+    mutated = mode in (
+        "apply",
+        "apply-link",
+        "migration-failure",
+        "absent-web",
+        "custom-apply",
+    )
     assert configuration.read_text() == (
         original.replace(old_image, candidate["image"]) if mutated else original
     )
@@ -298,6 +317,22 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         assert "--wait" in commands[startup_index]
     else:
         assert not any("stop" in command or "up" in command for command in commands)
+    if mode != "mismatched-web":
+        migration_check = next(
+            command for command in commands if "migrate" in command and "--check" in command
+        )
+        assert migration_check[-6:] == [
+            "--no-deps",
+            "web",
+            "/app/.venv/bin/python",
+            "manage.py",
+            "migrate",
+            "--check",
+        ]
+        assert "--rm" in migration_check
+        assert "exec" not in migration_check
+    else:
+        assert not any("--check" in command for command in commands)
     assert not any("down" in command or "--volumes" in command for command in commands)
     if custom:
         compose_calls = [command for command in commands if command[:2] == ["docker", "compose"]]

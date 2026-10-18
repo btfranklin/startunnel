@@ -107,7 +107,10 @@ application no longer stores a per-message content digest.
    For another config name, add `--env-file /absolute/path/team.env` to the
    preview and apply commands. The helper validates the record, clean checkout,
    selected Compose model, secret files, and installed image's source/version
-   labels. It accepts a digest-pinned image from a custom registry. Versioned
+   labels. It checks any existing web containers against the configured image,
+   but it does not require web to run. The migration check runs in a disposable
+   container from the configured old application image. It accepts a
+   digest-pinned image from a custom registry. Versioned
    installations must appear in the release's `supported_from` list.
    Unversioned installations must have an ancestor source commit and matching
    applied migration files in an unchanged prefix. Forward migration and recovery
@@ -126,7 +129,10 @@ application no longer stores a per-message content digest.
 
    `--backup-verified` is the operator's attestation, not an automated restore
    check. The helper pulls the selected image and checks its revision before
-   stopping writers. It preserves a private copy of the old configuration,
+   stopping writers. The preview can run while web is stopped or absent. The
+   helper checks existing web container images and runs the old image's
+   migration check in a disposable Compose `web` container. It preserves a private
+   copy of the old configuration,
    changes only the application image reference, removes the completed old
    migration container, and waits for the production stack. It never deletes
    database volumes or regenerates secrets. There is no automatic rollback.

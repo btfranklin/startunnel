@@ -108,6 +108,16 @@ def rendered_web_image(command: list[str]) -> str:
     return image
 
 
+def validate_existing_web_images(command: list[str], configured_image: str) -> None:
+    containers = run([*command, "ps", "--all", "--quiet", "web"], capture=True)
+    for container in containers.splitlines():
+        image = run(["docker", "inspect", container, "--format", "{{.Config.Image}}"], capture=True)
+        if image != configured_image:
+            raise ValueError(
+                "Existing web container image differs from production.env; reconcile first."
+            )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -144,19 +154,13 @@ def main(argv: list[str] | None = None) -> int:
         command = compose_command(edge=False, env_file=env_file)
         if rendered_web_image(command) != old_image:
             raise ValueError("The selected Compose web image differs from the installed image.")
-        container = run([*command, "ps", "--quiet", "web"], capture=True)
-        if not container or "\n" in container:
-            raise ValueError("Expected exactly one running web container before upgrade.")
-        running_image = run(
-            ["docker", "inspect", container, "--format", "{{.Config.Image}}"], capture=True
-        )
-        if running_image != old_image:
-            raise ValueError("Running web image differs from production.env; reconcile first.")
+        validate_existing_web_images(command, old_image)
         run(
             [
                 *command,
-                "exec",
-                "-T",
+                "run",
+                "--rm",
+                "--no-deps",
                 "web",
                 "/app/.venv/bin/python",
                 "manage.py",
