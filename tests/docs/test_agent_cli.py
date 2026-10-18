@@ -253,14 +253,15 @@ def test_cli_rejects_unsafe_base_urls_without_exposing_them(base_url: str) -> No
     assert "st_test-agent-key" not in result.stderr
 
 
-def test_api_error_keeps_safe_fields_and_discards_server_text() -> None:
+def test_api_error_keeps_authored_message_and_discards_unknown_fields() -> None:
     request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
     response = {
         "error": {
             "code": "tunnel_unavailable",
-            "message": "private-message-visible-marker",
+            "message": "This tunnel is not available. Check the address or create a new tunnel.",
             "request_id": request_id,
-            "field_errors": [{"message": "another-visible-marker"}],
+            "field_errors": [],
+            "unexpected": "unknown-field-visible-marker",
         }
     }
     with serve(Response(404, response)) as (base_url, _scenario):
@@ -271,12 +272,47 @@ def test_api_error_keeps_safe_fields_and_discards_server_text() -> None:
     error = json.loads(result.stderr)["error"]
     assert error == {
         "code": "tunnel_unavailable",
-        "message": "The StarTunnel request failed.",
+        "message": "This tunnel is not available. Check the address or create a new tunnel.",
         "status": 404,
         "request_id": request_id,
+        "field_errors": [],
     }
     assert "visible-marker" not in result.stderr
     assert "private-glyphs" not in result.stderr
+
+
+def test_missing_field_diagnostic_survives_transport_and_client() -> None:
+    response = {
+        "error": {
+            "code": "invalid_request",
+            "message": "The request is not valid. Correct the marked fields and try again.",
+            "request_id": "064c1aab-8f0f-42d3-b2db-f132ba86363c",
+            "field_errors": [
+                {"field": "body.focus_message_id", "message": "Field required", "extra": "ignored"}
+            ],
+        }
+    }
+    with serve(Response(400, response)) as (base_url, scenario):
+        result = run_cli(base_url, "read-context", body={"address": "glyphs"})
+
+    assert result.returncode == 1
+    assert scenario.requests[0]["path"] == "/api/v1/context"
+    assert json.loads(result.stderr)["error"] == {
+        "code": "invalid_request",
+        "message": "The request is not valid. Correct the marked fields and try again.",
+        "status": 400,
+        "request_id": "064c1aab-8f0f-42d3-b2db-f132ba86363c",
+        "field_errors": [{"field": "body.focus_message_id", "message": "Field required"}],
+    }
+
+
+def test_missing_command_argument_has_standard_parser_diagnostic() -> None:
+    result = run_cli("http://127.0.0.1:8000", "reply")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--idempotency-key" in result.stderr
+    assert "required" in result.stderr
 
 
 def test_api_error_discards_reflected_credentials_in_safe_fields() -> None:
@@ -301,6 +337,20 @@ def test_api_error_discards_reflected_credentials_in_safe_fields() -> None:
         "status": 400,
     }
     assert reflected_key not in result.stderr
+
+
+def test_malformed_api_error_does_not_print_response_data() -> None:
+    response = {"error": {"code": "invalid_request", "message": ["private-visible-marker"]}}
+    with serve(Response(400, response)) as (base_url, _scenario):
+        result = run_cli(base_url, "read-context", body={"address": "glyphs"})
+
+    assert result.returncode == 1
+    assert json.loads(result.stderr)["error"] == {
+        "code": "invalid_request",
+        "message": "The request is not valid.",
+        "status": 400,
+    }
+    assert "visible-marker" not in result.stderr
 
 
 def test_non_ascii_agent_key_produces_a_sanitized_configuration_error() -> None:

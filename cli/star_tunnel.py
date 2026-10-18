@@ -22,7 +22,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException, HTTPMessage
-from typing import Any, NoReturn
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -74,20 +74,14 @@ PUBLIC_ERROR_CODES = {
 
 @dataclass
 class CliError(Exception):
-    """A safe error that can be printed without exposing request data."""
+    """An error with safe details from the public API or the client."""
 
     code: str
     status: int | None = None
     request_id: str | None = None
     retry_after: float | None = None
-
-
-class SafeArgumentParser(argparse.ArgumentParser):
-    """Convert argument errors to the CLI's JSON error format."""
-
-    def error(self, message: str) -> NoReturn:
-        del message
-        raise CliError("usage_error")
+    message: str | None = None
+    field_errors: list[dict[str, str]] | None = None
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -199,6 +193,8 @@ def _retry_after_seconds(value: str | None) -> float | None:
 def _safe_server_error(error: HTTPError) -> CliError:
     code = "http_error"
     request_id = error.headers.get("X-Request-ID")
+    message = None
+    field_errors = None
     try:
         raw = error.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) <= MAX_RESPONSE_BYTES:
@@ -209,6 +205,20 @@ def _safe_server_error(error: HTTPError) -> CliError:
                 candidate_request_id = envelope.get("request_id")
                 if isinstance(candidate_code, str) and candidate_code in PUBLIC_ERROR_CODES:
                     code = candidate_code
+                    candidate_message = envelope.get("message")
+                    if isinstance(candidate_message, str):
+                        message = candidate_message
+                    candidate_field_errors = envelope.get("field_errors")
+                    if isinstance(candidate_field_errors, list) and all(
+                        isinstance(item, dict)
+                        and isinstance(item.get("field"), str)
+                        and isinstance(item.get("message"), str)
+                        for item in candidate_field_errors
+                    ):
+                        field_errors = [
+                            {"field": item["field"], "message": item["message"]}
+                            for item in candidate_field_errors
+                        ]
                 if isinstance(candidate_request_id, str):
                     try:
                         request_id = str(uuid.UUID(candidate_request_id))
@@ -228,7 +238,14 @@ def _safe_server_error(error: HTTPError) -> CliError:
     else:
         request_id = None
     retry_after = _retry_after_seconds(error.headers.get("Retry-After"))
-    return CliError(code=code, status=error.code, request_id=request_id, retry_after=retry_after)
+    return CliError(
+        code=code,
+        status=error.code,
+        request_id=request_id,
+        retry_after=retry_after,
+        message=message,
+        field_errors=field_errors,
+    )
 
 
 class StarTunnelTransport:
@@ -944,7 +961,7 @@ def run_tutorial() -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = SafeArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Use the StarTunnel public API with Python 3.10 or later."
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -971,9 +988,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def print_error(error: CliError) -> None:
-    """Write one bounded, sanitized JSON error object."""
+    """Write safe client or public API error details as JSON."""
 
-    message = SAFE_ERROR_MESSAGES.get(error.code, "The StarTunnel request failed.")
+    message = error.message or SAFE_ERROR_MESSAGES.get(error.code, "The StarTunnel request failed.")
     details: dict[str, Any] = {"code": error.code, "message": message}
     if error.status is not None:
         details["status"] = error.status
@@ -981,6 +998,8 @@ def print_error(error: CliError) -> None:
         details["request_id"] = error.request_id
     if error.retry_after is not None:
         details["retry_after"] = error.retry_after
+    if error.field_errors is not None:
+        details["field_errors"] = error.field_errors
     print(json.dumps({"error": details}, separators=(",", ":")), file=sys.stderr)
 
 

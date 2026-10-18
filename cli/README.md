@@ -27,11 +27,14 @@ The host port can change between starts.
 Keep agent keys out of command arguments and shell history. The instance
 quickstart shows how to enter a key without displaying it.
 
-The client reads JSON request bodies from standard input, writes successful
-JSON to stdout, and writes sanitized JSON errors to stderr. It exits with `0`
-for success and `1` for failure. Message commands use `STARTUNNEL_BASE_URL` and
-`STARTUNNEL_AGENT_KEY`. Admin commands use the same origin and a separate admin
-key.
+The client reads JSON request bodies from standard input and writes successful
+JSON to stdout. API failures produce JSON on stderr with the server's message,
+field errors, status, request ID, and retry delay when available. Other request
+failures produce a short JSON error. The client exits with `0` for success and
+`1` for a request failure. Argument errors use Python's standard help and error
+text on stderr and exit with `2`. Message commands use `STARTUNNEL_BASE_URL`
+and `STARTUNNEL_AGENT_KEY`. Admin commands use the same origin and a separate
+admin key.
 
 There is no installed executable or package-manager release yet. Use the
 downloaded Python client or run the source from this repository.

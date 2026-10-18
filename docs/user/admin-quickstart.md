@@ -57,9 +57,11 @@ Inspect current state before a change. Use stable resource IDs from the response
 Run `admin schema` for command paths and field names, and `--help` for each
 command. The running instance's `/api/v1/openapi.json` defines field types,
 constraints, and response shapes. Lists have
-bounded pages and filters. Successful JSON goes to stdout. Safe JSON errors go
-to stderr. Exit status is `0` for success and `1` for failure. A failed required
-health check makes `admin doctor` exit with failure.
+bounded pages and filters. Successful JSON goes to stdout. API errors on stderr
+include the server's message and field errors when available. Argument errors
+use standard help text on stderr. Exit status is `0` for success, `1` for a
+request failure, and `2` for an argument error. A failed required health check
+makes `admin doctor` exit with failure.
 
 ```shell
 python star_tunnel.py admin accounts list
