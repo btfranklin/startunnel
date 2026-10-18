@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 from datetime import timedelta
 from typing import Any
 
@@ -10,6 +12,7 @@ import pytest
 from django.contrib.sessions.models import Session
 from django.utils import timezone
 
+from core.logging import SafeJsonFormatter
 from core.maintenance_status import read_maintenance_status
 from core.models import MaintenanceState, RateLimitBucket
 from tunnels.maintenance import (
@@ -142,7 +145,7 @@ def test_next_deadline_and_due_work_use_earliest_persisted_value(
 
 
 def test_failed_cycle_does_not_block_later_deletion(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     first = _tree(credential_factory, "failure-first")
     second = _tree(credential_factory, "failure-second")
@@ -163,9 +166,15 @@ def test_failed_cycle_does_not_block_later_deletion(
         return bool(original(cycle_id=cycle_id, now=now))
 
     monkeypatch.setattr("tunnels.maintenance.delete_due_cycle_content", fail_one)
-    deleted, failures, candidates = _delete_due_cycles(now=now)
+    with caplog.at_level(logging.ERROR, logger="tunnels.maintenance"):
+        deleted, failures, candidates = _delete_due_cycles(now=now)
     assert (deleted, failures, candidates) == (1, 1, 2)
     assert Cycle.objects.get(pk=second.cycle.pk).state == Cycle.State.DELETED
+    event = json.loads(SafeJsonFormatter().format(caplog.records[-1]))
+    assert event["message"] == "Cycle content deletion failed."
+    assert event["cycle_id"] == str(first.cycle.id)
+    assert event["exception_type"] == "RuntimeError"
+    assert "expected test failure" not in json.dumps(event)
 
 
 def test_cleanup_records_deletion_failure_and_observed_lag(

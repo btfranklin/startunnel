@@ -137,7 +137,10 @@ production guide. There is no cache or archive volume to coordinate.
 Use `scripts/container-logs.sh` for bounded development logs. For production,
 load the production configuration and use the [production log command](setup/maintain.md#fault-checks).
 Logs must not contain admin keys, agent keys, addresses, cursors, passwords, message content,
-or identity data. Keep `.env` and `.env.tutorial` untracked and at mode `0600`.
+or identity data. Fixed internal warnings remain visible. Exception entries show
+the type and bounded code locations, without exception values. A failed cycle
+deletion also shows its cycle UUID. Keep `.env` and `.env.tutorial` untracked and
+at mode `0600`.
 
 ## Production
 

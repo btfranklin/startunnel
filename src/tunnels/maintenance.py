@@ -127,7 +127,7 @@ def _delete_due_cycles(*, now: datetime) -> tuple[int, int, int]:
                 deleted += 1
         except Exception:
             failures += 1
-            logger.exception("Cycle content deletion failed for cycle %s.", cycle_id)
+            logger.exception("Cycle content deletion failed.", extra={"cycle_id": cycle_id})
     return deleted, failures, len(cycle_ids)
 
 

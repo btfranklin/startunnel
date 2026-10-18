@@ -1,4 +1,4 @@
-"""JSON logs remove browser bearer tokens before serialization."""
+"""JSON logs keep fixed diagnostics and omit sensitive values."""
 
 import json
 import logging
@@ -10,24 +10,9 @@ import pytest
 from django.http import HttpResponse
 from django.test import Client, RequestFactory
 
-from core.logging import RedactingJsonFormatter, redact_sensitive_urls
+from core.logging import SafeJsonFormatter
 from core.metrics import API_REQUEST_SECONDS
 from core.middleware import RequestIdMiddleware
-
-
-@pytest.mark.parametrize(
-    ("path", "secret"),
-    [
-        ("/continue/?code=authorization-code-secret", "authorization-code-secret"),
-        ("/continue/?state=authorization-state-secret", "authorization-state-secret"),
-        ("/continue/?token=query-token-secret&next=/app/", "query-token-secret"),
-        ("/continue/?key=query-key-secret&next=/app/", "query-key-secret"),
-    ],
-)
-def test_browser_bearer_tokens_are_redacted(path: str, secret: str) -> None:
-    redacted = redact_sensitive_urls(path)
-    assert secret not in redacted
-    assert "[REDACTED]" in redacted
 
 
 def test_json_formatter_cannot_serialize_raw_tokens() -> None:
@@ -44,7 +29,7 @@ def test_json_formatter_cannot_serialize_raw_tokens() -> None:
     )
     record.request_path = f"/continue/?token={token}"
     record.request = RequestFactory().get(f"/continue/?code={confirmation}")
-    output = RedactingJsonFormatter().format(record)
+    output = SafeJsonFormatter().format(record)
     parsed = json.loads(output)
     assert token not in output
     assert confirmation not in output
@@ -53,7 +38,7 @@ def test_json_formatter_cannot_serialize_raw_tokens() -> None:
     assert "request" not in parsed
 
 
-def test_json_formatter_omits_exception_stack_and_arbitrary_values() -> None:
+def test_json_formatter_keeps_exception_type_and_location_without_values() -> None:
     exception_token = "synthetic-message-body-marker"
     stack_token = "synthetic-cursor-marker"
     address_token = "synthetic-glyph-address-marker"
@@ -77,7 +62,7 @@ def test_json_formatter_omits_exception_stack_and_arbitrary_values() -> None:
         "nested": [b"opaque-bytes", {"snapshot_cursor": stack_token}],
     }
 
-    output = RedactingJsonFormatter().format(record)
+    output = SafeJsonFormatter().format(record)
 
     assert exception_token not in output
     assert stack_token not in output
@@ -86,9 +71,56 @@ def test_json_formatter_omits_exception_stack_and_arbitrary_values() -> None:
     assert "opaque-bytes" not in output
     parsed = json.loads(output)
     assert parsed["message"] == "[REDACTED]"
+    assert parsed["exception_type"] == "ValueError"
+    assert exception_info[2] is not None
+    assert parsed["exception_frames"][-1] == {
+        "file": "test_logging.py",
+        "function": "test_json_formatter_keeps_exception_type_and_location_without_values",
+        "line": exception_info[2].tb_lineno,
+    }
     assert "exc_info" not in parsed
     assert "stack_info" not in parsed
     assert "context" not in parsed
+
+
+def test_fixed_listener_warning_survives_formatter() -> None:
+    record = logging.LogRecord(
+        name="core.activity_listener",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg="The PostgreSQL activity listener disconnected.",
+        args=(),
+        exc_info=None,
+    )
+    record.context = {"address": "sensitive-glyph-marker"}
+    output = SafeJsonFormatter().format(record)
+    assert json.loads(output)["message"] == "The PostgreSQL activity listener disconnected."
+    assert "sensitive-glyph-marker" not in output
+
+
+def test_fixed_maintenance_failure_keeps_cycle_id_and_safe_exception() -> None:
+    cycle_id = uuid4()
+    try:
+        raise RuntimeError("sensitive SQL parameter marker")
+    except RuntimeError:
+        exception_info = sys.exc_info()
+    record = logging.LogRecord(
+        name="tunnels.maintenance",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="Cycle content deletion failed.",
+        args=(),
+        exc_info=exception_info,
+    )
+    record.cycle_id = cycle_id
+    output = SafeJsonFormatter().format(record)
+    parsed = json.loads(output)
+    assert parsed["message"] == "Cycle content deletion failed."
+    assert parsed["cycle_id"] == str(cycle_id)
+    assert parsed["exception_type"] == "RuntimeError"
+    assert "sensitive SQL parameter marker" not in output
 
 
 def test_request_logger_normalizes_an_unknown_method(
@@ -104,7 +136,7 @@ def test_request_logger_normalizes_an_unknown_method(
     assert response.status_code == 200
     record = next(record for record in caplog.records if record.name == "startunnel.request")
     assert getattr(record, "method", None) == "OTHER"
-    formatted = RedactingJsonFormatter().format(record)
+    formatted = SafeJsonFormatter().format(record)
     assert marker not in formatted
 
 

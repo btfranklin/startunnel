@@ -4,8 +4,8 @@
 [metadata]
 groups = ["default", "dev", "live-agents"]
 strategy = ["inherit_metadata"]
-lock_version = "4.5.0"
-content_hash = "sha256:e3d0daf90b89f9a87cdeaac51a926c05e696c08a2b2be10eabfabf1c9957cc9d"
+lock_version = "4.5.1"
+content_hash = "sha256:5a6132db608bacc559f4fd339fa7aff04044a3c216f26ef53f0994567a72dec0"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -2423,17 +2423,6 @@ groups = ["default", "dev"]
 files = [
     {file = "python_dotenv-1.2.3-py3-none-any.whl", hash = "sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9"},
     {file = "python_dotenv-1.2.3.tar.gz", hash = "sha256:a20a594dabeaa385725aa239d5244871c143ecb356add8a20fcf23773a6c3a35"},
-]
-
-[[package]]
-name = "python-json-logger"
-version = "4.2.0"
-requires_python = ">=3.10"
-summary = "JSON Log Formatter for the Python Logging Package"
-groups = ["default"]
-files = [
-    {file = "python_json_logger-4.2.0-py3-none-any.whl", hash = "sha256:158a52126fcd6869e09574d2b66272666f3dc8f468c62637ef9a1fa883719cb9"},
-    {file = "python_json_logger-4.2.0.tar.gz", hash = "sha256:e371ebe22ec01e289850102091a2b1f6fc9e655c7f1f5f29073936756c290afa"},
 ]
 
 [[package]]

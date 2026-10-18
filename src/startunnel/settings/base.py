@@ -214,7 +214,7 @@ LOGGING = {
     "filters": {"request_id": {"()": "core.logging.RequestIdFilter"}},
     "formatters": {
         "json": {
-            "()": "core.logging.RedactingJsonFormatter",
+            "()": "core.logging.SafeJsonFormatter",
             "format": "%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
         }
     },

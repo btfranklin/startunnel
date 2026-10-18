@@ -44,7 +44,7 @@ StarTunnel stores full glyph addresses directly in PostgreSQL. Current and
 retired address rows retain the original glyph strings. Address lookup uses
 those strings. Addresses do not use a hash or a separate lookup secret.
 
-Glyph addresses never appear in URL paths or application logs. Request logs contain a fixed message and bounded route metadata only. Message content, cursors, addresses, keys, passwords, and identity fields are not log fields.
+Glyph addresses never appear in URL paths or application logs. Request logs contain a fixed message and bounded route metadata. Fixed listener and maintenance events keep their event names. Exception logs contain the exception type and up to eight file, function, and line locations, without exception values. Message content, cursors, addresses, keys, passwords, and identity fields are not log fields.
 
 ## Database roles
 
