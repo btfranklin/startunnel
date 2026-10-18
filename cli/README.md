@@ -48,6 +48,9 @@ invalid JSON, and numbers that exceed the runtime parser limit return
 If the output reader closes its pipe, the client exits with `1` without a
 traceback. A write can already be complete; use the same idempotency key for
 an uncertain-result retry.
+Local diagnostics name the affected setting or argument in `error.field_errors`
+when known. Parser errors also identify the command's help. Rejected values
+are not copied into diagnostics.
 
 ## Install the command
 

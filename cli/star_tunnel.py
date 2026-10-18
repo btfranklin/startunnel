@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
@@ -89,8 +89,41 @@ class CliError(Exception):
     usage: str | None = None
 
 
+def field_error(code: str, field: str, message: str) -> CliError:
+    """Identify a known field without copying its value."""
+
+    return CliError(code, field_errors=[{"field": field, "message": message}])
+
+
 class JsonArgumentParser(argparse.ArgumentParser):
     """Report argument errors without reflecting command line values."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["exit_on_error"] = False
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, args: Iterable[str] | None = None, namespace: Any = None) -> Any:
+        try:
+            return super().parse_args(args, namespace)
+        except argparse.ArgumentError:
+            self.error("")
+
+    def parse_known_args(
+        self, args: Iterable[str] | None = None, namespace: Any = None
+    ) -> tuple[Any, list[str]]:
+        try:
+            return super().parse_known_args(args, namespace)
+        except argparse.ArgumentError as error:
+            raise CliError(
+                "usage_error",
+                message=f"Check the arguments. Run {self.prog} --help.",
+                usage=self.format_usage().strip(),
+                field_errors=(
+                    [{"field": error.argument_name, "message": "The value is not valid."}]
+                    if error.argument_name is not None
+                    else None
+                ),
+            ) from error
 
     def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
         sys.stdout.flush()
@@ -98,7 +131,11 @@ class JsonArgumentParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> NoReturn:
         del message
-        raise CliError("usage_error", usage=self.format_usage().strip())
+        raise CliError(
+            "usage_error",
+            message=f"Check the arguments. Run {self.prog} --help.",
+            usage=self.format_usage().strip(),
+        )
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -205,17 +242,22 @@ def client_version() -> dict[str, Any]:
 def validate_base_url(value: str) -> str:
     """Return a safe origin URL for authenticated API requests."""
 
+    invalid = field_error(
+        "configuration_error",
+        "STARTUNNEL_BASE_URL",
+        "Provide an HTTP or HTTPS origin without a path, query, or credentials.",
+    )
     if (
         not value
         or value != value.strip()
         or any(ord(character) < 33 or ord(character) > 126 for character in value)
     ):
-        raise CliError("configuration_error")
+        raise invalid
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError as error:
-        raise CliError("configuration_error") from error
+        raise invalid from error
     hostname = parsed.hostname
     if (
         parsed.scheme not in {"http", "https"}
@@ -226,9 +268,9 @@ def validate_base_url(value: str) -> str:
         or parsed.fragment
         or parsed.path not in {"", "/"}
     ):
-        raise CliError("configuration_error")
+        raise invalid
     if port is not None and not 1 <= port <= 65535:
-        raise CliError("configuration_error")
+        raise invalid
     return urlunsplit(SplitResult(parsed.scheme, parsed.netloc, "", "", ""))
 
 
@@ -237,7 +279,11 @@ def require_key(name: str) -> str:
 
     value = os.environ.get(name, "")
     if not value or any(ord(character) < 33 or ord(character) > 126 for character in value):
-        raise CliError("configuration_error")
+        raise field_error(
+            "configuration_error",
+            name,
+            "Set a non-empty key without whitespace or control characters.",
+        )
     return value
 
 
@@ -247,7 +293,11 @@ def require_idempotency_key(value: str) -> str:
     if not 8 <= len(value) <= 128 or any(
         ord(character) < 32 or ord(character) > 126 for character in value
     ):
-        raise CliError("usage_error")
+        raise field_error(
+            "usage_error",
+            "--idempotency-key",
+            "Use 8 to 128 printable ASCII characters.",
+        )
     return value
 
 
@@ -831,24 +881,32 @@ def require_admin_key() -> str:
     direct = os.environ.get("STARTUNNEL_ADMIN_KEY")
     filename = os.environ.get("STARTUNNEL_ADMIN_KEY_FILE")
     if (direct is None) == (filename is None):
-        raise CliError("configuration_error")
+        raise CliError(
+            "configuration_error",
+            message="Set exactly one of STARTUNNEL_ADMIN_KEY or STARTUNNEL_ADMIN_KEY_FILE.",
+        )
     if direct is not None:
         return require_key("STARTUNNEL_ADMIN_KEY")
     descriptor = None
+    invalid = field_error(
+        "configuration_error",
+        "STARTUNNEL_ADMIN_KEY_FILE",
+        "Select a readable regular file containing one key.",
+    )
     try:
         descriptor = os.open(filename or "", os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
-            raise CliError("configuration_error")
+            raise invalid
         value = os.read(descriptor, 4097)
         if len(value) > 4096:
-            raise CliError("configuration_error")
+            raise invalid
         key = value.decode("utf-8").strip()
         if not key or any(ord(character) < 33 or ord(character) > 126 for character in key):
-            raise CliError("configuration_error")
+            raise invalid
         return key
     except (OSError, UnicodeError) as error:
-        raise CliError("configuration_error") from error
+        raise invalid from error
     finally:
         if descriptor is not None:
             os.close(descriptor)
@@ -904,7 +962,11 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
         try:
             resource_id = str(uuid.UUID(arguments.resource_id))
         except ValueError as error:
-            raise CliError("usage_error") from error
+            raise field_error(
+                "usage_error",
+                "resource_id",
+                "Provide a resource UUID.",
+            ) from error
         suffix = suffix.replace("{id}", resource_id)
     if method == "GET" and name.endswith((" list", " cycles")):
         query = {
@@ -920,7 +982,11 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
     if name == "accounts create" and not (body or {}).get("password"):
         secret_required = True
         if not arguments.secret_output:
-            raise CliError("usage_error")
+            raise field_error(
+                "usage_error",
+                "--secret-output",
+                "Provide a new file path when password is omitted or empty.",
+            )
     transport = StarTunnelTransport(os.environ.get("STARTUNNEL_BASE_URL", ""), require_admin_key())
     descriptor = None
     complete = False

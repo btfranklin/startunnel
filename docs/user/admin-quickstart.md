@@ -73,6 +73,8 @@ return JSON with code `usage_error` on stderr. Explicit `--help` returns text
 on stdout. Exit status is `0` for success, `1` for a
 request failure, and `2` for an argument error. A failed required health check
 makes `admin doctor` exit with failure.
+Local diagnostics name known settings and arguments in `error.field_errors`.
+Use these names to correct configuration, UUIDs, retry keys, and output paths.
 
 ```shell
 startunnel admin accounts list

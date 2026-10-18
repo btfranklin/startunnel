@@ -87,3 +87,9 @@ return `invalid_input` errors. Escaped Unicode in requests reaches the server's
 validation without a local encoding failure.
 Closing the output pipe now exits with status `1` without a traceback or a
 shutdown error. A completed API write is not undone by an output failure.
+
+## Actionable diagnostics
+
+Local errors name known settings or argument fields in `error.field_errors`.
+Parser errors point to the relevant command's help. Diagnostics do not copy
+rejected values. Error codes and exit statuses are unchanged.

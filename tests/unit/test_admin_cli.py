@@ -195,7 +195,9 @@ def test_missing_conditional_secret_output_returns_usage_exit_code(
     assert cli.main(["admin", "accounts", "create", "--idempotency-key", "account-key"]) == 2
     output = capsys.readouterr()
     assert output.out == ""
-    assert json.loads(output.err)["error"]["code"] == "usage_error"
+    error = json.loads(output.err)["error"]
+    assert error["code"] == "usage_error"
+    assert error["field_errors"][0]["field"] == "--secret-output"
 
 
 def test_secret_output_accepts_symlinked_parent_and_keeps_new_file_private(

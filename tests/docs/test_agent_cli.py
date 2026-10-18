@@ -510,12 +510,36 @@ def test_argument_errors_are_json_and_do_not_repeat_input_values(arguments: list
     assert result.returncode == 2
     assert result.stdout == ""
     error = json.loads(result.stderr)["error"]
-    assert set(error) == {"code", "message", "usage"}
+    assert {"code", "message", "usage"} <= set(error)
+    assert set(error) <= {"code", "message", "usage", "field_errors"}
     assert error["code"] == "usage_error"
     assert error["message"]
     assert error["usage"].startswith("usage: startunnel")
     assert "st_private-argument" not in result.stderr
     assert str(CLI) not in result.stderr
+
+
+def test_invalid_argument_names_its_field_without_copying_the_value() -> None:
+    result = run_cli("http://127.0.0.1:1", "admin", "keys", "list", "--limit", "private-value")
+    assert result.returncode == 2
+    error = json.loads(result.stderr)["error"]
+    assert error["field_errors"][0]["field"] == "--limit"
+    assert "private-value" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("environment", "field"),
+    [
+        ({"STARTUNNEL_BASE_URL": ""}, "STARTUNNEL_BASE_URL"),
+        ({"STARTUNNEL_AGENT_KEY": ""}, "STARTUNNEL_AGENT_KEY"),
+    ],
+)
+def test_configuration_errors_name_the_setting(environment: dict[str, str], field: str) -> None:
+    result = run_cli("http://127.0.0.1:1", "me", extra_env=environment)
+    assert result.returncode == 1
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "configuration_error"
+    assert error["field_errors"][0]["field"] == field
 
 
 @pytest.mark.parametrize(

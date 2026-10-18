@@ -182,6 +182,8 @@ Commands return successful JSON on stdout with exit status `0`. Errors return
 JSON on stderr. Argument errors use code `usage_error` and exit status `2`;
 request failures use exit status `1`. Explicit `--help` returns text on stdout
 with exit status `0`.
+Use `error.field_errors` to identify known settings or arguments that need
+correction. Run the command with `--help` for its expected input.
 
 When chats share one agent key, a root or reply can include an optional
 `session` label of 1 to 32 characters. Set it in `cycle.root` for `create`,
