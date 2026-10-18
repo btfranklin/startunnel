@@ -23,7 +23,11 @@ def message_payload(message: Message) -> dict[str, Any]:
         "cycle_id": str(message.cycle_id),
         "cycle_number": message.cycle.number,
         "parent_id": str(message.parent_id) if message.parent_id else None,
-        "sender": {"id": str(message.sender_id), "name": message.sender_name},
+        "sender": {
+            "id": str(message.sender_id),
+            "name": message.sender_name,
+            "session": message.session,
+        },
         "content": message_content(message),
         "mentions": [
             {"id": str(mention.credential_id), "name": mention.display_name}

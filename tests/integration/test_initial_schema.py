@@ -1,6 +1,7 @@
 """Verify the current schema from a fresh PostgreSQL installation."""
 
 import pytest
+from django.apps import apps
 from django.db import connection
 from django.db.migrations.loader import MigrationLoader
 
@@ -9,13 +10,23 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 def test_initial_schema_has_current_models_and_guards() -> None:
     assert connection.vendor == "postgresql"
-    leaves = dict(MigrationLoader(connection).graph.leaf_nodes())
-    assert {name: leaves[name] for name in ("accounts", "agents", "core", "tunnels")} == {
-        "accounts": "0002_admincredential_adminoperation",
-        "agents": "0001_initial",
-        "core": "0001_initial",
-        "tunnels": "0002_auditevent_actor_admin_credential_auditevent_channel",
-    }
+    loader = MigrationLoader(connection)
+    owned_apps = {"accounts", "agents", "core", "tunnels"}
+    leaves = [node for node in loader.graph.leaf_nodes() if node[0] in owned_apps]
+    assert {node[0] for node in leaves} == owned_apps
+    assert all(node in loader.applied_migrations for node in leaves)
+
+    with connection.cursor() as cursor:
+        for model in apps.get_models():
+            if model._meta.app_label not in owned_apps:
+                continue
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(
+                    cursor, model._meta.db_table
+                )
+            }
+            assert columns == {field.column for field in model._meta.local_fields}, model.__name__
 
     tables = set(connection.introspection.table_names())
     assert {

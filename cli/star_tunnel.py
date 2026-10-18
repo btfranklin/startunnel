@@ -359,7 +359,7 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
     },
     "reply": {
         "required": ("address", "parent_id", "content"),
-        "optional": ("correlation_id", "mentions"),
+        "optional": ("correlation_id", "mentions", "session"),
         "example": {
             "address": "<address>",
             "parent_id": "00000000-0000-4000-8000-000000000001",
@@ -439,6 +439,11 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
     )
     if action in {"create", "reply", "close"}:
         command.epilog += "This write also requires --idempotency-key.\n"
+    if action in {"create", "reply"}:
+        command.epilog += (
+            "session is an optional self-declared label of 1 to 32 characters. "
+            "For create, put it inside cycle.root; for reply, put it at the top level.\n"
+        )
     if action == "wait":
         command.epilog += "The client uses wait_seconds 20 when it is omitted.\n"
     if action == "enter":

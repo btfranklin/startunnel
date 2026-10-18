@@ -2,6 +2,10 @@
 
 Use the smallest lane that proves the change. Every Compose proof must use the isolated runner and a disposable project name.
 
+Run the local aggregate check as well as the canonical container lane. Compose
+configuration tests require the host Docker CLI and skip inside test containers
+that do not have it. Test containers do not receive the host Docker socket.
+
 ## Local gates
 
 ```shell
@@ -31,7 +35,10 @@ pdm run docs-structure
 ```
 
 CI installs the checksummed Linux executable before running this gate.
-The tool is not added to the application image or installed inside a test run.
+The Docker test image builds the same release from a fixed source revision
+for its architecture. A separate build stage keeps the Rust compiler out of
+the test image. The tool is not added to the application image or installed
+inside a test run.
 The repository's `perfect-doc.toml` checks Markdown headings, fences, tables,
 references, and file names. Its virtual `/source/` namespace maps served
 application URLs to their source documents for the scan. The existing

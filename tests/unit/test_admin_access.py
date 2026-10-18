@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hmac
+import json
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.utils import timezone
@@ -26,6 +29,66 @@ def run(
     return execute_admin_operation(
         actor=actor, operation=operation, key=key or str(uuid4()), data=data
     )
+
+
+def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
+    user_factory: Any, credential_factory: Any
+) -> None:
+    from tunnels.services import create_tunnel
+
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="admin-session-base",
+        root_content={"type": "text", "text": "Initial root"},
+    )
+    run(
+        actor,
+        "tunnels.close",
+        {"tunnel_id": str(created.tunnel.id), "expected_cycle_id": str(created.cycle.id)},
+    )
+    data = {
+        "tunnel_id": str(created.tunnel.id),
+        "expected_address_generation": 1,
+        "root_content": {"type": "text", "text": "New root"},
+        "cycle_label": "",
+        "expires_in_seconds": None,
+    }
+    key = "admin-session-retry"
+    first = run(actor, "tunnels.start", data, key)
+    old_body = json.dumps(
+        {"operation": "tunnels.start", "data": data},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+        allow_nan=False,
+    ).encode()
+    expected = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), old_body, "sha256")
+    receipt = AdminOperation.objects.get(pk=first["operation"]["id"])
+    assert bytes(receipt.request_digest) == expected
+    assert run(actor, "tunnels.start", {**data, "root_session": None}, key) == first
+    with pytest.raises(IdempotencyConflict):
+        run(actor, "tunnels.start", {**data, "root_session": "chat-a"}, key)
+
+    from tunnels.models import Cycle
+
+    cycle = Cycle.objects.get(pk=first["resource"]["active_cycle_id"])
+    assert cycle.root_message is not None and cycle.root_message.session is None
+    labeled = run(
+        actor,
+        "tunnels.rollover",
+        {
+            **data,
+            "expected_cycle_id": str(cycle.id),
+            "root_content": {"type": "text", "text": "Labeled root"},
+            "root_session": "operator-chat",
+        },
+        "admin-session-labeled",
+    )
+    labeled_cycle = Cycle.objects.get(pk=labeled["resource"]["active_cycle_id"])
+    assert labeled_cycle.root_message is not None
+    assert labeled_cycle.root_message.session == "operator-chat"
 
 
 def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:

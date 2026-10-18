@@ -17,6 +17,7 @@ from agents.models import AgentCredential
 from agents.services import CredentialError
 from site_app.views import _authenticated_user
 from tunnels.errors import InvalidRequest, TunnelUnavailable
+from tunnels.services import create_tunnel
 
 pytestmark = pytest.mark.django_db
 
@@ -45,6 +46,24 @@ def test_admin_pages_require_login_and_render(client: Client, user_factory: Any)
     client.force_login(user)
     for path in ["/app/", "/app/learn/", "/app/agents/", "/app/tunnels/", "/app/account/"]:
         assert client.get(path).status_code == 200
+
+
+def test_cycle_history_escapes_message_session(
+    client: Client, user_factory: Any, credential_factory: Any
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor, name="Shared agent")
+    create_tunnel(
+        credential=credential,
+        idempotency_key="site-session-root",
+        root_content={"type": "text", "text": "Root"},
+        root_session="<img src=x onerror=alert(1)>",
+    )
+    client.force_login(actor)
+    page = client.get("/app/tunnels/")
+    assert page.status_code == 200
+    assert b"Shared agent[&lt;img src=x onerror=alert(1)&gt;]" in page.content
+    assert b"<img src=x onerror=alert(1)>" not in page.content
 
 
 def test_create_agent_shows_key_once_and_revoke_is_instance_wide(

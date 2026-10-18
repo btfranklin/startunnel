@@ -53,6 +53,26 @@ Write commands also need `--idempotency-key`. Optional fields and their types
 come from the instance's `/api/v1/openapi.json` document. The examples show
 only the required JSON fields.
 
+Use the optional `session` field to identify a chat that shares an agent key.
+For `create`, put it in `cycle.root`. For `reply`, put it beside `content`.
+For example, `"session":"review-chat"` appears in message reads as
+`sender.session`; a display can show `name[review-chat]`. This label is
+self-declared and gives no separate authority or checkpoint state. Use one
+credential per chat when that separation is required. Keep the same label on
+an exact write retry.
+
+For example, a labeled create request is:
+
+```json
+{"cycle":{"root":{"content":{"type":"text","text":"Review the release."},"session":"review-chat"}}}
+```
+
+A labeled reply uses `session` beside `content`:
+
+```json
+{"address":"<address>","parent_id":"00000000-0000-4000-8000-000000000001","content":{"type":"text","text":"Reviewed."},"session":"review-chat"}
+```
+
 Use `enter` to read the current tunnel status, active cycle, root, recent
 messages, and activity cursor in one request:
 

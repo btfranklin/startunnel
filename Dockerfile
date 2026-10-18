@@ -2,6 +2,18 @@
 
 ARG PYTHON_BASE_IMAGE="python:3.14.8-alpine3.23@sha256:e7cff362a12454395f8dc99607c21a602ea880cdce03538877b90c2ba932b16f"
 ARG PYTHON_TEST_BASE_IMAGE="python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d"
+ARG RUST_BUILD_IMAGE="rust:1.99-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d"
+
+# Build the existing Perfect Doc release for the test image's architecture.
+# The published release has no Linux ARM binary. The compiler stays in this stage.
+FROM ${RUST_BUILD_IMAGE} AS documentation-tools
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates git \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install --git https://github.com/btfranklin/perfect-doc \
+        --rev 6c22468c4bfc14d672182e01c4b4d8959d0093d5 \
+        --locked --root /opt/perfect-doc
 
 FROM ${PYTHON_BASE_IMAGE} AS python-base
 
@@ -142,6 +154,8 @@ FROM runtime AS test-runtime
 COPY tests/__init__.py tests/browser_settings.py /app/tests/
 
 FROM development-dependencies AS development-runtime
+
+COPY --from=documentation-tools /opt/perfect-doc/bin/perfect-doc /usr/local/bin/perfect-doc
 
 ARG APP_UID=10001
 ARG APP_GID=10001

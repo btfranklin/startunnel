@@ -121,3 +121,15 @@ def test_runtime_image_removes_unused_package_runtimes() -> None:
     assert "apt-get" not in runtime
     assert "/usr/local/lib/python3.14/site-packages/pip" in runtime
     assert "/app/.venv/lib/python3.14/site-packages/pip" in runtime
+
+
+def test_documentation_tool_stays_outside_the_application_image() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    runtime = dockerfile.split("FROM python-base AS runtime", 1)[1].split(
+        "FROM development-dependencies AS development-runtime", 1
+    )[0]
+    development = dockerfile.split("FROM development-dependencies AS development-runtime", 1)[1]
+    assert "perfect-doc" not in runtime
+    assert "cargo" not in runtime
+    assert "COPY --from=documentation-tools /opt/perfect-doc/bin/perfect-doc" in development
+    assert "--locked --root /opt/perfect-doc" in dockerfile

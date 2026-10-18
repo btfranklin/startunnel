@@ -378,7 +378,7 @@ def _cycle_directory_item(cycle: Cycle) -> dict[str, Any]:
         "state": cycle.state,
         "root": {
             "id": root.id,
-            "sender": {"id": root.sender_id, "name": root.sender_name},
+            "sender": {"id": root.sender_id, "name": root.sender_name, "session": root.session},
             "correlation_id": root.correlation_id or None,
             "content_preview": _cycle_content_preview(root),
         },
@@ -440,6 +440,7 @@ def _create(
         root_content=root.content.model_dump(mode="json"),
         root_mentions=root.mentions,
         root_correlation_id=root.correlation_id,
+        root_session=root.session,
         new_request_gate=lambda: consume_tunnel_creation(credential, provider.for_instance()),
     )
     return _created_tunnel_response(created)
@@ -482,6 +483,7 @@ def _post_reply(
             content=payload.content.model_dump(mode="json"),
             mentions=payload.mentions,
             correlation_id=payload.correlation_id,
+            session=payload.session,
         )
     except TunnelUnavailable:
         _record_miss(request, credential)
@@ -1256,7 +1258,11 @@ def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
                 "message_id": hit.message.id,
                 "cycle_id": hit.message.cycle_id,
                 "parent_id": hit.message.parent_id,
-                "sender": {"id": hit.message.sender_id, "name": hit.message.sender_name},
+                "sender": {
+                    "id": hit.message.sender_id,
+                    "name": hit.message.sender_name,
+                    "session": hit.message.session,
+                },
                 "mention_ids": sorted(
                     (mention.credential_id for mention in hit.message.mentions.all()),
                     key=str,
@@ -1482,6 +1488,7 @@ def _start_cycle(
             root_content=root.content.model_dump(mode="json"),
             root_mentions=root.mentions,
             root_correlation_id=root.correlation_id,
+            root_session=root.session,
         )
     except TunnelUnavailable:
         _record_miss(request, credential)
@@ -1530,6 +1537,7 @@ def _rollover_cycle(
             root_content=root.content.model_dump(mode="json"),
             root_mentions=root.mentions,
             root_correlation_id=root.correlation_id,
+            root_session=root.session,
         )
     except TunnelUnavailable:
         _record_miss(request, credential)

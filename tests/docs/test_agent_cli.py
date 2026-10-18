@@ -579,3 +579,6 @@ def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -
         assert "max_bytes bounds the full UTF-8 JSON response" in result.stdout
     if action in {"create", "reply", "close"}:
         assert "--idempotency-key" in result.stdout
+    if action in {"create", "reply"}:
+        assert "self-declared label" in result.stdout
+        assert "session" in result.stdout

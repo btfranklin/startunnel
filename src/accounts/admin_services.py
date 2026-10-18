@@ -407,6 +407,8 @@ def _execute_admin_operation(
     data: dict[str, Any],
 ) -> dict[str, Any]:
     validate_idempotency_key(key)
+    if operation in {"tunnels.start", "tunnels.rollover"} and data.get("root_session") is None:
+        data = {field: value for field, value in data.items() if field != "root_session"}
     lock_admin_access()
     actor = validate_actor(actor, credential)
     digest = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), key.encode(), "sha256")
@@ -551,6 +553,7 @@ def _perform(
             **common,
             "expected_address_generation": data.get("expected_address_generation"),
             "root_content": data.get("root_content", {}),
+            "root_session": data.get("root_session"),
             "cycle_label": data.get("cycle_label", ""),
             "expires_in_seconds": data.get("expires_in_seconds"),
         }

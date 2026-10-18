@@ -142,6 +142,8 @@ def upgraded(snapshot_path: Path) -> None:
     assert root.text_payload == "Root retained" and root.parent_id is None
     assert reply.text_payload == "Reply retained" and reply.parent_id == root.pk
     assert root.sequence == 1 and reply.sequence == 2 and reply.depth == 1
+    assert root.session is None and reply.session is None
+    assert root.sender_name == reply.sender_name == credential.name
     audit = AuditEvent.objects.get(pk=expected["audit_id"])
     assert audit.action == "human.created" and audit.metadata == {"historical": True}
     assert audit.actor_user_id == user.pk and audit.actor_admin_credential_id is None
@@ -153,12 +155,13 @@ def upgraded(snapshot_path: Path) -> None:
     assert recovered.owner_id == user.pk
     assert AuditEvent.objects.filter(action="admin.recovered", channel="server").exists()
     with transaction.atomic():
-        Message.objects.create(
+        labeled = Message.objects.create(
             tunnel_id=expected["tunnel_id"],
             cycle=cycle,
             parent=reply,
             sender=credential,
             sender_name=credential.name,
+            session="upgrade-proof",
             sequence=3,
             depth=2,
             payload_type="text",
@@ -169,6 +172,7 @@ def upgraded(snapshot_path: Path) -> None:
         cycle.next_sequence = 4
         cycle.message_count = 3
         cycle.save()
+    assert Message.objects.get(pk=labeled.pk).session == "upgrade-proof"
     connection.close()
 
 

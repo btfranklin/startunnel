@@ -62,6 +62,12 @@
           required></textarea>
                         </label>
                         <label>
+                          Session label (not verified)<input type="text"
+       name="root_session"
+       maxlength="32"
+       autocomplete="off">
+                        </label>
+                        <label>
                           Lifetime in seconds<input type="number"
        name="expires_in_seconds"
        min="{{ cycle_form.expires_in_seconds.field.min_value }}"
@@ -97,6 +103,12 @@
           rows="3"
           autocomplete="off"
           required></textarea>
+                        </label>
+                        <label>
+                          Session label (not verified)<input type="text"
+       name="root_session"
+       maxlength="32"
+       autocomplete="off">
                         </label>
                         <label>
                           Lifetime in seconds<input type="number"
@@ -159,7 +171,7 @@
                           disabled>Address metadata unavailable</button>
                 </form>
               {% endif %}
-              {% if row.cycles %}<details><summary>Cycle history</summary><ol>{% for cycle in row.cycles %}<li>Cycle {{ cycle.number }} · {{ cycle.state }} · {{ cycle.message_count }} messages</li>{% endfor %}</ol></details>{% endif %}
+              {% if row.cycles %}<details><summary>Cycle history</summary><ol>{% for cycle in row.cycles %}<li>Cycle {{ cycle.number }} · {{ cycle.state }} · {{ cycle.message_count }} messages{% if cycle.root_message %} · Root by {{ cycle.root_message.sender_name }}{% if cycle.root_message.session %}[{{ cycle.root_message.session }}] (unverified session label){% endif %}{% endif %}</li>{% endfor %}</ol></details>{% endif %}
             </li>
           {% endwith %}
         {% endfor %}

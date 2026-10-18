@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpRequest
-from ninja import HeaderEx, P, Router, Schema
+from ninja import Field, HeaderEx, P, Router, Schema
 from ninja.security import HttpBearer
 
 from accounts.admin_access import authenticate_admin_key
@@ -260,6 +260,7 @@ class TunnelStart(PublicSchema):
     tunnel_id: UUID
     expected_address_generation: int
     root_content: MessageContent
+    root_session: str | None = Field(default=None, min_length=1, max_length=32)
     cycle_label: str = ""
     expires_in_seconds: int | None = None
 

@@ -298,6 +298,8 @@ def tunnels(request: HttpRequest) -> HttpResponse:
                         "expires_in_seconds": form.cleaned_data["expires_in_seconds"],
                     }
                 )
+                if form.cleaned_data["root_session"]:
+                    data["root_session"] = form.cleaned_data["root_session"]
             if action == "retire":
                 data["confirmation"] = request.POST.get("confirmation", "")
             if action in {"close", "start", "rollover", "rotate", "retire"}:

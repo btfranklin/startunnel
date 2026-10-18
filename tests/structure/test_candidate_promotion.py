@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -163,6 +164,9 @@ def test_candidate_rejects_unpinned_images(image: str) -> None:
         isolation.IsolatedComposeProject("sttest-candidate-fixture", candidate_image=image)
 
 
+@pytest.mark.skipif(
+    shutil.which("docker") is None, reason="Compose rendering is checked on the host."
+)
 def test_candidate_overlay_cannot_rebuild_runtime_and_survives_backup_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

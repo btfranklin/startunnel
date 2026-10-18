@@ -54,6 +54,12 @@ The response contains the address, cycle ID, and root message ID. Keep them
 in private work state. For later operations, put addresses, IDs, and cursors
 in JSON request files, then pass each file on standard input:
 
+You can set `session` in `cycle.root` or beside `content` in a reply. It is a
+self-declared label of 1 to 32 characters. Message reads return it as
+`sender.session`. It helps show which chat wrote a message when chats share
+one key. It does not give separate authority or checkpoint progress. Use a
+different key for each chat when those boundaries matter.
+
 ```shell
 python3 star_tunnel.py reply --idempotency-key reply-review-001 < reply.json
 python3 star_tunnel.py wait < activity.json

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -215,6 +216,28 @@ def _normalize_correlation_id(value: str | None) -> str:
     return correlation
 
 
+def _validate_session(value: str | None) -> str | None:
+    if value is None:
+        return None
+    validate_storable_text(value, field="session")
+    if (
+        not 1 <= len(value) <= 32
+        or value != value.strip()
+        or any(unicodedata.category(character) in {"Cc", "Cf"} for character in value)
+    ):
+        raise InvalidRequest(
+            "session must contain 1 to 32 characters with no outer whitespace "
+            "or control characters."
+        )
+    return value
+
+
+def _add_session_request_data(request_data: dict[str, Any], session: str | None) -> None:
+    # Preserve fingerprints from requests stored before sessions existed.
+    if session is not None:
+        request_data["session"] = session
+
+
 def _content_digest(payload: ValidatedPayload) -> bytes:
     body = payload.text if payload.payload_type == Message.PayloadType.TEXT else payload.json_text
     assert body is not None
@@ -288,6 +311,7 @@ def _create_message(
     sequence: int,
     payload: ValidatedPayload,
     correlation_id: str,
+    session: str | None = None,
 ) -> Message:
     return Message.objects.create(
         tunnel=tunnel,
@@ -295,6 +319,7 @@ def _create_message(
         parent=parent,
         sender=sender,
         sender_name=sender.name,
+        session=session,
         sequence=sequence,
         depth=0 if parent is None else parent.depth + 1,
         payload_type=payload.payload_type,
@@ -344,6 +369,7 @@ def create_tunnel(
     expires_in_seconds: int | None = None,
     root_mentions: list[UUID] | None = None,
     root_correlation_id: str | None = None,
+    root_session: str | None = None,
     new_request_gate: Callable[[], None] | None = None,
 ) -> CreatedTunnel:
     if not credential_is_active(credential):
@@ -354,6 +380,7 @@ def create_tunnel(
     limits = limits_for(credential)
     root_payload = validate_content(root_content, maximum_bytes=limits.bytes_per_message)
     correlation = _normalize_correlation_id(root_correlation_id)
+    session = _validate_session(root_session)
     mention_ids = root_mentions or []
     request_data = {
         "label": tunnel_label,
@@ -363,6 +390,7 @@ def create_tunnel(
         "root_mentions": [str(item) for item in mention_ids],
         "root_correlation_id": correlation,
     }
+    _add_session_request_data(request_data, session)
     operation = "create_tunnel"
     idempotency = begin_idempotency(
         credential=credential,
@@ -463,6 +491,7 @@ def create_tunnel(
         sequence=1,
         payload=root_payload,
         correlation_id=correlation,
+        session=session,
     )
     _store_mentions(root, mentions)
     cycle.root_message = root
@@ -535,10 +564,12 @@ def post_reply(
     content: dict[str, Any],
     mentions: list[UUID] | None = None,
     correlation_id: str | None = None,
+    session: str | None = None,
 ) -> PostedReply:
     limits = limits_for(credential)
     payload = validate_content(content, maximum_bytes=limits.bytes_per_message)
     correlation = _normalize_correlation_id(correlation_id)
+    session = _validate_session(session)
     token = parse_address(address)
     mention_ids = mentions or []
     request_data = {
@@ -548,6 +579,7 @@ def post_reply(
         "mentions": [str(item) for item in mention_ids],
         "correlation_id": correlation,
     }
+    _add_session_request_data(request_data, session)
     idempotency = begin_idempotency(
         credential=credential,
         operation="post_reply",
@@ -594,6 +626,7 @@ def post_reply(
         sequence=sequence,
         payload=payload,
         correlation_id=correlation,
+        session=session,
     )
     _store_mentions(message, resolved_mentions)
     cycle.next_sequence = sequence + 1
@@ -1148,6 +1181,7 @@ def _start_cycle_locked(
     payload: ValidatedPayload,
     correlation: str,
     mentions: list[AgentCredential],
+    session: str | None = None,
     actor_user: User | None = None,
 ) -> StartedCycle:
     if (
@@ -1178,6 +1212,7 @@ def _start_cycle_locked(
         sequence=1,
         payload=payload,
         correlation_id=correlation,
+        session=session,
     )
     _store_mentions(root, mentions)
     cycle.root_message = root
@@ -1299,6 +1334,7 @@ def start_cycle(
     expires_in_seconds: int | None = None,
     root_mentions: list[UUID] | None = None,
     root_correlation_id: str | None = None,
+    root_session: str | None = None,
 ) -> StartedCycle:
     if not credential_is_active(credential):
         raise InvalidCredential()
@@ -1310,6 +1346,7 @@ def start_cycle(
         root_mentions=root_mentions,
         root_correlation_id=root_correlation_id,
     )
+    session = _validate_session(root_session)
     request_data = _cycle_request_data(
         address=address,
         expected_address_generation=expected_address_generation,
@@ -1320,6 +1357,7 @@ def start_cycle(
         root_mentions=root_mentions or [],
         root_correlation_id=correlation,
     )
+    _add_session_request_data(request_data, session)
     operation = "start_cycle"
     replay = find_idempotency_replay(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
@@ -1349,6 +1387,7 @@ def start_cycle(
         payload=payload,
         correlation=correlation,
         mentions=mentions,
+        session=session,
     )
     finish_idempotency(
         idempotency.record,
@@ -1396,6 +1435,7 @@ def rollover_cycle(
     expires_in_seconds: int | None = None,
     root_mentions: list[UUID] | None = None,
     root_correlation_id: str | None = None,
+    root_session: str | None = None,
 ) -> StartedCycle:
     if not credential_is_active(credential):
         raise InvalidCredential()
@@ -1407,6 +1447,7 @@ def rollover_cycle(
         root_mentions=root_mentions,
         root_correlation_id=root_correlation_id,
     )
+    session = _validate_session(root_session)
     request_data = _cycle_request_data(
         address=address,
         expected_address_generation=expected_address_generation,
@@ -1417,6 +1458,7 @@ def rollover_cycle(
         root_mentions=root_mentions or [],
         root_correlation_id=correlation,
     )
+    _add_session_request_data(request_data, session)
     operation = "rollover_cycle"
     replay = find_idempotency_replay(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
@@ -1454,6 +1496,7 @@ def rollover_cycle(
         payload=payload,
         correlation=correlation,
         mentions=mentions,
+        session=session,
     )
     finish_idempotency(
         idempotency.record,
@@ -1640,6 +1683,7 @@ def _start_cycle_as_admin_locked(
     cycle_label: str,
     expires_in_seconds: int | None,
     expected_cycle_id: UUID | None,
+    root_session: str | None,
 ) -> StartedCycle:
     credential = tunnel.creator
     if not credential_is_active(credential):
@@ -1655,6 +1699,7 @@ def _start_cycle_as_admin_locked(
         root_mentions=[],
         root_correlation_id=None,
     )
+    session = _validate_session(root_session)
     if expected_cycle_id is not None:
         cycle = active_cycle(tunnel=tunnel, for_update=True)
         if cycle.id != expected_cycle_id:
@@ -1676,6 +1721,7 @@ def _start_cycle_as_admin_locked(
             mention_ids=mention_ids,
             maximum=limits_for(credential).mentions_per_message,
         ),
+        session=session,
         actor_user=actor,
     )
 
@@ -1689,6 +1735,7 @@ def start_cycle_as_operator(
     root_content: dict[str, Any],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
+    root_session: str | None = None,
 ) -> StartedCycle:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _start_cycle_as_admin_locked(
@@ -1699,6 +1746,7 @@ def start_cycle_as_operator(
         cycle_label=cycle_label,
         expires_in_seconds=expires_in_seconds,
         expected_cycle_id=None,
+        root_session=root_session,
     )
 
 
@@ -1712,6 +1760,7 @@ def rollover_cycle_as_operator(
     root_content: dict[str, Any],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
+    root_session: str | None = None,
 ) -> StartedCycle:
     tunnel = _locked_operator_tunnel(actor=actor, tunnel_id=tunnel_id)
     return _start_cycle_as_admin_locked(
@@ -1722,6 +1771,7 @@ def rollover_cycle_as_operator(
         cycle_label=cycle_label,
         expires_in_seconds=expires_in_seconds,
         expected_cycle_id=expected_cycle_id,
+        root_session=root_session,
     )
 
 

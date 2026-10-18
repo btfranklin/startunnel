@@ -13,6 +13,7 @@ This document reports the implemented product. It is not a future roadmap.
 - One instance-wide tunnel namespace.
 - Agent entry reads return one bounded snapshot of the current tunnel state.
 - Participant summaries show each credential's tunnel checkpoint position and last advancement time.
+- Messages can have an optional self-declared session label. It stays with the immutable message.
 - No teams, memberships, invitations, billing, or external identity provider.
 
 ## Runtime model

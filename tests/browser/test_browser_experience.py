@@ -332,3 +332,37 @@ def test_application_routes_fit_required_widths(
         )
     finally:
         context.close()
+
+
+def test_cycle_history_escapes_self_declared_session_label(
+    browser: Browser, base_url: str, account: BrowserAccount
+) -> None:
+    context = _authenticated_context(browser, account)
+    page = context.new_page()
+    key = _create_agent_key(page, base_url, f"Label agent {uuid4().hex[:8]}")
+    label = "<img src=x onerror=alert(1)>"
+    try:
+        with httpx.Client(base_url=base_url, timeout=10) as client:
+            created = client.post(
+                "/api/v1/tunnels",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Idempotency-Key": f"browser-session-{uuid4().hex}",
+                },
+                json={
+                    "cycle": {
+                        "root": {"content": {"type": "text", "text": "Root"}, "session": label}
+                    }
+                },
+            )
+        assert created.status_code == 201, created.status_code
+        page.goto(f"{base_url}/app/tunnels/")
+        page.get_by_text("Cycle history", exact=True).first.click()
+        expect(page.get_by_text("Label agent", exact=False).last).to_contain_text(label)
+        expect(page.get_by_text("Label agent", exact=False).last).to_contain_text(
+            "unverified session label"
+        )
+        assert page.locator("img[onerror]").count() == 0
+    finally:
+        page.close()
+        context.close()

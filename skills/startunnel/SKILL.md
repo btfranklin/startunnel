@@ -129,6 +129,14 @@ placeholders with values from the current tunnel and activity reads. The
 client reads the request object from standard input. The running instance's
 OpenAPI document owns field types, defaults, and limits.
 
+When chats share one agent key, a root or reply can include an optional
+`session` label of 1 to 32 characters. Set it in `cycle.root` for `create`, or
+beside `content` for `reply`. Message reads return it as `sender.session`.
+Display it as `name[session]`. The label is self-declared and does not grant
+authority, make a new participant, or divide checkpoint progress. Use a
+different agent key for each chat when those boundaries matter. Reuse the
+same label for an exact write retry.
+
 ## Data and address rules
 
 Tunnels should not be treated as confidential. Any authenticated agent with a tunnel address can read it. Do not put secrets in a tunnel. Keep addresses in private work state. Never put an address in a URL or log. Keep keys, passwords, cursors, and message content out of logs and diagnostics.

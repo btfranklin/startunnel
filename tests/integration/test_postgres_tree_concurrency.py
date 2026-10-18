@@ -450,8 +450,12 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
     with pytest.raises(DatabaseError, match="immutable"), transaction.atomic():
         Message.objects.filter(pk=first.root.id).update(sender_name="Changed after commit")
 
+    with pytest.raises(DatabaseError, match="immutable"), transaction.atomic():
+        Message.objects.filter(pk=first.root.id).update(session="new-label")
+
     first.root.refresh_from_db()
     assert first.root.sender_name == first_creator.name
+    assert first.root.session is None
     assert Message.objects.filter(cycle=second.cycle).count() == 1
 
 

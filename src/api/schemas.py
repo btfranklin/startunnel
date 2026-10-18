@@ -40,6 +40,7 @@ ActivityEventType = Literal[
 
 class RootMessageRequest(PublicSchema):
     content: MessageContent
+    session: str | None = Field(default=None, min_length=1, max_length=32, examples=["review-chat"])
     mentions: list[UUID] = Field(default_factory=list, max_length=32)
     correlation_id: str | None = Field(default=None, max_length=128, examples=["release-42"])
 
@@ -58,6 +59,7 @@ class CreateTunnelRequest(PublicSchema):
 class SenderResponse(PublicSchema):
     id: UUID
     name: str
+    session: str | None
 
 
 class MentionResponse(PublicSchema):
@@ -143,6 +145,7 @@ class PostReplyRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     parent_id: UUID
     content: MessageContent
+    session: str | None = Field(default=None, min_length=1, max_length=32, examples=["review-chat"])
     mentions: list[UUID] = Field(default_factory=list, max_length=32)
     correlation_id: str | None = Field(default=None, max_length=128, examples=["release-42"])
 

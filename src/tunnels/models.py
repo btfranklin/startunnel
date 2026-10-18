@@ -163,6 +163,7 @@ class Message(models.Model):
         AgentCredential, on_delete=models.PROTECT, related_name="sent_messages"
     )
     sender_name = models.CharField(max_length=120)
+    session = models.CharField(max_length=32, null=True, blank=True)  # noqa: DJ001
     sequence = models.PositiveBigIntegerField()
     depth = models.PositiveIntegerField()
     payload_type = models.CharField(max_length=8, choices=PayloadType.choices)

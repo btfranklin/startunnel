@@ -15,6 +15,9 @@ class AgentCredentialForm(forms.Form):
 
 
 class TunnelCycleForm(forms.Form):
+    root_session = forms.CharField(
+        label="Session label (not verified)", max_length=32, required=False, strip=False
+    )
     cycle_label = forms.CharField(
         label="Cycle label",
         max_length=160,

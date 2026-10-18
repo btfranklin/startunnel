@@ -2687,6 +2687,22 @@
             "format": "uuid",
             "title": "Parent Id",
             "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "review-chat"
+            ],
+            "title": "Session"
           }
         },
         "required": [
@@ -2954,6 +2970,22 @@
             "maxItems": 32,
             "title": "Mentions",
             "type": "array"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "review-chat"
+            ],
+            "title": "Session"
           }
         },
         "required": [
@@ -3301,11 +3333,23 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session"
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "session"
         ],
         "title": "SenderResponse",
         "type": "object"
@@ -3821,6 +3865,19 @@
             ],
             "title": "Root Content"
           },
+          "root_session": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Session"
+          },
           "tunnel_id": {
             "format": "uuid",
             "title": "Tunnel Id",
@@ -3896,6 +3953,19 @@
               }
             ],
             "title": "Root Content"
+          },
+          "root_session": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Session"
           },
           "tunnel_id": {
             "format": "uuid",

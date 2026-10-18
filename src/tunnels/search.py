@@ -124,7 +124,11 @@ def _hit_response_bytes(*, message: Message, snippet: str, rank: int) -> int:
         "message_id": str(message.id),
         "cycle_id": str(message.cycle_id),
         "parent_id": str(message.parent_id) if message.parent_id else None,
-        "sender": {"id": str(message.sender_id), "name": message.sender_name},
+        "sender": {
+            "id": str(message.sender_id),
+            "name": message.sender_name,
+            "session": message.session,
+        },
         "mention_ids": sorted(str(item.credential_id) for item in message.mentions.all()),
         "correlation_id": message.correlation_id or None,
         "sequence": message.sequence,
