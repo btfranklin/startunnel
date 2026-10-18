@@ -19,7 +19,9 @@ from django.utils import timezone
 
 from accounts.models import User
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.audit import record_event
+from core.limits import Limits
 from core.logging import current_request_id
 from core.metrics import MESSAGES_SENT, TUNNELS_CREATED
 from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
@@ -1100,14 +1102,13 @@ def list_cycles(
 
 def _prepare_cycle_root(
     *,
-    credential: AgentCredential,
+    limits: Limits,
     root_content: dict[str, Any],
     cycle_label: str,
     expires_in_seconds: int | None,
     root_mentions: list[UUID] | None,
     root_correlation_id: str | None,
 ) -> tuple[int, str, ValidatedPayload, str, list[UUID]]:
-    limits = limits_for(credential)
     seconds = _cycle_lifetime(expires_in_seconds)
     label = _validate_label(cycle_label, field="A cycle label")
     payload = validate_content(root_content, maximum_bytes=limits.bytes_per_message)
@@ -1281,10 +1282,9 @@ def start_cycle(
     root_correlation_id: str | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    if not credential_is_active(credential):
-        raise InvalidCredential()
+    limits = limits_for(credential)
     seconds, label, payload, correlation, mention_ids = _prepare_cycle_root(
-        credential=credential,
+        limits=limits,
         root_content=root_content,
         cycle_label=cycle_label,
         expires_in_seconds=expires_in_seconds,
@@ -1314,7 +1314,7 @@ def start_cycle(
         raise TunnelUnavailable()
     mentions = _resolve_mentions(
         mention_ids=mention_ids,
-        maximum=limits_for(credential).mentions_per_message,
+        maximum=limits.mentions_per_message,
     )
     current_address = _current_address(tunnel=tunnel, for_update=True)
     if current_address.generation != expected_address_generation:
@@ -1382,10 +1382,9 @@ def rollover_cycle(
     root_correlation_id: str | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    if not credential_is_active(credential):
-        raise InvalidCredential()
+    limits = limits_for(credential)
     seconds, label, payload, correlation, mention_ids = _prepare_cycle_root(
-        credential=credential,
+        limits=limits,
         root_content=root_content,
         cycle_label=cycle_label,
         expires_in_seconds=expires_in_seconds,
@@ -1420,7 +1419,7 @@ def rollover_cycle(
         return _replayed_cycle(idempotency.record)
     mentions = _resolve_mentions(
         mention_ids=mention_ids,
-        maximum=limits_for(credential).mentions_per_message,
+        maximum=limits.mentions_per_message,
     )
     current_address = _current_address(tunnel=tunnel, for_update=True)
     if current_address.generation != expected_address_generation:
@@ -1631,13 +1630,11 @@ def _start_cycle_as_admin_locked(
     root_session: str | None,
 ) -> StartedCycle:
     credential = tunnel.creator
-    if not credential_is_active(credential):
-        raise TunnelUnavailable()
     current_address = _current_address(tunnel=tunnel, for_update=True)
     if current_address.generation != expected_address_generation:
         raise LifecycleConflict()
-    seconds, label, payload, correlation, mention_ids = _prepare_cycle_root(
-        credential=credential,
+    seconds, label, payload, correlation, _ = _prepare_cycle_root(
+        limits=instance_limits.effective_limits(),
         root_content=root_content,
         cycle_label=cycle_label,
         expires_in_seconds=expires_in_seconds,
@@ -1662,10 +1659,7 @@ def _start_cycle_as_admin_locked(
         label=label,
         payload=payload,
         correlation=correlation,
-        mentions=_resolve_mentions(
-            mention_ids=mention_ids,
-            maximum=limits_for(credential).mentions_per_message,
-        ),
+        mentions=[],
         session=session,
         actor_user=actor,
     )

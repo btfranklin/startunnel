@@ -54,6 +54,9 @@ Key issuance locks its owner so a concurrent deactivation revokes the new key.
 Tunnel operations retain expected-cycle and address-generation checks. Admins
 can remove all passwords and keys or deactivate all accounts.
 Server-only bootstrap and recovery issue access without a browser session.
+Admin cycle starts and rollovers use instance limits. The historical tunnel
+creator remains the root sender and cycle creator, while the admin is recorded
+as the actor in the audit event.
 
 See the [admin quickstart](user/admin-quickstart.md) for the inspect, act, and
 verify workflow. Deployment settings are read-only diagnostics in the admin API.

@@ -318,6 +318,73 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     assert tunnel_resource(created.tunnel)["address"] is None
 
 
+@pytest.mark.parametrize("inactive_reason", ["revoked", "suspended", "expired"])
+def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
+    user_factory: Any, credential_factory: Any, inactive_reason: str
+) -> None:
+    from tunnels.services import create_tunnel
+
+    creator_user = user_factory()
+    actor = user_factory()
+    creator, _ = credential_factory(user=creator_user)
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key=f"inactive-creator-{inactive_reason}",
+        root_content={"type": "text", "text": "Initial root"},
+        label="inactive-creator",
+    )
+    if inactive_reason == "revoked":
+        creator.revoked_at = timezone.now()
+        creator.save(update_fields=["revoked_at"])
+    elif inactive_reason == "suspended":
+        creator.suspended_at = timezone.now()
+        creator.save(update_fields=["suspended_at"])
+    else:
+        creator.expires_at = timezone.now() - timedelta(seconds=1)
+        creator.save(update_fields=["expires_at"])
+
+    run(
+        actor,
+        "tunnels.close",
+        {"tunnel_id": str(created.tunnel.id), "expected_cycle_id": str(created.cycle.id)},
+    )
+    started = run(
+        actor,
+        "tunnels.start",
+        {
+            "tunnel_id": str(created.tunnel.id),
+            "expected_address_generation": 1,
+            "root_content": {"type": "text", "text": "Admin start"},
+        },
+    )
+    started_cycle_id = started["resource"]["active_cycle_id"]
+    rolled = run(
+        actor,
+        "tunnels.rollover",
+        {
+            "tunnel_id": str(created.tunnel.id),
+            "expected_cycle_id": started_cycle_id,
+            "expected_address_generation": 1,
+            "root_content": {"type": "text", "text": "Admin rollover"},
+        },
+    )
+
+    from tunnels.models import Cycle
+
+    rolled_cycle_id = rolled["resource"]["active_cycle_id"]
+    admin_cycles = Cycle.objects.filter(pk__in=[started_cycle_id, rolled_cycle_id])
+    assert admin_cycles.count() == 2
+    for cycle in admin_cycles.select_related("root_message"):
+        assert cycle.creator_id == creator.id
+        assert cycle.root_message is not None
+        assert cycle.root_message.sender_id == creator.id
+    events = AuditEvent.objects.filter(
+        action="cycle.started", target_id__in=admin_cycles.values("id")
+    )
+    assert events.count() == 2
+    assert set(events.values_list("actor_user_id", flat=True)) == {actor.id}
+
+
 def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
     actor = user_factory()
     initial = User.objects.count()
