@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -134,7 +133,6 @@ def test_maximum_cycle_traversal_and_context_materialize_only_requested_pages(
         root_content={"type": "text", "text": "Coordinate a maximum-size cycle."},
     )
     payload = "x"
-    digest = hashlib.sha256(payload.encode()).digest()
     message_total = Limits().messages_per_cycle
     reply_rows = [
         Message(
@@ -149,7 +147,6 @@ def test_maximum_cycle_traversal_and_context_materialize_only_requested_pages(
             payload_type=Message.PayloadType.TEXT,
             text_payload=payload,
             byte_count=1,
-            content_digest=digest,
         )
         for sequence in range(2, message_total + 1)
     ]
@@ -479,7 +476,6 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
             payload_type=Message.PayloadType.TEXT,
             text_payload="Invalid cross-cycle reply",
             byte_count=len(b"Invalid cross-cycle reply"),
-            content_digest=hashlib.sha256(b"invalid").digest(),
         )
 
     with pytest.raises(DatabaseError, match="immutable"), transaction.atomic():

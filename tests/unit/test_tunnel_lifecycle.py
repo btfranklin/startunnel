@@ -144,7 +144,6 @@ def test_replies_form_an_immutable_ordered_tree_and_allow_self_reply(
     assert created.cycle.message_count == 3
     assert created.cycle.next_sequence == 4
     assert created.tunnel.next_event_position == 5
-    assert Message.objects.get(pk=first.message.id).content_digest
 
 
 def test_parent_must_belong_to_the_active_cycle(credential_factory: Any) -> None:
@@ -341,7 +340,6 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
             payload_type=Message.PayloadType.TEXT,
             text_payload="Another root",
             byte_count=12,
-            content_digest=b"x" * 32,
         )
 
 

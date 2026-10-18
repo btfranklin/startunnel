@@ -65,7 +65,5 @@ def test_initial_schema_has_current_models_and_guards() -> None:
         "startunnel_lifecycle_from_address",
         "startunnel_lifecycle_from_cycle",
     } <= triggers
-    assert {
-        "message_payload_actual_size_at_most_64k",
-        "message_content_digest_is_sha256",
-    } <= constraints
+    assert "message_payload_actual_size_at_most_64k" in constraints
+    assert "message_content_digest_is_sha256" not in constraints

@@ -81,6 +81,10 @@ For a database that still stores address digests, this upgrade performs a
 and their message data. Accounts and credentials remain. Read that notice and
 make a verified backup before applying the update. No conversion file is needed.
 
+For databases that already store glyph addresses, removing the unused
+per-message content digest preserves existing messages and payloads. The
+application no longer stores a per-message content digest.
+
 1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.

@@ -5,7 +5,6 @@ PostgreSQL owns tree, lifecycle, rate-limit, and notification correctness.
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import unicodedata
 from dataclasses import dataclass
@@ -235,12 +234,6 @@ def _add_session_request_data(request_data: dict[str, Any], session: str | None)
         request_data["session"] = session
 
 
-def _content_digest(payload: ValidatedPayload) -> bytes:
-    body = payload.text if payload.payload_type == Message.PayloadType.TEXT else payload.json_text
-    assert body is not None
-    return hashlib.sha256(f"{payload.payload_type}\x00{body}".encode()).digest()
-
-
 def _allocate_random_address(*, tunnel: Tunnel, generation: int) -> tuple[TunnelAddress, str]:
     """Allocate one random current address inside the locked tunnel transaction."""
 
@@ -283,7 +276,6 @@ def _create_message(
         text_payload=payload.text,
         json_payload=payload.json_text,
         byte_count=payload.byte_count,
-        content_digest=_content_digest(payload),
         correlation_id=correlation_id,
     )
 

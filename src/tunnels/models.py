@@ -170,7 +170,6 @@ class Message(models.Model):
     text_payload = models.TextField(null=True, blank=True)  # noqa: DJ001
     json_payload = models.TextField(null=True, blank=True)  # noqa: DJ001
     byte_count = models.PositiveIntegerField()
-    content_digest = models.BinaryField(max_length=32)
     correlation_id = models.CharField(max_length=128, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

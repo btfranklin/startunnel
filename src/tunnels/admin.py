@@ -35,7 +35,7 @@ class CycleAdmin(InspectionAdmin):
 @admin.register(Message)
 class MessageAdmin(InspectionAdmin):
     list_display = ("id", "cycle_id", "sequence", "sender_id", "depth", "created_at")
-    exclude = ("text_payload", "json_payload", "content_digest")
+    exclude = ("text_payload", "json_payload")
 
 
 @admin.register(TunnelEvent)
