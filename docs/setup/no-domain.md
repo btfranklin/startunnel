@@ -50,9 +50,11 @@ The operator or setup agent must complete these changes:
    Use a local Compose override for the mounts and custom Caddyfile, and include
    that file in `COMPOSE_FILE` so later maintenance uses it too.
 5. Enable automatic renewal and a deploy hook that makes Caddy load the renewed
-   files. The supplied Caddyfile has `admin off`, so its default configuration
-   cannot use the normal admin API reload. A Caddy container restart is one
-   option, with a brief interruption. Monitor renewal failures and expiry.
+   files. From the [configured server shell](maintain.md#start-each-server-session),
+   run `docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --force`.
+   The reload loads new certificates at the same paths without a service
+   interruption. Caddy's admin API listens on container loopback; do not publish
+   port 2019. Monitor renewal failures and expiry.
 
 In `production.env`, set `STARTUNNEL_DOMAIN` to the bare public IPv4 address,
 without a scheme or path. Despite its name, the production Compose file uses

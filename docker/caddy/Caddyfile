@@ -1,5 +1,4 @@
 {
-	admin off
 	log default {
 		output stdout
 		format filter {

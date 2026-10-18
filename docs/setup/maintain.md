@@ -47,6 +47,16 @@ This causes a short interruption. Do not use `down --volumes` or a Docker volume
 prune for a restart. They can remove durable data. Container restart policies
 start services after a server reboot; verify their health after every reboot.
 
+To apply Caddy configuration changes or renewed certificate files without a
+service interruption, run:
+
+```shell
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --force
+```
+
+The admin API uses container loopback. The supplied Compose file does not publish
+its port, 2019. Keep that port private.
+
 ## Recover administrator access
 
 Use another available admin key or password account first. If remote access is
