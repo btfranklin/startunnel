@@ -42,6 +42,9 @@ Behind a trusted proxy, this limit uses the validated client address. Passwords 
 A key starts with `st_`. Creation returns it through a private file or browser download. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
 
 Do not put agent keys in Git, images, fixtures, examples, URLs, or logs.
+The release scan checks candidate source files, the current security reports,
+and the runtime image and its history. It does not scan unrelated ignored
+local reports or private input files. A Git-free source export is also checked.
 
 ## Addresses and logs
 

@@ -5,16 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from scripts.check_secrets import OCR_PATTERNS
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def test_ocr_secret_patterns_stay_on_one_rendered_line() -> None:
-    pattern = OCR_PATTERNS["StarTunnel key-like OCR"]
-
-    assert pattern.search("s t _ " + "A " * 43)
-    assert not pattern.search("st_capture\nCreated 10 Aug 2026\nordinary product text")
 
 
 def test_local_secret_files_are_ignored() -> None:

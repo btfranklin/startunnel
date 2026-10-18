@@ -152,6 +152,12 @@ pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST
 pdm run security-release --skip-build --image IMAGE_DIGEST
 ```
 
+The security lane scans tracked and nonignored candidate files, or source files
+in a Git-free export. It scans current security reports and the runtime image
+separately. Ignored local reports and private input files are outside the
+candidate scan. The lane also checks locked dependencies and blocks high and
+critical image vulnerabilities.
+
 Replace `IMAGE_DIGEST` with the actual official digest reference. The isolated
 runners pull and inspect the image revision and version before use, build only
 proof helpers, and verify application service image IDs. The system proof covers
