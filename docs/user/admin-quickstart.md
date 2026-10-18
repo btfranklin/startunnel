@@ -140,8 +140,8 @@ if the account needs API access.
 
 Use `accounts set-password` with `admin_id` and `password` to set browser access.
 Supply passwords through private JSON input from an approved secret store.
-Omit `password`, or set it to `null`, to remove browser access. The service
-rejects removal of the last non-expiring recovery path.
+Omit `password`, or set it to `null`, to remove browser access. This can remove
+the final browser access path.
 
 For your own key rotation, obtain your admin ID from `admin me`. Replace
 `ADMIN_ID` below with that ID, and use a new output file:
@@ -157,8 +157,8 @@ Save the old key's ID and the receipt IDs. Load the replacement file, run
 Only then revoke the old key with `keys revoke` and JSON containing `key_id`.
 Any active admin can inspect prior receipts and continue list cursors with the
 same filters. An exact retry uses the original admin account.
-Use a separate non-expiring key or password account for recovery before adding
-expiry to routine keys. `expires_at` is optional for both key types.
+An expiring key stops working at its deadline. `expires_at` is optional for
+both key types. Keep server recovery access available.
 
 To use a newly issued agent key for message commands, load its private file:
 
@@ -226,8 +226,8 @@ requires its confirmation value. Inspection does not reserve a target.
 
 Deactivation blocks browser access and revokes that admin's keys. Reactivation
 requires new keys. Agent credentials remain instance-owned and independent.
-One active password account or non-expiring admin key must remain as a recovery
-path. Keep server recovery access available.
+These operations can remove every admin access path. Keep server recovery
+access available.
 
 ## Browser access and completion
 

@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from accounts.admin_access import issue_admin_key, lock_admin_access
+from accounts.admin_access import issue_admin_key
 from accounts.models import User
 from core.audit import record_event
 
@@ -37,7 +37,6 @@ class Command(BaseCommand):
             path, descriptor = reserve_key_file(options["key_file"])
             try:
                 with os.fdopen(descriptor, "w") as output, transaction.atomic():
-                    lock_admin_access()
                     user = User(username=username, is_active=True)
                     user.full_clean(exclude={"password"})
                     user.set_unusable_password()
@@ -72,7 +71,6 @@ class Command(BaseCommand):
             raise CommandError(" ".join(error.messages)) from error
 
         with transaction.atomic():
-            lock_admin_access()
             user.set_password(password)
             user.save()
             record_event(

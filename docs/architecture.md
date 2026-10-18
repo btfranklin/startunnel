@@ -50,9 +50,9 @@ a credential key or reads a current address row. Current resource state prevents
 restoration of revoked credentials or retired addresses.
 
 Explicit account state changes check the expected state under a row lock.
-Changes that remove admin access also use the instance access lock. Tunnel
-operations retain expected-cycle and address-generation checks. Last-access
-protection requires an active password account or non-expiring admin key.
+Key issuance locks its owner so a concurrent deactivation revokes the new key.
+Tunnel operations retain expected-cycle and address-generation checks. Admins
+can remove all passwords and keys or deactivate all accounts.
 Server-only bootstrap and recovery issue access without a browser session.
 
 See the [admin quickstart](user/admin-quickstart.md) for the inspect, act, and

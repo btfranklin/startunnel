@@ -59,11 +59,11 @@ def test_account_services_reject_inactive_or_missing_accounts(user_factory: Any)
         set_admin_active(actor=actor, admin_id=actor.id, active=True)
 
 
-def test_last_active_admin_cannot_be_deactivated(user_factory: Any) -> None:
+def test_last_active_admin_can_be_deactivated(user_factory: Any) -> None:
     actor = user_factory()
-    with pytest.raises(AccountError, match="last active"):
-        set_admin_active(actor=actor, admin_id=actor.id, active=False)
-    assert set_admin_active(actor=actor, admin_id=actor.id, active=True) == actor
+    assert not set_admin_active(actor=actor, admin_id=actor.id, active=False).is_active
+    with pytest.raises(AccountError, match="inactive"):
+        require_active_admin(User.objects.get(pk=actor.pk))
 
 
 def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any) -> None:

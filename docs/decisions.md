@@ -12,8 +12,8 @@ limits belong to the instance.
 
 The existing CLI and typed admin API are primary administration interfaces.
 Django accounts use optional passwords and named admin keys. There is no
-self-sign-up. Every active admin has full instance authority. Database locks
-protect the last usable access path and a non-expiring recovery path.
+self-sign-up. Every active admin has full instance authority. An operator can
+restore access with the server recovery command after all admin access is removed.
 
 This lets agents perform routine administration without a browser. It keeps the model small and does not require an external identity provider. An operator can add SSO at a deployment boundary later, but it is not part of the core product.
 

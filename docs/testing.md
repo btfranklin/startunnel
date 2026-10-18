@@ -100,7 +100,7 @@ before an installation upgrade. The first release keeps `supported_from` empty.
 
 ## Required focused evidence
 
-- Identity changes: password and key-only accounts, credential-type isolation, expiry, revocation, last-access protection, concurrent account changes, bootstrap, recovery, and browser session invalidation.
+- Identity changes: password and key-only accounts, credential-type isolation, expiry, revocation, final-access removal, concurrent account changes, bootstrap, recovery, and browser session invalidation.
 - Credential changes: digest storage, secret-file failures, lost responses, exact retries, changed-input conflicts, independent agent-key lifecycle, and revocation.
 - Admin changes: complete unattended CLI setup and operation, audit attribution, receipt inspection, pagination, secret-free logs, and no-JavaScript browser controls.
 - Lifecycle changes: exact deadline access, delayed close semantics, `forever`, tombstone deletion, and idempotent cleanup.

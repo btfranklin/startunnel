@@ -1,4 +1,4 @@
-"""Administrator credentials protect the final usable access path."""
+"""Administrator credentials and account controls share one domain service."""
 
 from __future__ import annotations
 
@@ -129,37 +129,6 @@ def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
         {"admin_id": str(target.id), "active": True, "expected_active": False},
     )
     assert AdminCredential.objects.get(pk=credential.id).revoked_at is not None
-
-
-def test_last_access_and_expiring_keys(user_factory: Any) -> None:
-    actor = user_factory()
-    with pytest.raises(LifecycleConflict):
-        run(actor, "accounts.password", {"admin_id": str(actor.id), "password": None})
-    assert User.objects.get(pk=actor.pk).has_usable_password()
-    expiring = run(
-        actor,
-        "keys.create",
-        {
-            "admin_id": str(actor.id),
-            "name": "temporary",
-            "expires_at": (timezone.now() + timedelta(days=1)).isoformat(),
-        },
-    )
-    with pytest.raises(LifecycleConflict):
-        run(actor, "accounts.password", {"admin_id": str(actor.id), "password": None})
-    permanent = run(actor, "keys.create", {"admin_id": str(actor.id), "name": "recovery"})
-    run(actor, "accounts.password", {"admin_id": str(actor.id), "password": None})
-    with pytest.raises(LifecycleConflict):
-        run(actor, "keys.revoke", {"key_id": permanent["resource"]["id"]})
-    with pytest.raises(LifecycleConflict):
-        run(
-            actor,
-            "accounts.state",
-            {"admin_id": str(actor.id), "active": False, "expected_active": True},
-        )
-    run(actor, "keys.revoke", {"key_id": expiring["resource"]["id"]})
-    with pytest.raises(InvalidCredential):
-        authenticate_admin_key(expiring["secret"])
 
 
 def test_admin_key_isolation_expiry_and_stale_actor(
@@ -400,7 +369,7 @@ def test_safe_failure_audit_and_filters(user_factory: Any) -> None:
             credential=credential,
             operation="accounts.state",
             key=str(uuid4()),
-            data={"admin_id": str(actor.id), "active": False, "expected_active": True},
+            data={"admin_id": str(actor.id), "active": False, "expected_active": False},
         )
     event = AuditEvent.objects.get(action="admin.operation_failed")
     assert event.actor_admin_credential == credential

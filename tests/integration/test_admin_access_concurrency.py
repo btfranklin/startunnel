@@ -1,4 +1,4 @@
-"""PostgreSQL serializes administrator lockout checks."""
+"""PostgreSQL keeps admin receipts and target-state races consistent."""
 
 from __future__ import annotations
 
@@ -16,42 +16,34 @@ from accounts.admin_access import (
     authenticate_admin_key,
     change_admin_state,
     issue_admin_key,
-    lock_admin_access,
 )
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminOperation, User
-from tunnels.errors import IdempotencyConflict, InvalidCredential, LifecycleConflict
+from tunnels.errors import IdempotencyConflict, InvalidCredential
 from tunnels.models import AuditEvent, Cycle
 from tunnels.services import close_cycle_as_operator, create_tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-def test_concurrent_deactivation_preserves_access() -> None:
+def test_independent_self_deactivations_can_leave_no_active_admins() -> None:
     assert connection.vendor == "postgresql"
     first = User.objects.create_user(username="first", password="test-long-password-7291")
     second = User.objects.create_user(username="second", password="test-long-password-7282")
     barrier = Barrier(2)
 
-    def deactivate(account_id: UUID) -> bool:
+    def deactivate(account_id: UUID) -> None:
         close_old_connections()
         try:
             actor = User.objects.get(pk=account_id)
             barrier.wait(timeout=10)
-            try:
-                change_admin_state(
-                    actor=actor, admin_id=actor.id, active=False, expected_active=True
-                )
-            except LifecycleConflict:
-                return False
-            return True
+            change_admin_state(actor=actor, admin_id=actor.id, active=False, expected_active=True)
         finally:
             close_old_connections()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(deactivate, [first.id, second.id]))
-    assert sorted(results) == [False, True]
-    assert User.objects.filter(is_active=True).count() == 1
+        list(pool.map(deactivate, [first.id, second.id]))
+    assert User.objects.filter(is_active=True).count() == 0
 
 
 def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
@@ -239,40 +231,6 @@ def test_concurrent_retry_replaces_one_expired_receipt() -> None:
     assert AuditEvent.objects.filter(action="agents.create").count() == 2
 
 
-def test_access_removal_and_other_operation_with_same_key_do_not_deadlock() -> None:
-    assert connection.vendor == "postgresql"
-    actor = User.objects.create_user(username="operator", password="test-long-password-7291")
-    removable_key, _ = issue_admin_key(owner=actor, name="removable")
-    both_started = Barrier(2)
-    requests = [
-        ("keys.revoke", {"key_id": str(removable_key.pk)}),
-        ("agents.create", {"name": "contested-worker"}),
-    ]
-
-    def execute(request: tuple[str, dict[str, Any]]) -> str:
-        close_old_connections()
-        try:
-            both_started.wait(timeout=15)
-            try:
-                execute_admin_operation(
-                    actor=User.objects.get(pk=actor.pk),
-                    operation=request[0],
-                    key="access-removal-shared-key",
-                    data=request[1],
-                )
-            except IdempotencyConflict:
-                return "conflict"
-            return "success"
-        finally:
-            close_old_connections()
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(execute, requests))
-    assert sorted(outcomes) == ["conflict", "success"]
-    assert AdminOperation.objects.filter(owner=actor).count() == 1
-    assert AuditEvent.objects.filter(action__in=["keys.revoke", "agents.create"]).count() == 1
-
-
 def test_key_issuance_finishes_before_concurrent_owner_deactivation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -281,7 +239,7 @@ def test_key_issuance_finishes_before_concurrent_owner_deactivation(
     owner = User.objects.create_user(username="key-owner", password="test-long-password-7292")
     issued = Event()
     release_issuance = Event()
-    deactivation_lock_attempted = Event()
+    deactivation_entered_domain = Event()
     deactivation_finished = Event()
 
     def pause_after_issue(*args: Any, **kwargs: Any) -> Any:
@@ -290,12 +248,12 @@ def test_key_issuance_finishes_before_concurrent_owner_deactivation(
         assert release_issuance.wait(timeout=15)
         return result
 
-    def observe_access_lock() -> None:
-        deactivation_lock_attempted.set()
-        lock_admin_access()
+    def observe_state_change(*args: Any, **kwargs: Any) -> User:
+        deactivation_entered_domain.set()
+        return change_admin_state(*args, **kwargs)
 
     monkeypatch.setattr("accounts.admin_services.issue_admin_key", pause_after_issue)
-    monkeypatch.setattr("accounts.admin_services.lock_admin_access", observe_access_lock)
+    monkeypatch.setattr("accounts.admin_services.change_admin_state", observe_state_change)
 
     def create_key() -> dict[str, Any]:
         close_old_connections()
@@ -326,7 +284,7 @@ def test_key_issuance_finishes_before_concurrent_owner_deactivation(
         key_future = pool.submit(create_key)
         assert issued.wait(timeout=15)
         deactivate_future = pool.submit(deactivate_owner)
-        assert deactivation_lock_attempted.wait(timeout=15)
+        assert deactivation_entered_domain.wait(timeout=15)
         try:
             assert not deactivation_finished.wait(timeout=0.3)
         finally:

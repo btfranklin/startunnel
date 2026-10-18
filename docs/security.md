@@ -19,10 +19,10 @@ metadata. Keys authenticate only to admin endpoints. Ordinary `st_` keys cannot
 use those endpoints. Deactivating an account revokes its admin keys and blocks
 browser access. Reactivation requires new admin keys.
 
-Database locks protect changes that can remove the last usable access path.
-One active password account or non-expiring admin key must remain. Key issuance
-locks and checks its owner before it creates a key. Server bootstrap and
-recovery commands write new keys to private files and record safe audit events.
+Key issuance locks and checks its owner before it creates a key. Account state
+changes lock the target account. An admin can remove the final password or key
+and deactivate the final account. Server bootstrap and recovery commands write
+new keys to private files and record safe audit events.
 Remote endpoints cannot bootstrap an unauthenticated administrator.
 
 Audit events identify the admin, credential or browser channel, target, request,

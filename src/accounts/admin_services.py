@@ -40,8 +40,6 @@ from tunnels.services import (
 from .admin_access import (
     change_admin_state,
     issue_admin_key,
-    lock_admin_access,
-    require_recovery_path,
     validate_actor,
 )
 from .models import AdminCredential, AdminOperation, User
@@ -437,13 +435,6 @@ def _execute_admin_operation(
     if not created:
         receipt.delete()
         receipt = AdminOperation.objects.create(owner=actor, key_digest=digest, **defaults)
-    if (
-        operation == "keys.revoke"
-        or (operation == "accounts.state" and data.get("active") is False)
-        or (operation == "accounts.password" and not data.get("password"))
-    ):
-        lock_admin_access()
-        actor = validate_actor(actor, credential)
     with admin_audit_context(credential, "admin_api" if credential else "browser"):
         try:
             resource, target_type, target_id = _perform(actor, receipt, operation, data)
@@ -514,7 +505,6 @@ def _perform(
                 raise InvalidRequest(" ".join(error.messages)) from error
         account.set_password(password or None)
         account.save(update_fields=["password"])
-        require_recovery_path()
         return admin_resource(account), "user", account.id
     if operation == "keys.create":
         account = User.objects.get(pk=_id(data, "admin_id"))
@@ -531,7 +521,6 @@ def _perform(
         created = AdminCredential.objects.get(pk=_id(data, "key_id"))
         created.revoked_at = created.revoked_at or timezone.now()
         created.save(update_fields=["revoked_at"])
-        require_recovery_path()
         return key_resource(created), "admin_credential", created.id
     if operation == "agents.create":
         receipt.secret_kind = "agent_key"

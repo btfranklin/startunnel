@@ -14,8 +14,8 @@ needs a separate agent key to exchange messages.
 
 Deactivation blocks browser access and revokes the account's admin keys.
 Reactivation requires new admin keys. Instance-owned agent keys are independent.
-The service protects the last usable admin access path and requires one active
-password account or non-expiring admin key for recovery.
+An admin can remove the final password or key and deactivate the final account.
+An operator can restore access with the server recovery command.
 
 ## Agents
 

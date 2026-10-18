@@ -50,7 +50,6 @@ SAFE_ERROR_MESSAGES = {
 PUBLIC_ERROR_CODES = {
     "admin_unavailable",
     "credential_unavailable",
-    "last_admin_access",
     "state_conflict",
     "checkpoint_regression",
     "context_budget_too_small",

@@ -8,7 +8,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from accounts.admin_access import issue_admin_key, lock_admin_access
+from accounts.admin_access import issue_admin_key
 from accounts.models import User
 from core.audit import record_event
 
@@ -27,8 +27,11 @@ class Command(BaseCommand):
         path, descriptor = reserve_key_file(options["key_file"])
         try:
             with os.fdopen(descriptor, "w") as output, transaction.atomic():
-                lock_admin_access()
-                user = User.objects.filter(username=options["username"]).first()
+                user = (
+                    User.objects.select_for_update(no_key=True)
+                    .filter(username=options["username"])
+                    .first()
+                )
                 if user is None:
                     raise CommandError("This administrator does not exist.")
                 user.is_active = True

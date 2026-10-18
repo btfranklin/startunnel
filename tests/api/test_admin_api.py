@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from django.core.management import call_command
+from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
 from accounts.models import AdminOperation
@@ -38,6 +42,60 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     assert listed[0]["address"] == rotated.address
     assert client.get(path, **headers).json()["address"] == rotated.address
     assert rotated.address not in str(list(AuditEvent.objects.values_list("metadata", flat=True)))
+
+
+def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
+    client: Any, user_factory: Any, tmp_path: Path
+) -> None:
+    actor = user_factory()
+    credential, first_secret = issue_admin_key(
+        owner=actor, name="only key", expires_at=timezone.now() + timedelta(hours=1)
+    )
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + first_secret}
+
+    def mutate(path: str, body: dict[str, Any], key: str, auth: dict[str, str]) -> Any:
+        return client.post(
+            path,
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_IDEMPOTENCY_KEY=key,
+            **auth,
+        )
+
+    removed_password = mutate(
+        "/api/v1/admin/accounts/password",
+        {"admin_id": str(actor.pk), "password": None},
+        "last-password-removal",
+        headers,
+    )
+    assert removed_password.status_code == 200, removed_password.content
+    assert not type(actor).objects.get(pk=actor.pk).has_usable_password()
+    revoked = mutate(
+        "/api/v1/admin/keys/revoke",
+        {"key_id": str(credential.pk)},
+        "last-key-revocation",
+        headers,
+    )
+    assert revoked.status_code == 200, revoked.content
+    assert client.get("/api/v1/admin/me", **headers).status_code == 401
+
+    recovery_file = tmp_path / "recovered.key"
+    call_command("recover_instance_admin", actor.username, key_file=str(recovery_file))
+    recovered_headers = {"HTTP_AUTHORIZATION": "Bearer " + recovery_file.read_text().strip()}
+    assert client.get("/api/v1/admin/me", **recovered_headers).status_code == 200
+    deactivated = mutate(
+        "/api/v1/admin/accounts/state",
+        {"admin_id": str(actor.pk), "active": False, "expected_active": True},
+        "last-account-deactivation",
+        recovered_headers,
+    )
+    assert deactivated.status_code == 200, deactivated.content
+    assert client.get("/api/v1/admin/me", **recovered_headers).status_code == 401
+
+    second_recovery_file = tmp_path / "recovered-again.key"
+    call_command("recover_instance_admin", actor.username, key_file=str(second_recovery_file))
+    final_headers = {"HTTP_AUTHORIZATION": "Bearer " + second_recovery_file.read_text().strip()}
+    assert client.get("/api/v1/admin/me", **final_headers).status_code == 200
 
 
 def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: Any) -> None:

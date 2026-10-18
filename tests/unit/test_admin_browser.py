@@ -7,6 +7,7 @@ import pytest
 from django.test import Client
 
 from accounts.models import AdminCredential, User
+from tunnels.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -36,7 +37,9 @@ def test_passwordless_admin_creation_downloads_first_key(client: Client, user_fa
     assert secret.encode() not in client.get("/app/admins/").content
 
 
-def test_browser_cannot_remove_last_recovery_path(client: Client, user_factory: Any) -> None:
+def test_browser_can_remove_final_password_and_session_expires(
+    client: Client, user_factory: Any
+) -> None:
     actor = user_factory()
     client.force_login(actor)
     response = client.post(
@@ -45,7 +48,15 @@ def test_browser_cannot_remove_last_recovery_path(client: Client, user_factory: 
     )
     assert response.status_code == 302
     actor.refresh_from_db()
-    assert actor.has_usable_password()
+    assert not actor.has_usable_password()
+    operation = actor.admin_operations.get(operation="accounts.password")
+    event = AuditEvent.objects.get(metadata__operation_id=str(operation.id))
+    assert event.action == "accounts.password"
+    assert event.channel == "browser"
+    assert event.actor_user == actor
+    next_request = client.get("/app/admins/")
+    assert next_request.status_code == 302
+    assert next_request["Location"].startswith("/accounts/login/")
 
 
 def test_browser_key_download_and_revoke(client: Client, user_factory: Any) -> None:

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -24,28 +24,6 @@ def key_digest(key: str) -> bytes:
 
 def new_admin_key() -> str:
     return "sta_" + base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-
-
-def lock_admin_access() -> None:
-    """Serialize access changes, including bootstrap into an empty instance."""
-    if connection.vendor == "postgresql":
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [7195415308903])
-    list(User.objects.select_for_update(no_key=True).order_by("id"))
-
-
-def require_recovery_path() -> None:
-    users = User.objects.filter(is_active=True)
-    if any(user.has_usable_password() for user in users):
-        return
-    if AdminCredential.objects.filter(
-        owner__is_active=True, revoked_at__isnull=True, expires_at__isnull=True
-    ).exists():
-        return
-    raise LifecycleConflict(
-        "The last active admin access cannot be removed. "
-        "Keep a password account or a non-expiring key."
-    )
 
 
 def validate_actor(actor: User, credential: AdminCredential | None = None) -> User:
@@ -115,8 +93,6 @@ def issue_admin_key(
 def change_admin_state(
     *, actor: User, admin_id: UUID, active: bool, expected_active: bool | None = None
 ) -> User:
-    if not active:
-        lock_admin_access()
     validate_actor(actor)
     target = User.objects.select_for_update(no_key=True).filter(pk=admin_id).first()
     if target is None:
@@ -129,5 +105,4 @@ def change_admin_state(
         AdminCredential.objects.filter(owner=target, revoked_at__isnull=True).update(
             revoked_at=timezone.now()
         )
-    require_recovery_path()
     return target
