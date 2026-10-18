@@ -18,7 +18,6 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-asyncio>=1.4.0",
     "hypothesis>=6.165.2",
-    "factory-boy>=3.3.3",
     "time-machine>=3.3.1",
     "ruff>=0.16.2",
     "mypy>=2.3.0",

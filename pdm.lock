@@ -5,7 +5,7 @@
 groups = ["default", "dev", "live-agents"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.1"
-content_hash = "sha256:db5888a0766e80b4fa6e0e2baed61948172e84dda5ebe0b3850611a27beba20a"
+content_hash = "sha256:71a7df0959b8d4e25184ff89b07e9102c1bad3d5378383b600c509a637094960"
 
 [[metadata.targets]]
 requires_python = ">=3.14"
@@ -870,34 +870,6 @@ groups = ["dev"]
 files = [
     {file = "editorconfig-0.17.1-py3-none-any.whl", hash = "sha256:1eda9c2c0db8c16dbd50111b710572a5e6de934e39772de1959d41f64fc17c82"},
     {file = "editorconfig-0.17.1.tar.gz", hash = "sha256:23c08b00e8e08cc3adcddb825251c497478df1dada6aefeb01e626ad37303745"},
-]
-
-[[package]]
-name = "factory-boy"
-version = "3.3.3"
-requires_python = ">=3.8"
-summary = "A versatile test fixtures replacement based on thoughtbot's factory_bot for Ruby."
-groups = ["dev"]
-dependencies = [
-    "Faker>=0.7.0",
-]
-files = [
-    {file = "factory_boy-3.3.3-py2.py3-none-any.whl", hash = "sha256:1c39e3289f7e667c4285433f305f8d506efc2fe9c73aaea4151ebd5cdea394fc"},
-    {file = "factory_boy-3.3.3.tar.gz", hash = "sha256:866862d226128dfac7f2b4160287e899daf54f2612778327dd03d0e2cb1e3d03"},
-]
-
-[[package]]
-name = "faker"
-version = "40.39.0"
-requires_python = ">=3.10"
-summary = "Faker is a Python package that generates fake data for you."
-groups = ["dev"]
-dependencies = [
-    "tzdata; platform_system == \"Windows\"",
-]
-files = [
-    {file = "faker-40.39.0-py3-none-any.whl", hash = "sha256:c4c7ec2cddfaf602c5a8a2c960614946aa8c161250bd9d49a8846cd24d1ef028"},
-    {file = "faker-40.39.0.tar.gz", hash = "sha256:52799ad96fcf92aab2fc96a9e03869bbf1a634300f7cd91c38dbfd51f639f6fa"},
 ]
 
 [[package]]
@@ -2715,7 +2687,7 @@ version = "2026.4"
 requires_python = ">=2"
 summary = "Provider of IANA time zone data"
 groups = ["default", "dev"]
-marker = "sys_platform == \"win32\" or platform_system == \"Windows\""
+marker = "sys_platform == \"win32\""
 files = [
     {file = "tzdata-2026.4-py2.py3-none-any.whl", hash = "sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81"},
     {file = "tzdata-2026.4.tar.gz", hash = "sha256:f1b8bd365d8d210c55353f4d7f8d6d8561c0ba50d704b700d195a9424bba0d79"},
