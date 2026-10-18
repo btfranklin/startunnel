@@ -397,6 +397,33 @@ def test_missing_field_diagnostic_survives_transport_and_client() -> None:
     }
 
 
+@pytest.mark.parametrize("write", [False, True])
+def test_unicode_results_work_with_ascii_output_encoding(write: bool) -> None:
+    value = "caf\u00e9 \U0001f680"
+    response = (
+        {"message": {"content": {"type": "text", "text": value}}}
+        if write
+        else {"agent": {"name": value}}
+    )
+    arguments = ("reply", "--idempotency-key", "unicode-output-001") if write else ("me",)
+    body = (
+        {
+            "address": "test-address",
+            "parent_id": "test-parent",
+            "content": {"type": "text", "text": "Hello"},
+        }
+        if write
+        else None
+    )
+    with serve(Response(201 if write else 200, response)) as (base_url, scenario):
+        result = run_cli(base_url, *arguments, body=body, extra_env={"PYTHONIOENCODING": "ascii"})
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout.isascii()
+    assert json.loads(result.stdout) == response
+    assert len(scenario.requests) == 1
+
+
 def test_missing_command_argument_has_json_usage_error() -> None:
     result = run_cli("http://127.0.0.1:8000", "reply")
 

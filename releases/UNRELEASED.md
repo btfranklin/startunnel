@@ -74,3 +74,10 @@ Direct script use on Windows supports admin key files and key output files.
 New output paths must still be unused. On Windows, choose a private directory;
 the client does not change access-control lists. Linux and macOS key output
 files retain mode `0600`.
+
+## Portable JSON output
+
+JSON output now escapes non-ASCII characters. This prevents output failures
+on hosts with legacy encodings. Decoded addresses and message strings are
+unchanged. Callers must read the JSON values instead of copying escaped text
+from the serialized document.

@@ -1295,7 +1295,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 1
-    print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 

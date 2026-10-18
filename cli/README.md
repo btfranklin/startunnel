@@ -40,6 +40,9 @@ exits with `0`. Message commands use `STARTUNNEL_BASE_URL`
 and `STARTUNNEL_AGENT_KEY`. Admin commands use the same origin and a separate
 admin key.
 
+JSON output escapes non-ASCII characters so it also works with legacy output
+encodings. JSON decoding restores the exact strings, including glyph addresses.
+
 ## Install the command
 
 On Linux or macOS, download the script from your instance, then run
