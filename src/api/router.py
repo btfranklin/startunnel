@@ -24,8 +24,9 @@ from core.security import client_ip
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
+from tunnels.entry import enter_tunnel, entry_payload
 from tunnels.errors import InvalidCursor, InvalidRequest, TunnelDomainError, TunnelUnavailable
-from tunnels.message_data import message_payload
+from tunnels.message_data import cycle_payload, message_payload
 from tunnels.models import Cycle, Message, Tunnel
 from tunnels.participants import list_participants
 from tunnels.search import search_messages
@@ -71,6 +72,8 @@ from .schemas import (
     CreateTunnelResponse,
     CycleListRequest,
     CycleListResponse,
+    EnterRequest,
+    EnterResponse,
     ErrorResponse,
     LeavesRequest,
     LeavesResponse,
@@ -247,22 +250,6 @@ def _require_cursor_tunnel(
         raise TunnelUnavailable()
 
 
-def _directory_cycle(cycle: Cycle) -> dict[str, Any]:
-    if cycle.root_message_id is None:
-        raise InvalidRequest("The cycle root is not available.")
-    return {
-        "id": cycle.id,
-        "number": cycle.number,
-        "label": cycle.label,
-        "state": cycle.state,
-        "root_id": cycle.root_message_id,
-        "created_at": cycle.created_at,
-        "expires_at": cycle.expires_at,
-        "message_count": cycle.message_count,
-        "content_bytes": cycle.content_bytes,
-    }
-
-
 def _created_tunnel_response(created: CreatedTunnel) -> dict[str, Any]:
     tunnel = created.tunnel
     cycle = created.cycle
@@ -315,7 +302,7 @@ def _tunnel_metadata(tunnel: Tunnel) -> dict[str, Any]:
         "label": tunnel.label,
         "state": tunnel.state,
         "created_at": tunnel.created_at,
-        "current_cycle": _directory_cycle(active_cycle) if active_cycle else None,
+        "current_cycle": cycle_payload(active_cycle) if active_cycle else None,
     }
     return data
 
@@ -602,7 +589,7 @@ def _tree_response(page: TreePage) -> dict[str, Any]:
     if page.cycle.root_message_id is None:
         raise InvalidRequest("The cycle root is not available.")
     return {
-        "cycle": _directory_cycle(page.cycle),
+        "cycle": cycle_payload(page.cycle),
         "root_id": page.cycle.root_message_id,
         "nodes": [message_payload(message) for message in page.messages],
         "snapshot_cursor": snapshot_cursor,
@@ -635,7 +622,7 @@ def _message_read(request: HttpRequest, payload: MessageReadRequest) -> dict[str
     return {
         "message": message_payload(message),
         "child_count": message.replies.count(),
-        "cycle": _directory_cycle(message.cycle),
+        "cycle": cycle_payload(message.cycle),
     }
 
 
@@ -1154,6 +1141,31 @@ def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> dict[s
     return _context(request, payload)
 
 
+@router.post(
+    "/enter",
+    response={
+        200: EnterResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        413: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> dict[str, Any]:
+    credential = _credential(request)
+    try:
+        view = enter_tunnel(
+            credential=credential,
+            address=payload.address,
+            limit=payload.limit,
+            max_bytes=payload.max_bytes,
+        )
+    except TunnelUnavailable:
+        _record_miss(request, credential)
+        raise
+    return entry_payload(view)
+
+
 def _search_filter_digest(payload: SearchRequest) -> str:
     values = {
         "query": (payload.query or "").strip(),
@@ -1377,7 +1389,7 @@ def _tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> dict[s
         "created_at": tunnel.created_at,
         "dormant_at": tunnel.dormant_at,
         "current_cycle": (
-            _directory_cycle(status.current_cycle) if status.current_cycle is not None else None
+            cycle_payload(status.current_cycle) if status.current_cycle is not None else None
         ),
     }
 

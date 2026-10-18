@@ -1573,6 +1573,119 @@
         "title": "DirectoryCycleResponse",
         "type": "object"
       },
+      "EnterRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "examples": [
+              "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "max_bytes": {
+            "default": 262144,
+            "maximum": 1048576,
+            "minimum": 1,
+            "title": "Max Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "EnterRequest",
+        "type": "object"
+      },
+      "EnterResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryCycleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Cursor"
+          },
+          "history_omitted": {
+            "title": "History Omitted",
+            "type": "boolean"
+          },
+          "recent_messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Recent Messages",
+            "type": "array"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Sequence"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "dormant"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "cycle",
+          "root",
+          "recent_messages",
+          "snapshot_sequence",
+          "history_omitted",
+          "history_cursor",
+          "activity_cursor"
+        ],
+        "title": "EnterResponse",
+        "type": "object"
+      },
       "ErrorBodyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7423,6 +7536,113 @@
           }
         ],
         "summary": "Start Tunnel Cycle",
+        "tags": [
+          "StarTunnel v1"
+        ]
+      }
+    },
+    "/api/v1/enter": {
+      "post": {
+        "operationId": "api_router_enter_tunnel_room",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnterResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Enter Tunnel Room",
         "tags": [
           "StarTunnel v1"
         ]

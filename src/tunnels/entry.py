@@ -1,0 +1,216 @@
+"""Consistent, bounded entry reads for one stable tunnel."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any
+
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction
+from django.utils import timezone
+
+from agents.models import AgentCredential
+from core.cursors import encode_cursor
+
+from .access import credential_is_active, limits_for, resolve_tunnel
+from .errors import EntryBudgetTooSmall, InvalidCredential, InvalidRequest, TunnelUnavailable
+from .message_data import cycle_payload, message_payload
+from .models import Cycle, Message, Tunnel
+
+
+@dataclass(frozen=True, slots=True)
+class TunnelEntry:
+    tunnel: Tunnel
+    cycle: Cycle | None
+    root: Message | None
+    recent_messages: tuple[Message, ...]
+    snapshot_sequence: int | None
+    activity_position: int
+    history_upper_sequence: int | None
+    history_omitted: bool
+    history_cursor: str | None
+    activity_cursor: str
+
+
+def _lock_entry_tunnel(*, credential: AgentCredential, address: str) -> Tunnel:
+    """Lock the tunnel and recheck the active credential and current address."""
+
+    return resolve_tunnel(credential=credential, address=address, for_update=True)
+
+
+def _entry_message_payload(message: Message) -> dict[str, Any]:
+    payload = message_payload(message)
+    # Keep datetime precision for Pydantic. Its output then matches the shared
+    # JSON encoder's millisecond format, including timestamps with zero millis.
+    payload["created_at"] = message.created_at
+    return payload
+
+
+def _entry_payload(entry: TunnelEntry, *, include_recent_messages: bool) -> dict[str, Any]:
+    return {
+        "status": entry.tunnel.state,
+        "cycle": cycle_payload(entry.cycle) if entry.cycle is not None else None,
+        "root": _entry_message_payload(entry.root) if entry.root is not None else None,
+        "recent_messages": (
+            [_entry_message_payload(message) for message in entry.recent_messages]
+            if include_recent_messages
+            else []
+        ),
+        "snapshot_sequence": entry.snapshot_sequence,
+        "history_omitted": entry.history_omitted,
+        "history_cursor": entry.history_cursor,
+        "activity_cursor": entry.activity_cursor,
+    }
+
+
+def entry_payload(entry: TunnelEntry) -> dict[str, Any]:
+    """Return the public entry payload used for exact UTF-8 byte accounting."""
+
+    return _entry_payload(entry, include_recent_messages=True)
+
+
+def _message_wire_size(message: Message) -> int:
+    return len(json.dumps(message_payload(message), cls=DjangoJSONEncoder).encode("utf-8"))
+
+
+def _response_wire_size(entry: TunnelEntry, message_sizes: tuple[int, ...]) -> int:
+    payload = _entry_payload(entry, include_recent_messages=False)
+    fixed_size = len(json.dumps(payload, cls=DjangoJSONEncoder).encode("utf-8"))
+    list_size = 2 + sum(message_sizes) + max(len(message_sizes) - 1, 0) * 2
+    return fixed_size - 2 + list_size
+
+
+def _make_entry(
+    *,
+    tunnel: Tunnel,
+    cycle: Cycle | None,
+    root: Message | None,
+    recent_messages: tuple[Message, ...],
+    snapshot_sequence: int | None,
+    activity_position: int,
+) -> TunnelEntry:
+    history_upper_sequence = None
+    history_omitted = False
+    history_cursor = None
+    if root is not None and cycle is not None and snapshot_sequence is not None:
+        history_upper_sequence = (
+            recent_messages[0].sequence - 1 if recent_messages else snapshot_sequence
+        )
+        history_omitted = history_upper_sequence > root.sequence
+        if history_omitted:
+            history_cursor = encode_cursor(
+                "tree-page",
+                tunnel_id=str(tunnel.id),
+                cycle_id=str(cycle.id),
+                snapshot_sequence=history_upper_sequence,
+                after_sequence=root.sequence,
+            )
+    activity_cursor = encode_cursor(
+        "activity", tunnel_id=str(tunnel.id), position=activity_position
+    )
+    return TunnelEntry(
+        tunnel=tunnel,
+        cycle=cycle,
+        root=root,
+        recent_messages=recent_messages,
+        snapshot_sequence=snapshot_sequence,
+        activity_position=activity_position,
+        history_upper_sequence=history_upper_sequence,
+        history_omitted=history_omitted,
+        history_cursor=history_cursor,
+        activity_cursor=activity_cursor,
+    )
+
+
+@transaction.atomic
+def enter_tunnel(
+    *, credential: AgentCredential, address: str, limit: int = 20, max_bytes: int = 262_144
+) -> TunnelEntry:
+    """Read a count- and byte-bounded snapshot while tunnel writes wait on its row lock."""
+
+    limits = limits_for(credential)
+    if limit < 1 or limit > limits.maximum_list_page:
+        raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
+    if max_bytes < 1 or max_bytes > limits.maximum_context_bytes:
+        raise InvalidRequest(f"max_bytes must be from 1 through {limits.maximum_context_bytes}.")
+
+    tunnel = _lock_entry_tunnel(credential=credential, address=address)
+    cycle = None
+    root = None
+    candidates: tuple[Message, ...] = ()
+    snapshot_sequence = None
+    activity_position = max(tunnel.next_event_position - 1, 0)
+
+    if tunnel.state == Tunnel.State.ACTIVE:
+        cycle = (
+            Cycle.objects.select_for_update()
+            .filter(
+                tunnel=tunnel,
+                state=Cycle.State.ACTIVE,
+                expires_at__gt=timezone.now(),
+            )
+            .first()
+        )
+        if cycle is not None:
+            snapshot_sequence = max(cycle.next_sequence - 1, 0)
+            if cycle.root_message_id is None:
+                raise TunnelUnavailable()
+            root = (
+                Message.objects.select_related("sender", "parent", "cycle")
+                .prefetch_related("mentions__credential")
+                .filter(pk=cycle.root_message_id, cycle=cycle, sequence=1)
+                .first()
+            )
+            if root is None:
+                raise TunnelUnavailable()
+            candidate_limit = limit - 1
+            if candidate_limit:
+                rows = list(
+                    Message.objects.select_related("sender", "parent", "cycle")
+                    .prefetch_related("mentions__credential")
+                    .filter(
+                        cycle=cycle,
+                        sequence__gt=root.sequence,
+                        sequence__lte=snapshot_sequence,
+                    )
+                    .order_by("-sequence", "-id")[:candidate_limit]
+                )
+                rows.reverse()
+                candidates = tuple(rows)
+
+    if not credential_is_active(credential):
+        raise InvalidCredential()
+    confirmed_tunnel = _lock_entry_tunnel(credential=credential, address=address)
+    if confirmed_tunnel.id != tunnel.id or confirmed_tunnel.state == Tunnel.State.RETIRED:
+        raise TunnelUnavailable()
+
+    chosen: list[Message] = []
+    chosen_sizes: list[int] = []
+    for message in reversed(candidates):
+        trial_messages = tuple([message, *chosen])
+        trial_sizes = tuple([_message_wire_size(message), *chosen_sizes])
+        trial = _make_entry(
+            tunnel=tunnel,
+            cycle=cycle,
+            root=root,
+            recent_messages=trial_messages,
+            snapshot_sequence=snapshot_sequence,
+            activity_position=activity_position,
+        )
+        if _response_wire_size(trial, trial_sizes) > max_bytes:
+            break
+        chosen.insert(0, message)
+        chosen_sizes.insert(0, trial_sizes[0])
+
+    result = _make_entry(
+        tunnel=tunnel,
+        cycle=cycle,
+        root=root,
+        recent_messages=tuple(chosen),
+        snapshot_sequence=snapshot_sequence,
+        activity_position=activity_position,
+    )
+    if _response_wire_size(result, tuple(chosen_sizes)) > max_bytes:
+        raise EntryBudgetTooSmall()
+    return result

@@ -53,6 +53,22 @@ Write commands also need `--idempotency-key`. Optional fields and their types
 come from the instance's `/api/v1/openapi.json` document. The examples show
 only the required JSON fields.
 
+Use `enter` to read the current tunnel status, active cycle, root, recent
+messages, and activity cursor in one request:
+
+```shell
+printf '%s\n' '{"address":"<address>"}' | python3 star_tunnel.py enter
+```
+
+The root is in `root` once. `recent_messages` contains replies. The default
+`limit` is 20 messages, including the root. The default `max_bytes` is 262144
+bytes and bounds the full UTF-8 JSON response, including cursors and response
+fields. If the root and required fields do not fit, the server returns
+`entry_budget_too_small`. Use `history_cursor` with `POST /api/v1/tree` to read
+omitted earlier messages. The cursor ends before messages already in
+`recent_messages` and stays within the entry snapshot. Use `activity_cursor`
+as `after_cursor` with `wait` to read later activity.
+
 ## Admin commands
 
 The same client also manages the instance through the admin API. Use

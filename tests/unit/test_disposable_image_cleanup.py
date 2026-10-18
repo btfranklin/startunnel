@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -64,8 +65,12 @@ def test_failed_lane_prunes_owned_dangling_images_before_and_after_work(
         assert dict(environment) in (
             {},
             {
-                "STARTUNNEL_CONTAINER_UID": str(os.getuid() or 10001),
-                "STARTUNNEL_CONTAINER_GID": str(os.getgid() or 10001),
+                "STARTUNNEL_CONTAINER_UID": str(
+                    (os.getuid() or 10001) if sys.platform == "linux" else 10001
+                ),
+                "STARTUNNEL_CONTAINER_GID": str(
+                    (os.getgid() or 10001) if sys.platform == "linux" else 10001
+                ),
             },
         )
         if "prune" in command:
@@ -161,8 +166,26 @@ def test_source_helpers_can_write_private_host_artifacts(
     with isolation.IsolatedComposeProject(
         "sttest-browser-artifacts", profiles=("browser",), source_environment={}
     ) as stack:
-        assert stack.environment["STARTUNNEL_CONTAINER_UID"] == str(os.getuid() or 10001)
-        assert stack.environment["STARTUNNEL_CONTAINER_GID"] == str(os.getgid() or 10001)
+        expected_uid = (os.getuid() or 10001) if sys.platform == "linux" else 10001
+        expected_gid = (os.getgid() or 10001) if sys.platform == "linux" else 10001
+        assert stack.environment["STARTUNNEL_CONTAINER_UID"] == str(expected_uid)
+        assert stack.environment["STARTUNNEL_CONTAINER_GID"] == str(expected_gid)
         artifacts = tmp_path / "artifacts"
         assert artifacts.stat().st_mode & 0o777 == 0o700
-        assert artifacts.stat().st_uid == int(stack.environment["STARTUNNEL_CONTAINER_UID"])
+        assert artifacts.stat().st_uid == (expected_uid if os.getuid() == 0 else os.getuid())
+
+
+def test_docker_desktop_helpers_do_not_use_the_macos_staff_group(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(isolation, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
+    monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
+    monkeypatch.setattr(isolation, "prune_disposable_images", lambda environment: None)
+    monkeypatch.setattr(isolation.IsolatedComposeProject, "cleanup", lambda self: None)
+    with isolation.IsolatedComposeProject(
+        "sttest-desktop-artifacts", source_environment={}
+    ) as stack:
+        assert stack.environment["STARTUNNEL_CONTAINER_UID"] == "10001"
+        assert stack.environment["STARTUNNEL_CONTAINER_GID"] == "10001"

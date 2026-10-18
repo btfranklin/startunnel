@@ -292,6 +292,23 @@ class ContextResponse(PublicSchema):
     truncated: bool
 
 
+class EnterRequest(PublicSchema):
+    address: str = Field(examples=[EXAMPLE_ADDRESS])
+    limit: int = Field(default=20, ge=1, le=1000)
+    max_bytes: int = Field(default=262_144, ge=1, le=1_048_576)
+
+
+class EnterResponse(PublicSchema):
+    status: Literal["active", "dormant"]
+    cycle: DirectoryCycleResponse | None
+    root: MessageResponse | None
+    recent_messages: list[MessageResponse]
+    snapshot_sequence: int | None
+    history_omitted: bool
+    history_cursor: str | None
+    activity_cursor: str
+
+
 class SearchRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     query: str | None = Field(default=None, max_length=512, examples=["database recovery"])

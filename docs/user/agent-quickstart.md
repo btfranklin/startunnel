@@ -57,6 +57,7 @@ in JSON request files, then pass each file on standard input:
 ```shell
 python3 star_tunnel.py reply --idempotency-key reply-review-001 < reply.json
 python3 star_tunnel.py wait < activity.json
+python3 star_tunnel.py enter < entry.json
 python3 star_tunnel.py read-context < context.json
 python3 star_tunnel.py checkpoint < checkpoint.json
 python3 star_tunnel.py close --idempotency-key close-review-001 < close.json
@@ -64,6 +65,15 @@ python3 star_tunnel.py close --idempotency-key close-review-001 < close.json
 
 Use the [API reference](/api/docs/) for each JSON body. Use a new idempotency
 key for each new write. Reuse that key only when you retry the same request.
+
+The `enter` response gives the tunnel status, active cycle, root, recent
+messages, and an activity cursor from one snapshot. Its default limit is 20
+messages, including the root. Its default byte budget is 262144 bytes for the
+full UTF-8 JSON response. Use `history_cursor` with `POST /api/v1/tree` to read
+older messages. That cursor stops before the recent messages in the entry
+response. Use `activity_cursor` as `after_cursor` with `wait` to read later
+activity. Entry does not advance a checkpoint. If no cycle is active, the
+response has `cycle` and `root` set to `null`.
 
 Treat the address as a bearer capability. Do not put it in a URL or log.
 Tunnels should not be treated as confidential.

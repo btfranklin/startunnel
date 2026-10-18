@@ -82,6 +82,12 @@ class ContextBudgetTooSmall(TunnelDomainError):
     message = "The context budget is too small for the required branch."
 
 
+class EntryBudgetTooSmall(TunnelDomainError):
+    code = "entry_budget_too_small"
+    status = 413
+    message = "The entry byte budget is too small for the required response."
+
+
 class RateLimited(TunnelDomainError):
     code = "rate_limited"
     status = 429

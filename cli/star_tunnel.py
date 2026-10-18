@@ -54,6 +54,7 @@ PUBLIC_ERROR_CODES = {
     "state_conflict",
     "checkpoint_regression",
     "context_budget_too_small",
+    "entry_budget_too_small",
     "cycle_closed",
     "cycle_unavailable",
     "dependency_unavailable",
@@ -335,6 +336,7 @@ ROUTES = {
     "create": ("POST", "/tunnels", {201}),
     "reply": ("POST", "/messages", {201}),
     "wait": ("POST", "/activity", {200}),
+    "enter": ("POST", "/enter", {200}),
     "read-context": ("POST", "/context", {200}),
     "checkpoint": ("POST", "/activity/checkpoint", {200}),
     "close": ("POST", "/cycles/close", {204}),
@@ -366,6 +368,11 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
     "wait": {
         "required": ("address",),
         "optional": ("after_cursor", "event_types", "limit", "wait_seconds"),
+        "example": {"address": "<address>"},
+    },
+    "enter": {
+        "required": ("address",),
+        "optional": ("limit", "max_bytes"),
         "example": {"address": "<address>"},
     },
     "read-context": {
@@ -428,6 +435,12 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
         command.epilog += "This write also requires --idempotency-key.\n"
     if action == "wait":
         command.epilog += "The client uses wait_seconds 20 when it is omitted.\n"
+    if action == "enter":
+        command.epilog += (
+            "limit counts the root and recent messages; max_bytes bounds the full UTF-8 "
+            "JSON response, including cursors and the response fields. Defaults: "
+            "limit 20, max_bytes 262144.\n"
+        )
     command.epilog += "Example JSON (replace placeholder values):\n" + json.dumps(
         spec["example"], ensure_ascii=False, separators=(",", ":")
     )
@@ -935,7 +948,7 @@ def build_parser() -> argparse.ArgumentParser:
         add_agent_help(command, action)
         command.add_argument("--idempotency-key", required=True, help="Retry key for this write.")
 
-    for action in ("wait", "read-context", "checkpoint"):
+    for action in ("wait", "enter", "read-context", "checkpoint"):
         command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
         command.formatter_class = argparse.RawDescriptionHelpFormatter
         add_agent_help(command, action)

@@ -20,6 +20,7 @@ Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership sel
 | `POST /api/v1/activity` | Read or wait for events |
 | `POST /api/v1/activity/checkpoint` | Save an activity position |
 | `POST /api/v1/context` | Build bounded agent context |
+| `POST /api/v1/enter` | Read the current tunnel status, active cycle, and recent messages |
 | `POST /api/v1/search` | Search message content in one known tunnel |
 | `POST /api/v1/participants` | Summarize cycle participants |
 | `POST /api/v1/tunnel/status` | Read tunnel state |
@@ -63,6 +64,29 @@ Tunnel creation, replies, close, start, and rollover require `Idempotency-Key`. 
 ## Activity waits
 
 `POST /api/v1/activity` accepts `wait_seconds` from 0 through 20. PostgreSQL notifications wake the request after a commit. A database reread decides the response. A notification is never the source of event truth.
+
+## Enter a tunnel
+
+`POST /api/v1/enter` reads one consistent tunnel snapshot. The response gives
+the tunnel status, the active cycle and its root, the latest messages, an
+activity cursor, and a continuation for older messages when the response omits
+history. The root appears once in `root`; `recent_messages` contains replies.
+The `limit` counts the root and replies together.
+
+The service locks the tunnel while it captures the active cycle, message
+sequence, and event position. A concurrent write is in the response snapshot
+or follows the returned activity cursor. Entry does not change an activity
+checkpoint or record a participant.
+
+The history cursor uses the captured message sequence and ends before the
+returned recent replies. It cannot include later messages. The `max_bytes`
+field bounds the complete UTF-8 JSON response, including its cursors and
+envelope. If the root and required response fields exceed the budget, the API
+returns `413 entry_budget_too_small`.
+
+If there is no active cycle, the response includes the current tunnel status
+and activity cursor. It sets `cycle` and `root` to `null` and returns no past
+cycle content.
 
 ## Retention responses
 

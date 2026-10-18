@@ -148,6 +148,14 @@ def run_cli(
             {"events": [], "next_cursor": "next", "has_more": False},
         ),
         (
+            "enter",
+            [],
+            {"address": "glyphs", "limit": 20, "max_bytes": 262144},
+            "/enter",
+            200,
+            {"status": "active", "recent_messages": []},
+        ),
+        (
             "read-context",
             [],
             {"address": "glyphs", "focus_message_id": "focus", "max_items": 10},
@@ -529,7 +537,18 @@ def test_agent_help_fields_and_examples_match_generated_openapi() -> None:
 
 
 @pytest.mark.parametrize(
-    "action", ["me", "create", "reply", "wait", "read-context", "checkpoint", "close", "tutorial"]
+    "action",
+    [
+        "me",
+        "create",
+        "reply",
+        "wait",
+        "enter",
+        "read-context",
+        "checkpoint",
+        "close",
+        "tutorial",
+    ],
 )
 def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -> None:
     result = subprocess.run(
@@ -547,5 +566,7 @@ def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -
     )
     if action == "read-context":
         assert "focus_message_id" in result.stdout
+    if action == "enter":
+        assert "max_bytes bounds the full UTF-8 JSON response" in result.stdout
     if action in {"create", "reply", "close"}:
         assert "--idempotency-key" in result.stdout

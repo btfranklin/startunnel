@@ -19,6 +19,7 @@ def test_live_openapi_is_valid_and_has_tree_routes() -> None:
     validate(schema)
     required = {
         "/api/v1/me": {"get"},
+        "/api/v1/enter": {"post"},
         "/api/v1/tunnels": {"post"},
         "/api/v1/messages": {"post"},
         "/api/v1/tree": {"post"},

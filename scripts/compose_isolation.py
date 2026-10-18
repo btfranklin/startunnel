@@ -359,10 +359,11 @@ class IsolatedComposeProject:
         self._env_file = Path(self._temporary.name) / "empty.env"
         self._env_file.write_text("# Intentionally empty.\n", encoding="utf-8")
         self._env_file.chmod(0o600)
-        # Bind-mounted reports must be writable by helpers and readable by the
-        # host. The candidate runtime keeps its original image user ID.
-        helper_uid = os.getuid() or 10001
-        helper_gid = os.getgid() or 10001
+        # Linux bind mounts need the host identity. Docker Desktop maps macOS
+        # file ownership; its low host group IDs can collide with image groups.
+        # The candidate runtime keeps its original image user ID.
+        helper_uid = (os.getuid() or 10001) if sys.platform == "linux" else 10001
+        helper_gid = (os.getgid() or 10001) if sys.platform == "linux" else 10001
         self.environment.update(
             STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
         )

@@ -12,7 +12,7 @@ from django.db import DatabaseError, close_old_connections, connection, transact
 
 from agents.models import AgentCredential
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
-from tunnels.services import CreatedTunnel, create_tunnel
+from tunnels.services import CreatedTunnel, close_cycle, create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -209,3 +209,132 @@ def test_checkpoint_cannot_exceed_committed_activity(credential_factory: Any) ->
         )
 
     assert Tunnel.objects.get(pk=created.tunnel.id).next_event_position == 3
+
+
+def _pause_entry_after_tunnel_lock(*, credential: AgentCredential, address: str) -> Any:
+    close_old_connections()
+    try:
+        from tunnels.entry import enter_tunnel
+
+        return enter_tunnel(credential=credential, address=address)
+    finally:
+        close_old_connections()
+
+
+def test_entry_and_reply_race_preserves_the_activity_boundary(
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tunnels import entry
+    from tunnels.activity import read_activity_once
+
+    creator, _ = credential_factory(name="Entry race creator")
+    created = _create_board(creator, key="entry-race-create")
+    lock_obtained = threading.Event()
+    release_entry = threading.Event()
+    writer_started = threading.Event()
+    writer_finished = threading.Event()
+    original_lock = entry._lock_entry_tunnel
+
+    def blocking_lock(**kwargs: Any) -> Tunnel:
+        tunnel = original_lock(**kwargs)
+        if not lock_obtained.is_set():
+            lock_obtained.set()
+            assert release_entry.wait(timeout=15)
+        return tunnel
+
+    monkeypatch.setattr(entry, "_lock_entry_tunnel", blocking_lock)
+
+    def post_during_entry() -> Any:
+        close_old_connections()
+        try:
+            writer_started.set()
+            return post_reply(
+                credential=creator,
+                idempotency_key="entry-race-reply",
+                address=created.address,
+                parent_id=created.root.id,
+                content={"type": "text", "text": "After entry."},
+            )
+        finally:
+            writer_finished.set()
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        entering = executor.submit(
+            _pause_entry_after_tunnel_lock,
+            credential=creator,
+            address=created.address,
+        )
+        assert lock_obtained.wait(timeout=15)
+        writing = executor.submit(post_during_entry)
+        assert writer_started.wait(timeout=15)
+        assert not writer_finished.wait(timeout=0.2)
+        release_entry.set()
+        view = entering.result(timeout=30)
+        posted = writing.result(timeout=30)
+
+    assert view.snapshot_sequence == 1
+    assert view.activity_position == 2
+    page = read_activity_once(
+        credential=creator,
+        address=created.address,
+        after_position=view.activity_position,
+    )
+    assert [event.message_id for event in page.events] == [posted.message.id]
+
+
+def test_entry_and_cycle_close_race_returns_a_consistent_state(
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tunnels import entry
+
+    creator, _ = credential_factory(name="Entry lifecycle race creator")
+    created = _create_board(creator, key="entry-close-race-create")
+    lock_obtained = threading.Event()
+    release_entry = threading.Event()
+    writer_started = threading.Event()
+    writer_finished = threading.Event()
+    original_lock = entry._lock_entry_tunnel
+
+    def blocking_lock(**kwargs: Any) -> Tunnel:
+        tunnel = original_lock(**kwargs)
+        if not lock_obtained.is_set():
+            lock_obtained.set()
+            assert release_entry.wait(timeout=15)
+        return tunnel
+
+    monkeypatch.setattr(entry, "_lock_entry_tunnel", blocking_lock)
+
+    def close_during_entry() -> None:
+        close_old_connections()
+        try:
+            writer_started.set()
+            close_cycle(
+                credential=creator,
+                idempotency_key="entry-close-race-close",
+                address=created.address,
+                expected_cycle_id=created.cycle.id,
+            )
+        finally:
+            writer_finished.set()
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        entering = executor.submit(
+            _pause_entry_after_tunnel_lock,
+            credential=creator,
+            address=created.address,
+        )
+        assert lock_obtained.wait(timeout=15)
+        closing = executor.submit(close_during_entry)
+        assert writer_started.wait(timeout=15)
+        assert not writer_finished.wait(timeout=0.2)
+        release_entry.set()
+        view = entering.result(timeout=30)
+        closing.result(timeout=30)
+
+    assert view.cycle is not None and view.cycle.id == created.cycle.id
+    assert view.root is not None and view.root.id == created.root.id
+    assert view.activity_position == 2

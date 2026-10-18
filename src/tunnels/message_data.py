@@ -7,7 +7,8 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from .models import Message
+from .errors import InvalidRequest
+from .models import Cycle, Message
 
 
 def message_content(message: Message) -> dict[str, Any]:
@@ -35,4 +36,20 @@ def message_payload(message: Message) -> dict[str, Any]:
         "sequence": message.sequence,
         "depth": message.depth,
         "created_at": DjangoJSONEncoder().default(message.created_at),
+    }
+
+
+def cycle_payload(cycle: Cycle) -> dict[str, Any]:
+    if cycle.root_message_id is None:
+        raise InvalidRequest("The cycle root is not available.")
+    return {
+        "id": cycle.id,
+        "number": cycle.number,
+        "label": cycle.label,
+        "state": cycle.state,
+        "root_id": cycle.root_message_id,
+        "created_at": cycle.created_at,
+        "expires_at": cycle.expires_at,
+        "message_count": cycle.message_count,
+        "content_bytes": cycle.content_bytes,
     }
