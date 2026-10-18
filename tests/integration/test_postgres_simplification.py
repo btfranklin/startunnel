@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
 import threading
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from django.conf import settings
+from django.contrib.sessions.models import Session
 from django.db import close_old_connections, connection, transaction
 from django.db.backends.signals import connection_created
+from django.db.models import QuerySet
 from django.test import Client
+from django.utils import timezone
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -26,7 +36,7 @@ from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
 from core.rate_limits import _consume
 from tunnels.errors import QuotaExceeded, RateLimited
-from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles
+from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch
 from tunnels.migrations.sql.guards import revoke_runtime_history_delete
 from tunnels.models import Cycle, Tunnel
 from tunnels.services import close_cycle, create_tunnel
@@ -299,23 +309,131 @@ def test_maintenance_lifecycle_change_does_not_notify_itself(credential_factory:
         assert list(listener.notifies(timeout=0.2, stop_after=1)) == []
 
 
-def test_only_one_maintenance_session_can_hold_the_advisory_lock() -> None:
-    with (
-        psycopg.connect(**_connection_kwargs(), autocommit=True) as first,
-        psycopg.connect(**_connection_kwargs(), autocommit=True) as second,
-    ):
-        assert first.execute("SELECT pg_try_advisory_lock(%s)", [ADVISORY_LOCK_ID]).fetchone() == (
-            True,
+def test_maintenance_command_survivor_takes_leadership_and_reconciles() -> None:
+    prefix = "maintenance-proof-" + uuid4().hex
+    tags = [prefix + "-first", prefix + "-second"]
+    environment = os.environ.copy()
+    original_url = urlsplit(environment["TEST_DATABASE_URL"])
+    environment["TEST_DATABASE_URL"] = urlunsplit(
+        original_url._replace(path="/" + quote(str(connection.settings_dict["NAME"]), safe=""))
+    )
+    environment["DJANGO_SETTINGS_MODULE"] = "startunnel.settings.test"
+    environment["PYTHONPATH"] = str(settings.PROJECT_ROOT / "src")
+    script = """
+import sys
+import django
+django.setup()
+from django.core.management import call_command
+from tunnels.management.commands import maintenance_loop
+maintenance_loop.RECONCILIATION_SECONDS = 0.2
+original_kwargs = maintenance_loop._connection_kwargs
+def tagged_kwargs():
+    return {**original_kwargs(), "application_name": sys.argv[1]}
+maintenance_loop._connection_kwargs = tagged_kwargs
+call_command("maintenance_loop")
+"""
+    processes: list[subprocess.Popen[bytes]] = []
+    running: list[subprocess.Popen[bytes]] = []
+
+    def leaders() -> list[str]:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT a.application_name FROM pg_locks l "
+                "JOIN pg_stat_activity a ON a.pid = l.pid "
+                "WHERE l.locktype = 'advisory' AND l.granted "
+                "AND l.classid::bigint = %s AND l.objid::bigint = %s "
+                "AND a.application_name = ANY(%s)",
+                [ADVISORY_LOCK_ID >> 32, ADVISORY_LOCK_ID & 0xFFFFFFFF, tags],
+            )
+            return [str(row[0]) for row in cursor.fetchall()]
+
+    def wait_until(condition: Callable[[], bool]) -> None:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            assert all(process.poll() is None for process in running)
+            if condition():
+                return
+            time.sleep(0.02)
+        pytest.fail("The maintenance commands did not reach the required state.")
+
+    def both_connected_with_one_leader() -> bool:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM pg_stat_activity WHERE application_name = ANY(%s)", [tags]
+            )
+            connected = int(cursor.fetchone()[0])
+        return connected == 2 and len(leaders()) == 1
+
+    try:
+        for tag in tags:
+            process = subprocess.Popen(
+                [sys.executable, "-c", script, tag],
+                cwd=settings.PROJECT_ROOT,
+                env=environment,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            processes.append(process)
+            running.append(process)
+        wait_until(both_connected_with_one_leader)
+        owner = leaders()[0]
+        leader = processes[tags.index(owner)]
+        survivor = tags[1 - tags.index(owner)]
+        leader.terminate()
+        leader.wait(timeout=5)
+        running.remove(leader)
+        session_key = "maintenance-takeover-session"
+        Session.objects.create(
+            session_key=session_key,
+            session_data="",
+            expire_date=timezone.now() - timedelta(seconds=1),
         )
-        assert second.execute("SELECT pg_try_advisory_lock(%s)", [ADVISORY_LOCK_ID]).fetchone() == (
-            False,
+        wait_until(
+            lambda: leaders() == [survivor] and not Session.objects.filter(pk=session_key).exists()
         )
-        assert first.execute("SELECT pg_advisory_unlock(%s)", [ADVISORY_LOCK_ID]).fetchone() == (
-            True,
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+        for process in processes:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("kind", ["session", "rate_bucket"])
+def test_batch_delete_preserves_a_concurrent_expiry_refresh(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    now = timezone.now()
+    if kind == "session":
+        row: Any = Session.objects.create(
+            session_key="concurrent-refresh", session_data="", expire_date=now
         )
-        assert second.execute("SELECT pg_try_advisory_lock(%s)", [ADVISORY_LOCK_ID]).fetchone() == (
-            True,
-        )
+        field = "expire_date"
+    else:
+        row = RateLimitBucket.objects.create(key_digest=b"p" * 32, expires_at=now)
+        field = "expires_at"
+    original_delete = QuerySet.delete
+
+    def refresh() -> None:
+        close_old_connections()
+        try:
+            type(row).objects.filter(pk=row.pk).update(**{field: now + timedelta(hours=1)})
+        finally:
+            connection.close()
+
+    def refresh_before_delete(queryset: QuerySet[Any]) -> tuple[int, dict[str, int]]:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(refresh).result(timeout=10)
+        return original_delete(queryset)
+
+    monkeypatch.setattr(QuerySet, "delete", refresh_before_delete)
+    query = type(row).objects.filter(**{field + "__lte": now})
+    assert _delete_batch(query, ordered_field=field) == 0
+    assert type(row).objects.filter(pk=row.pk).exists()
 
 
 def test_runtime_role_has_no_direct_history_delete_privilege() -> None:

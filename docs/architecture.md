@@ -142,6 +142,12 @@ PostgreSQL stores bounded rate-limit buckets. Row locks make updates atomic acro
 
 One process holds a PostgreSQL advisory lock. It listens for request-path deadline-change notices, reads the earliest indexed deadline, and waits until that time or a notification. Maintenance-owned lifecycle changes do not send new maintenance notices. It performs bounded batches for cycle close, Beacon expiry, content deletion, expired idempotency records, audit data, sessions, and rate buckets. It records last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL.
 
+Database errors close stale Django connections and trigger bounded backoff.
+A failed content deletion does not stop other due batches. After successful
+work drains, the worker waits before retrying failed deletions and still wakes
+for nearer deadlines. Batch deletion checks expiry again so refreshed sessions
+and rate-limit buckets remain available.
+
 The web database role cannot delete retained message content. The maintenance service uses the explicit administrative database role for deletion.
 
 ## Browser administration boundary

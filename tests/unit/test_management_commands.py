@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import OperationalError
 from django.test import override_settings
 
 from accounts.models import User
@@ -133,7 +134,7 @@ def test_sqlite_maintenance_loop_waits_until_deadline(
     monkeypatch.setattr(command, "_reconcile", lambda once: {"cycles_closed": 0})
     monkeypatch.setattr(
         "tunnels.management.commands.maintenance_loop.next_deadline",
-        lambda: __import__("django.utils.timezone", fromlist=["now"]).now(),
+        lambda **kwargs: __import__("django.utils.timezone", fromlist=["now"]).now(),
     )
     command._sqlite_loop(stop)  # type: ignore[arg-type]
     assert waits == [0]
@@ -169,7 +170,9 @@ def test_postgres_loop_drains_due_work_and_records_notification(
     monkeypatch.setattr(
         "tunnels.management.commands.maintenance_loop.has_due_work", lambda: next(due)
     )
-    monkeypatch.setattr("tunnels.management.commands.maintenance_loop.next_deadline", lambda: None)
+    monkeypatch.setattr(
+        "tunnels.management.commands.maintenance_loop.next_deadline", lambda **kwargs: None
+    )
     monkeypatch.setattr(
         "tunnels.management.commands.maintenance_loop.record_notification_wake",
         lambda: wakes.append(True),
@@ -204,11 +207,82 @@ def test_postgres_loop_does_not_busy_loop_after_delete_failure(
         "tunnels.management.commands.maintenance_loop.has_due_work",
         lambda: (_ for _ in ()).throw(AssertionError("must not drain failed work")),
     )
+
+    def deadline_after_failure(*, skip_overdue_deletions: bool = False) -> None:
+        assert skip_overdue_deletions
+
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.next_deadline",
-        lambda: __import__("django.utils.timezone", fromlist=["now"]).now(),
+        "tunnels.management.commands.maintenance_loop.next_deadline", deadline_after_failure
     )
     command._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
+
+
+def test_maintenance_recovers_from_orm_errors_with_backoff(
+    settings: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from core.logging import SafeJsonFormatter
+
+    monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")
+    waits: list[float] = []
+    closed: list[bool] = []
+    errors: list[str] = []
+    attempts: list[bool] = []
+
+    class Stop:
+        stopped = False
+
+        def is_set(self) -> bool:
+            return self.stopped
+
+        def set(self) -> None:
+            self.stopped = True
+
+        def wait(self, seconds: float) -> bool:
+            waits.append(seconds)
+            return self.stopped
+
+    class Listener:
+        def __enter__(self) -> Listener:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            return None
+
+        def execute(self, *args: Any) -> Listener:
+            return self
+
+        def fetchone(self) -> tuple[bool]:
+            return (True,)
+
+        def notifies(self, **kwargs: Any) -> list[object]:
+            return []
+
+    stop = Stop()
+
+    def cleanup() -> dict[str, int]:
+        attempts.append(True)
+        if len(attempts) < 3:
+            raise OperationalError("Synthetic SQL text must not enter logs.")
+        stop.set()
+        return {"cycles_closed": 0}
+
+    module = "tunnels.management.commands.maintenance_loop."
+    monkeypatch.setattr(module + "threading.Event", lambda: stop)
+    monkeypatch.setattr(module + "signal.signal", lambda *args: None)
+    monkeypatch.setattr(module + "psycopg.connect", lambda **kwargs: Listener())
+    monkeypatch.setattr(module + "cleanup_once", cleanup)
+    monkeypatch.setattr(module + "next_deadline", lambda **kwargs: None)
+    monkeypatch.setattr(module + "close_old_connections", lambda: closed.append(True))
+    monkeypatch.setattr(module + "record_maintenance_error", errors.append)
+    MaintenanceCommand().handle(once=False)
+    assert len(attempts) == 3
+    assert waits == [1.0, 2.0]
+    assert closed == [True, True]
+    assert errors == ["OperationalError", "OperationalError"]
+    events = [json.loads(SafeJsonFormatter().format(record)) for record in caplog.records]
+    assert len(events) == 2
+    assert all(event["exception_type"] == "OperationalError" for event in events)
+    assert "Synthetic SQL text" not in json.dumps(events)
 
 
 def test_maintenance_handle_backs_off_after_postgres_error(

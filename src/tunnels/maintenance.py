@@ -30,7 +30,7 @@ def _minimum(values: list[datetime | None]) -> datetime | None:
     return min(present) if present else None
 
 
-def next_deadline() -> datetime | None:
+def next_deadline(*, skip_overdue_deletions: bool = False) -> datetime | None:
     """Return the first persisted deadline across all maintenance categories."""
 
     active_expiry = (
@@ -45,11 +45,11 @@ def next_deadline() -> datetime | None:
         .values_list("expires_at", flat=True)
         .first()
     )
+    deletions = Cycle.objects.filter(state=Cycle.State.CLOSED, delete_after__isnull=False)
+    if skip_overdue_deletions:
+        deletions = deletions.filter(delete_after__gt=timezone.now())
     history_delete = (
-        Cycle.objects.filter(state=Cycle.State.CLOSED, delete_after__isnull=False)
-        .order_by("delete_after")
-        .values_list("delete_after", flat=True)
-        .first()
+        deletions.order_by("delete_after").values_list("delete_after", flat=True).first()
     )
     idempotency_expiry = (
         IdempotencyRecord.objects.order_by("expires_at")
@@ -185,7 +185,7 @@ def _delete_batch(query: QuerySet[Any], *, ordered_field: str) -> int:
     )
     if not ids:
         return 0
-    return int(query.model.objects.filter(pk__in=ids).delete()[0])
+    return int(query.filter(pk__in=ids).delete()[0])
 
 
 def _record_status(*, now: datetime, lag: float, due_work_count: int, last_error: str) -> None:

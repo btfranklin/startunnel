@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import signal
 import threading
 from collections.abc import Mapping
@@ -11,6 +12,7 @@ from contextlib import suppress
 import psycopg
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import DatabaseError, close_old_connections
 from django.utils import timezone
 
 from core.notifications import MAINTENANCE_CHANNEL
@@ -24,6 +26,7 @@ from tunnels.maintenance import (
 )
 
 RECONCILIATION_SECONDS = 60.0
+logger = logging.getLogger(__name__)
 
 
 def _should_report_cycle(counts: Mapping[str, int], *, once: bool) -> bool:
@@ -80,9 +83,11 @@ class Command(BaseCommand):
                     if not acquired or not acquired[0]:
                         stop.wait(RECONCILIATION_SECONDS)
                         continue
-                    backoff = 1.0
                     self._postgres_loop(listener, stop)
-            except psycopg.Error as error:
+                    backoff = 1.0
+            except (psycopg.Error, DatabaseError) as error:
+                logger.exception("Maintenance database operation failed.")
+                close_old_connections()
                 with suppress(Exception):
                     record_maintenance_error(type(error).__name__)
                 if stop.wait(backoff):
@@ -95,17 +100,14 @@ class Command(BaseCommand):
         stop: threading.Event,
     ) -> None:
         while not stop.is_set():
-            counts = self._reconcile(once=False)
+            counts = self._drain_due_work(stop)
             failed = counts.get("cycle_delete_failures", 0) > 0
-            while not failed and has_due_work() and not stop.is_set():
-                counts = self._reconcile(once=False)
-                failed = counts.get("cycle_delete_failures", 0) > 0
-            deadline = next_deadline()
+            deadline = next_deadline(skip_overdue_deletions=failed)
             now = timezone.now()
             timeout = RECONCILIATION_SECONDS
             if deadline is not None and deadline > now:
                 timeout = min((deadline - now).total_seconds(), RECONCILIATION_SECONDS)
-            elif deadline is not None and not failed:
+            elif deadline is not None:
                 timeout = 0
             notifications = list(listener.notifies(timeout=max(timeout, 0), stop_after=1))
             if notifications:
@@ -113,12 +115,23 @@ class Command(BaseCommand):
 
     def _sqlite_loop(self, stop: threading.Event) -> None:
         while not stop.is_set():
-            self._reconcile(once=False)
-            deadline = next_deadline()
+            counts = self._drain_due_work(stop)
+            failed = counts.get("cycle_delete_failures", 0) > 0
+            deadline = next_deadline(skip_overdue_deletions=failed)
             timeout = RECONCILIATION_SECONDS
             if deadline is not None:
                 timeout = min(max((deadline - timezone.now()).total_seconds(), 0), timeout)
             stop.wait(timeout)
+
+    def _drain_due_work(self, stop: threading.Event) -> dict[str, int]:
+        counts = self._reconcile(once=False)
+        while (
+            any(count for name, count in counts.items() if name != "cycle_delete_failures")
+            and has_due_work()
+            and not stop.is_set()
+        ):
+            counts = self._reconcile(once=False)
+        return counts
 
     def _reconcile(self, *, once: bool) -> dict[str, int]:
         counts = cleanup_once()

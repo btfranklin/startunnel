@@ -9,7 +9,9 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+import time_machine
 from django.contrib.sessions.models import Session
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from accounts.models import AdminOperation
@@ -17,6 +19,7 @@ from core.logging import SafeJsonFormatter
 from core.maintenance_status import read_maintenance_status
 from core.models import MaintenanceState, RateLimitBucket
 from tunnels.maintenance import (
+    _delete_batch,
     _delete_due_cycles,
     cleanup_once,
     has_due_work,
@@ -24,6 +27,7 @@ from tunnels.maintenance import (
     record_maintenance_error,
     record_notification_wake,
 )
+from tunnels.management.commands.maintenance_loop import Command as MaintenanceCommand
 from tunnels.models import AuditEvent, Cycle, IdempotencyRecord, Message
 from tunnels.services import create_tunnel, post_reply
 
@@ -131,6 +135,82 @@ def test_cleanup_limits_each_batch(
     )
     assert cleanup_once(now=now)["idempotency_purged"] == 2
     assert cleanup_once(now=now)["idempotency_purged"] == 1
+
+
+@pytest.mark.parametrize("kind", ["session", "rate_bucket"])
+def test_delete_batch_preserves_rows_refreshed_after_selection(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    now = timezone.now()
+    if kind == "session":
+        row: Any = Session.objects.create(
+            session_key="refreshed-session", session_data="", expire_date=now
+        )
+        field = "expire_date"
+    else:
+        row = RateLimitBucket.objects.create(key_digest=b"r" * 32, expires_at=now)
+        field = "expires_at"
+    original_delete = QuerySet.delete
+
+    def refresh_before_delete(queryset: QuerySet[Any]) -> tuple[int, dict[str, int]]:
+        type(row).objects.filter(pk=row.pk).update(**{field: now + timedelta(hours=1)})
+        return original_delete(queryset)
+
+    monkeypatch.setattr(QuerySet, "delete", refresh_before_delete)
+    query = type(row).objects.filter(**{field + "__lte": now})
+    assert _delete_batch(query, ordered_field=field) == 0
+    assert type(row).objects.filter(pk=row.pk).exists()
+
+
+def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = _tree(credential_factory, "failed-deletion-backlog")
+    now = timezone.now()
+    Cycle.objects.filter(pk=created.cycle.pk).update(
+        state=Cycle.State.CLOSED,
+        closed_at=now - timedelta(minutes=2),
+        delete_after=now - timedelta(seconds=30),
+        final_sequence=2,
+    )
+    RateLimitBucket.objects.bulk_create(
+        [
+            RateLimitBucket(
+                key_digest=hashlib.sha256(str(index).encode()).digest(),
+                expires_at=now - timedelta(seconds=1),
+            )
+            for index in range(201)
+        ]
+    )
+    Session.objects.create(
+        session_key="near-future-expiry", session_data="", expire_date=now + timedelta(seconds=5)
+    )
+    attempts: list[bool] = []
+
+    def fail_deletion(**kwargs: Any) -> bool:
+        attempts.append(True)
+        raise RuntimeError("Synthetic content deletion failure.")
+
+    monkeypatch.setattr("tunnels.maintenance.delete_due_cycle_content", fail_deletion)
+
+    class Stop:
+        stopped = False
+
+        def is_set(self) -> bool:
+            return self.stopped
+
+    class Listener:
+        def notifies(self, *, timeout: float, stop_after: int) -> list[object]:
+            assert timeout == 5 and stop_after == 1
+            assert not RateLimitBucket.objects.exists()
+            stop.stopped = True
+            return []
+
+    stop = Stop()
+    with time_machine.travel(now, tick=False):
+        MaintenanceCommand()._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
+    assert len(attempts) == 4
+    assert Cycle.objects.get(pk=created.cycle.pk).state == Cycle.State.CLOSED
 
 
 def test_next_deadline_and_due_work_use_earliest_persisted_value(

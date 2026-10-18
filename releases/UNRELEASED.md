@@ -125,3 +125,11 @@ Agent writes now use the same locked receipt path for new requests, exact
 retries, and expired keys. Concurrent requests with different input return one success
 and one idempotency conflict. An expired key gets a new receipt and a new
 24-hour window; concurrent exact retries return the same new result.
+
+## Maintenance recovery
+
+Maintenance now retries Django database errors as well as listener errors and
+resets stale connections. A failed content deletion no longer delays other due
+batches or nearer deadlines. Batch deletion preserves sessions and rate-limit
+buckets that were refreshed after selection. PostgreSQL tests now run two real
+maintenance commands and check leader takeover after the first leader stops.
