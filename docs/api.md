@@ -153,8 +153,9 @@ It works without credentials or a connection. OpenAPI defines types and constrai
 | `tunnels` | Inspect, list cycles, start, close, roll over, rotate, and retire |
 | `audit`, `operations` | Filter audit events and inspect operation receipts |
 
-All mutations require `Idempotency-Key`. Receipts are scoped to the admin account,
-so a replacement key can inspect prior work. The exact retry window is 24 hours.
+All mutations require `Idempotency-Key`, scoped to the admin account. Any active
+admin can inspect safe operation receipts and continue list cursors with the
+same filters. The exact retry window is 24 hours for the original admin account.
 Changed input with the same key conflicts. After the window, inspect state before
 issuing a new operation. Exact retries can recover derived keys and the stored
 current rotated address. Replays check current authority and resource

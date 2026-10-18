@@ -27,7 +27,9 @@ Remote endpoints cannot bootstrap an unauthenticated administrator.
 
 Audit events identify the admin, credential or browser channel, target, request,
 and result. They never contain raw keys, passwords, addresses, or payloads.
-Admin operation receipts are owner-scoped and support exact retries for 24 hours.
+Every active admin can inspect safe operation receipts and use list cursors
+with the same filters. Exact retries are scoped to the original admin account
+for 24 hours.
 A receipt row lock covers one owner and idempotency key. Independent admin
 writes can run at the same time.
 A revoked credential or retired address cannot be restored by replay.

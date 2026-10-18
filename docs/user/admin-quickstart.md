@@ -155,7 +155,8 @@ JSON
 Save the old key's ID and the receipt IDs. Load the replacement file, run
 `admin me`, and retrieve the prior operation receipt with the replacement key.
 Only then revoke the old key with `keys revoke` and JSON containing `key_id`.
-A replacement key for the same admin can inspect that admin's earlier receipts.
+Any active admin can inspect prior receipts and continue list cursors with the
+same filters. An exact retry uses the original admin account.
 Use a separate non-expiring key or password account for recovery before adding
 expiry to routine keys. `expires_at` is optional for both key types.
 

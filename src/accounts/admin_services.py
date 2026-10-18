@@ -248,7 +248,7 @@ def list_admin_resources(
             )
     if cursor:
         decoded = decode_cursor(cursor, kind="admin_" + kind)
-        if decoded.get("filters") != filters or decoded.get("owner") != str(actor.id):
+        if decoded.get("filters") != filters:
             raise InvalidRequest("The cursor does not match this request.")
         try:
             after_id = UUID(str(decoded["after"]))
@@ -285,7 +285,6 @@ def list_admin_resources(
             after=str(rows[limit - 1].id),
             after_at=rows[limit - 1].created_at.isoformat() if kind == "audit" else None,
             filters=filters,
-            owner=str(actor.id),
         )
         if len(rows) > limit
         else None,

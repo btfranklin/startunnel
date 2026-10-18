@@ -42,7 +42,8 @@ Admin reads do not use the write allowance.
 
 Mutations require an idempotency key. A transaction stores the keyed request
 digest, safe result, target references, and audit-event ID with the domain change.
-Receipts belong to the admin account and have a 24-hour retry window. Changed
+Retry keys belong to the admin account and have a 24-hour retry window. Every
+active admin can inspect receipts and use list cursors with the same filters. Changed
 input conflicts. A receipt row serializes retries with the same account and key.
 Independent admin writes use their own domain locks. An exact retry derives
 a credential key or reads a current address row. Current resource state prevents

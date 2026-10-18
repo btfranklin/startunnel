@@ -425,7 +425,7 @@ def audit(
 
 @router.get("/operations/{uuid:operation_id}", response={200: OperationRecord, **ADMIN_ERRORS})
 def operation(request: AdminRequest, operation_id: UUID) -> dict[str, Any]:
-    row = AdminOperation.objects.filter(pk=operation_id, owner=request.auth.owner).first()
+    row = AdminOperation.objects.filter(pk=operation_id).first()
     if row is None:
         raise InvalidRequest("This operation is not available.")
     return {

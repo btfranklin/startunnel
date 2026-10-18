@@ -88,13 +88,18 @@ def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: An
     assert client.get("/api/v1/admin/audit", **headers).json()["items"]
     other = user_factory()
     _, other_secret = issue_admin_key(owner=other, name="other")
-    assert (
-        client.get(
-            "/api/v1/admin/operations/" + created["operation"]["id"],
-            HTTP_AUTHORIZATION="Bearer " + other_secret,
-        ).status_code
-        == 400
+    other_headers = {"HTTP_AUTHORIZATION": "Bearer " + other_secret}
+    other_inspect = client.get(
+        "/api/v1/admin/operations/" + created["operation"]["id"], **other_headers
     )
+    assert other_inspect.status_code == 200
+    assert other_inspect.json() == inspect.json()
+    first_page = client.get("/api/v1/admin/accounts", {"limit": 1}, **headers).json()
+    query = {"limit": 1, "cursor": first_page["next_cursor"]}
+    original_page = client.get("/api/v1/admin/accounts", query, **headers)
+    handed_over_page = client.get("/api/v1/admin/accounts", query, **other_headers)
+    assert handed_over_page.status_code == 200
+    assert handed_over_page.json() == original_page.json()
 
 
 def test_admin_api_rejects_agent_keys_and_missing_idempotency(
