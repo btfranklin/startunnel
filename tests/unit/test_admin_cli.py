@@ -46,6 +46,15 @@ def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPat
     )
     rotated = next(item for item in result["commands"] if item["command"] == "admin tunnels rotate")
     assert rotated["secret_output_required"] is False
+    for action in ("start", "rollover"):
+        command = next(
+            item for item in result["commands"] if item["command"] == f"admin tunnels {action}"
+        )
+        assert command["optional_fields"] == [
+            "cycle_label",
+            "expires_in_seconds",
+            "root_session",
+        ]
     for command in result["commands"]:
         parsed = (
             arguments(*command["command"].split()[1:])

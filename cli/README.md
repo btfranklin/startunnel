@@ -112,6 +112,8 @@ The same client also manages the instance through the admin API. Use
 without a connection. The running instance's `/api/v1/openapi.json` owns field
 types and constraints. Use
 `admin --help` to list the command groups.
+Tunnel start and rollover accept the optional `root_session` field in their
+JSON input.
 
 Set `STARTUNNEL_ADMIN_KEY_FILE` to a private admin key file, or set
 `STARTUNNEL_ADMIN_KEY`. Do not set both. Admin credentials and agent

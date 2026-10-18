@@ -483,75 +483,76 @@ def run_action(arguments: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class AdminCommand:
+    method: str
+    suffix: str
+    has_secret_output: bool
+    required_fields: tuple[str, ...]
+    optional_fields: tuple[str, ...]
+
+
 # This table drives both argument parsing and the offline command schema.
 ADMIN_COMMANDS = {
-    "me": ("GET", "me", False, (), ()),
-    "capabilities": ("GET", "capabilities", False, (), ()),
-    "status": ("GET", "status", False, (), ()),
-    "doctor": ("GET", "status", False, (), ()),
-    "accounts list": ("GET", "accounts", False, (), ("state",)),
-    "accounts get": ("GET", "accounts/{id}", False, (), ()),
-    "accounts create": (
-        "POST",
-        "accounts/create",
-        True,
-        ("username",),
-        ("password", "key_name"),
+    "me": AdminCommand("GET", "me", False, (), ()),
+    "capabilities": AdminCommand("GET", "capabilities", False, (), ()),
+    "status": AdminCommand("GET", "status", False, (), ()),
+    "doctor": AdminCommand("GET", "status", False, (), ()),
+    "accounts list": AdminCommand("GET", "accounts", False, (), ("state",)),
+    "accounts get": AdminCommand("GET", "accounts/{id}", False, (), ()),
+    "accounts create": AdminCommand(
+        "POST", "accounts/create", True, ("username",), ("password", "key_name")
     ),
-    "accounts set-state": (
-        "POST",
-        "accounts/state",
-        False,
-        ("admin_id", "active", "expected_active"),
-        (),
+    "accounts set-state": AdminCommand(
+        "POST", "accounts/state", False, ("admin_id", "active", "expected_active"), ()
     ),
-    "accounts set-password": ("POST", "accounts/password", False, ("admin_id",), ("password",)),
-    "keys list": ("GET", "keys", False, (), ("admin_id", "state")),
-    "keys create": ("POST", "keys/create", True, ("admin_id", "name"), ("expires_at",)),
-    "keys revoke": ("POST", "keys/revoke", False, ("key_id",), ()),
-    "agents list": ("GET", "agents", False, (), ("state",)),
-    "agents create": ("POST", "agents/create", True, ("name",), ("expires_at",)),
-    "agents revoke": ("POST", "agents/revoke", False, ("credential_id",), ()),
-    "tunnels list": ("GET", "tunnels", False, (), ("state",)),
-    "tunnels get": ("GET", "tunnels/{id}", False, (), ()),
-    "tunnels cycles": ("GET", "tunnels/{id}/cycles", False, (), ("state",)),
-    "tunnels start": (
+    "accounts set-password": AdminCommand(
+        "POST", "accounts/password", False, ("admin_id",), ("password",)
+    ),
+    "keys list": AdminCommand("GET", "keys", False, (), ("admin_id", "state")),
+    "keys create": AdminCommand("POST", "keys/create", True, ("admin_id", "name"), ("expires_at",)),
+    "keys revoke": AdminCommand("POST", "keys/revoke", False, ("key_id",), ()),
+    "agents list": AdminCommand("GET", "agents", False, (), ("state",)),
+    "agents create": AdminCommand("POST", "agents/create", True, ("name",), ("expires_at",)),
+    "agents revoke": AdminCommand("POST", "agents/revoke", False, ("credential_id",), ()),
+    "tunnels list": AdminCommand("GET", "tunnels", False, (), ("state",)),
+    "tunnels get": AdminCommand("GET", "tunnels/{id}", False, (), ()),
+    "tunnels cycles": AdminCommand("GET", "tunnels/{id}/cycles", False, (), ("state",)),
+    "tunnels start": AdminCommand(
         "POST",
         "tunnels/start",
         False,
         ("tunnel_id", "expected_address_generation", "root_content"),
-        ("cycle_label", "expires_in_seconds"),
+        ("cycle_label", "expires_in_seconds", "root_session"),
     ),
-    "tunnels close": ("POST", "tunnels/close", False, ("tunnel_id", "expected_cycle_id"), ()),
-    "tunnels rollover": (
+    "tunnels close": AdminCommand(
+        "POST", "tunnels/close", False, ("tunnel_id", "expected_cycle_id"), ()
+    ),
+    "tunnels rollover": AdminCommand(
         "POST",
         "tunnels/rollover",
         False,
         ("tunnel_id", "expected_cycle_id", "expected_address_generation", "root_content"),
-        ("cycle_label", "expires_in_seconds"),
+        ("cycle_label", "expires_in_seconds", "root_session"),
     ),
-    "tunnels rotate": (
-        "POST",
-        "tunnels/rotate",
-        False,
-        ("tunnel_id", "expected_address_generation"),
-        (),
+    "tunnels rotate": AdminCommand(
+        "POST", "tunnels/rotate", False, ("tunnel_id", "expected_address_generation"), ()
     ),
-    "tunnels retire": (
+    "tunnels retire": AdminCommand(
         "POST",
         "tunnels/retire",
         False,
         ("tunnel_id", "confirmation", "expected_address_generation"),
         (),
     ),
-    "audit list": (
+    "audit list": AdminCommand(
         "GET",
         "audit",
         False,
         (),
         ("action", "actor_id", "target_type", "target_id", "credential_id"),
     ),
-    "operations get": ("GET", "operations/{id}", False, (), ()),
+    "operations get": AdminCommand("GET", "operations/{id}", False, (), ()),
 }
 
 
@@ -593,18 +594,18 @@ def admin_schema() -> dict[str, Any]:
         "commands": [
             {
                 "command": "admin " + name,
-                "method": spec[0],
-                "path": "/api/v1/admin/" + spec[1],
-                "stdin_json": spec[0] == "POST",
-                "idempotency_key_required": spec[0] == "POST",
-                "secret_output_required": spec[2] and name != "accounts create",
+                "method": spec.method,
+                "path": "/api/v1/admin/" + spec.suffix,
+                "stdin_json": spec.method == "POST",
+                "idempotency_key_required": spec.method == "POST",
+                "secret_output_required": spec.has_secret_output and name != "accounts create",
                 "secret_output_condition": (
                     "Required when password is omitted or empty."
                     if name == "accounts create"
                     else None
                 ),
-                "required_fields": list(spec[3]),
-                "optional_fields": list(spec[4]),
+                "required_fields": list(spec.required_fields),
+                "optional_fields": list(spec.optional_fields),
             }
             for name, spec in ADMIN_COMMANDS.items()
         ],
@@ -626,7 +627,10 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
     name = arguments.admin_command
     if name == "schema":
         return admin_schema()
-    method, suffix, has_secret_output, _required, optional = ADMIN_COMMANDS[name]
+    spec = ADMIN_COMMANDS[name]
+    method = spec.method
+    suffix = spec.suffix
+    optional = spec.optional_fields
     if "{id}" in suffix:
         try:
             resource_id = str(uuid.UUID(arguments.resource_id))
@@ -643,7 +647,7 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
             suffix += "?" + urlencode(query)
     body = read_input_object() if method == "POST" else None
     retry_key = require_idempotency_key(arguments.idempotency_key) if method == "POST" else None
-    secret_required = has_secret_output and name != "accounts create"
+    secret_required = spec.has_secret_output and name != "accounts create"
     if name == "accounts create" and not (body or {}).get("password"):
         secret_required = True
         if not arguments.secret_output:
@@ -708,19 +712,19 @@ def add_admin_parser(subparsers: Any) -> None:
             command = groups[group].add_parser(action)
         else:
             command = commands.add_parser(name)
-        if spec[0] == "POST":
+        if spec.method == "POST":
             command.description = (
                 "Read one JSON object from stdin. Required fields: "
-                + ", ".join(spec[3])
+                + ", ".join(spec.required_fields)
                 + ". Optional fields: "
-                + (", ".join(spec[4]) or "none")
+                + (", ".join(spec.optional_fields) or "none")
                 + ". Write resource metadata and an operation receipt as JSON to stdout. "
                 + (
                     "Save a returned key in the required private output file. "
                     "Required only when password is omitted or empty."
                     if name == "accounts create"
                     else "Save returned keys in the required private output file."
-                    if spec[2]
+                    if spec.has_secret_output
                     else ""
                 )
             )
@@ -736,13 +740,13 @@ def add_admin_parser(subparsers: Any) -> None:
                 "document for response types."
             )
         command.set_defaults(admin_command=name)
-        if "{id}" in spec[1]:
+        if "{id}" in spec.suffix:
             command.add_argument("resource_id", help="Stable resource UUID.")
-        if spec[0] == "POST":
+        if spec.method == "POST":
             command.add_argument(
                 "--idempotency-key", required=True, help="Reuse for exact retries."
             )
-        if spec[2]:
+        if spec.has_secret_output:
             command.add_argument(
                 "--secret-output",
                 required=name != "accounts create",
@@ -755,7 +759,7 @@ def add_admin_parser(subparsers: Any) -> None:
         if name.endswith((" list", " cycles")):
             command.add_argument("--limit", type=int)
             command.add_argument("--cursor")
-            for field in spec[4]:
+            for field in spec.optional_fields:
                 command.add_argument("--" + field.replace("_", "-"), dest="filter_" + field)
 
 

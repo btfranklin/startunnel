@@ -577,7 +577,7 @@ def _resolve_schema(schema: dict[str, Any], document: dict[str, Any]) -> dict[st
     return _resolve_schema(resolved, document)
 
 
-def test_agent_help_fields_and_examples_match_generated_openapi() -> None:
+def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
     document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
     cli = _load_cli_module()
     commands = cli.AGENT_COMMANDS
@@ -597,6 +597,71 @@ def test_agent_help_fields_and_examples_match_generated_openapi() -> None:
         Draft202012Validator(validation_schema, format_checker=FormatChecker()).validate(
             commands[action]["example"]
         )
+
+    for command in cli.ADMIN_COMMANDS.values():
+        if command.method != "POST":
+            continue
+        operation = document["paths"][f"/api/v1/admin/{command.suffix}"]["post"]
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        resolved = _resolve_schema(request_schema, document)
+        properties = resolved["properties"]
+        required = set(resolved.get("required", ()))
+        assert set(command.required_fields) == required
+        assert set(command.optional_fields) == set(properties) - required
+
+
+@pytest.mark.parametrize(
+    ("command", "suffix", "body"),
+    [
+        (
+            "start",
+            "start",
+            {
+                "tunnel_id": "tunnel-id",
+                "expected_address_generation": 1,
+                "root_content": {"type": "text", "text": "Root message."},
+                "root_session": "root-session-start",
+            },
+        ),
+        (
+            "rollover",
+            "rollover",
+            {
+                "tunnel_id": "tunnel-id",
+                "expected_cycle_id": "cycle-id",
+                "expected_address_generation": 1,
+                "root_content": {"type": "text", "text": "Root message."},
+                "root_session": "root-session-rollover",
+            },
+        ),
+    ],
+)
+def test_admin_cycle_commands_forward_root_session(
+    command: str,
+    suffix: str,
+    body: dict[str, Any],
+) -> None:
+    response = {"resource": {"cycle_id": "cycle-id"}, "operation": {"id": "receipt-id"}}
+    with serve(Response(200, response)) as (base_url, scenario):
+        result = run_cli(
+            base_url,
+            "admin",
+            "tunnels",
+            command,
+            "--idempotency-key",
+            f"start-session-{command}",
+            body=body,
+            extra_env={"STARTUNNEL_ADMIN_KEY": "sta_test-admin-key"},
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == response
+    request = scenario.requests[0]
+    assert request["method"] == "POST"
+    assert request["path"] == f"/api/v1/admin/tunnels/{suffix}"
+    assert request["body"] == body
+    assert request["headers"]["Authorization"] == "Bearer sta_test-admin-key"
+    assert request["headers"]["Idempotency-Key"] == f"start-session-{command}"
 
 
 @pytest.mark.parametrize(
@@ -637,3 +702,17 @@ def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -
     if action in {"create", "reply"}:
         assert "self-declared label" in result.stdout
         assert "session" in result.stdout
+
+
+@pytest.mark.parametrize("command", ["start", "rollover"])
+def test_admin_cycle_help_lists_root_session(command: str) -> None:
+    result = subprocess.run(
+        [sys.executable, str(CLI), "admin", "tunnels", command, "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "root_session" in result.stdout
+    assert "Optional fields:" in result.stdout
