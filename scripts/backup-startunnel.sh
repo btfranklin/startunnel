@@ -32,37 +32,16 @@ fi
 
 project_root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 temporary="${destination}.partial.$$"
-running_services=""
 umask 077
 : "${COMPOSE_FILE:=compose.yaml:compose.dev.yaml}"
 export COMPOSE_FILE
 
-restart_services() {
-    if [ -n "$running_services" ]; then
-        # The service names are fixed output from Docker Compose, not user input.
-        # shellcheck disable=SC2086
-        docker compose up -d $running_services >/dev/null
-    fi
-}
-
 cleanup() {
     rm -rf -- "$temporary"
-    restart_services
 }
 trap cleanup EXIT HUP INT TERM
 
 cd "$project_root"
-running_services="$(
-    docker compose ps --status running --services |
-        awk '$0 == "web" || $0 == "maintenance" {print}' |
-        tr '\n' ' '
-)"
-if [ -n "$running_services" ]; then
-    # The service names are fixed by the allowlist above.
-    # shellcheck disable=SC2086
-    docker compose stop $running_services >/dev/null
-fi
-
 mkdir -m 700 -- "$temporary"
 docker compose exec -T postgres \
     pg_dump \
@@ -83,5 +62,4 @@ docker compose exec -T postgres \
 )
 mv -- "$temporary" "$destination"
 trap - EXIT HUP INT TERM
-restart_services
 echo "Created the StarTunnel PostgreSQL backup: $destination"

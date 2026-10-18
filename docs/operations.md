@@ -126,10 +126,10 @@ scripts/verify-startunnel-restore.sh /absolute/private/path/startunnel.backup
 ```
 
 The backup path is a directory with `postgres.dump` and `manifest.sha256`.
-The parent directory must have mode `0700`. The helper stops application
-writers during the dump and restarts them afterward. It defaults to development
-Compose files unless `COMPOSE_FILE` is set. The database backup does not include
-the secret files required for recovery; preserve them as described in the
+The parent directory must have mode `0700`. The helper makes an online dump
+while the application stays available. It defaults to development Compose
+files unless `COMPOSE_FILE` is set. The database backup does not include the
+secret files required for recovery; preserve them as described in the
 production guide. There is no cache or archive volume to coordinate.
 
 ## Logs and secrets

@@ -24,36 +24,40 @@ from scripts import system_proof
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_system_outage_proof_waits_for_writers_restarted_by_backup(
+def test_system_outage_proof_checks_online_backup_availability_before_database_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Stack:
-        project_name = "stproof-backup-restart"
+        project_name = "stproof-online-backup"
         environment: dict[str, str] = {}
         running = False
         backup_finished = False
-        recovery_waited = False
+        availability_checked = False
+        database_loss_started = False
 
         def run(self, label: str, *args: str, **kwargs: Any) -> None:
             if args[0] == "up" and "--wait" in args:
                 self.running = True
-                if self.backup_finished:
-                    self.recovery_waited = True
+            if self.backup_finished and not self.database_loss_started:
+                if label.startswith(("Verify live health", "Verify ready health")):
+                    self.availability_checked = True
+                elif label != "Stop PostgreSQL":
+                    assert args[0] not in {"up", "restart", "stop"}
             if label == "Stop PostgreSQL":
-                assert self.running, "Outage injection raced the writer restart"
+                assert self.availability_checked
+                self.database_loss_started = True
             if label.startswith(("Verify live health", "Verify ready health", "Verify readiness")):
-                assert self.running, "HTTP probe reached a web service still starting"
+                assert self.running
 
         def capture(self, *args: str, **kwargs: Any) -> str:
             return "Application service started."
 
     stack: Any = Stack()
 
-    def backup_restart(value: Any) -> None:
+    def online_backup(value: Any) -> None:
         value.backup_finished = True
-        value.running = False
 
-    monkeypatch.setattr(system_proof, "_coordinated_restore_proof", backup_restart)
+    monkeypatch.setattr(system_proof, "_coordinated_restore_proof", online_backup)
     monkeypatch.setattr(system_proof, "_assert_reusable_images", lambda value: None)
     monkeypatch.setattr(system_proof, "_run_activity_restart_proof", lambda value: None)
     monkeypatch.setattr(system_proof, "_system_host_profile", lambda value: {})
@@ -62,7 +66,7 @@ def test_system_outage_proof_waits_for_writers_restarted_by_backup(
 
     report = system_proof.run_system_proof(stack, build_images=False)
     assert report["status"] == "passed"
-    assert stack.recovery_waited
+    assert stack.availability_checked
 
 
 @pytest.mark.skipif(

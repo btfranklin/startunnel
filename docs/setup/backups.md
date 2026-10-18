@@ -42,10 +42,10 @@ Do not paste the recovery key. Keep this recipient file outside Git.
 
 ## 2. Install the backup command
 
-The command below pauses `web` and `maintenance` while it makes the database
-dump, then restarts them. Schedule a short daily interruption when the team
-can tolerate it. It also checks a restore in a temporary database on the same
-PostgreSQL server. This check uses additional disk space and database capacity.
+The command below makes an online PostgreSQL dump while `web` and
+`maintenance` stay available. It also checks a restore in a temporary database
+on the same PostgreSQL server. This check uses additional disk space and
+database capacity.
 
 In the server's root shell, create the command:
 
@@ -80,8 +80,8 @@ chmod 700 /usr/local/sbin/startunnel-backup
 ```
 
 Expect a successful restore check and an encrypted backup path. Record that
-path. A `.partial` file is not a completed backup. If the command fails, check
-that application services restarted and correct the failure before retrying.
+path. A `.partial` file is not a completed backup. If the command fails, correct
+the failure before retrying.
 Do not rotate secrets or update the application while a backup is running.
 
 ## 3. Copy it outside the server and test decryption

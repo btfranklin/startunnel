@@ -8,6 +8,16 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+FAKE_DATABASE = """
+docker() {
+    printf '%s\\n' "$*" >> "$BACKUP_TEST_COMMANDS"
+    if [ "${BACKUP_TEST_FAIL:-}" = 1 ]; then
+        return 1
+    fi
+    printf 'test database dump\\n'
+}
+. "$0"
+"""
 
 
 @pytest.mark.parametrize("parent_mode", [0o700, 0o755])
@@ -15,24 +25,13 @@ def test_backup_checks_native_permissions_before_database_access(
     tmp_path: Path, parent_mode: int
 ) -> None:
     commands = tmp_path / "commands"
-    # A shell function also works when the isolated test lane mounts /tmp as noexec.
-    fake_database = """
-docker() {
-    printf '%s\\n' "$*" >> "$BACKUP_TEST_COMMANDS"
-    case "$*" in
-        *--services*) printf 'web\\nmaintenance\\n' ;;
-        *pg_dump*) printf 'test database dump\\n' ;;
-    esac
-}
-. "$0"
-"""
     private = tmp_path / "private"
     private.mkdir(mode=parent_mode)
     private.chmod(parent_mode)
     backup = private / "instance.backup"
 
     result = subprocess.run(
-        ["sh", "-c", fake_database, str(ROOT / "scripts/backup-startunnel.sh"), str(backup)],
+        ["sh", "-c", FAKE_DATABASE, str(ROOT / "scripts/backup-startunnel.sh"), str(backup)],
         env={
             **os.environ,
             "BACKUP_TEST_COMMANDS": str(commands),
@@ -56,6 +55,27 @@ docker() {
     assert backup.stat().st_mode & 0o777 == 0o700
     digest = hashlib.sha256(dump.read_bytes()).hexdigest()
     assert (backup / "manifest.sha256").read_text() == f"{digest}  postgres.dump\n"
-    calls = commands.read_text().splitlines()
-    assert "compose stop web maintenance" in calls
-    assert calls[-1] == "compose up -d web maintenance"
+    assert commands.read_text().splitlines() == [
+        "compose exec -T postgres pg_dump --username startunnel_admin --dbname startunnel "
+        "--format custom --compress 9 --no-owner --no-acl"
+    ]
+
+
+def test_failed_dump_removes_partial_backup(tmp_path: Path) -> None:
+    commands = tmp_path / "commands"
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    backup = private / "instance.backup"
+
+    result = subprocess.run(
+        ["sh", "-c", FAKE_DATABASE, str(ROOT / "scripts/backup-startunnel.sh"), str(backup)],
+        env={**os.environ, "BACKUP_TEST_COMMANDS": str(commands), "BACKUP_TEST_FAIL": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert not backup.exists()
+    assert not list(private.glob("*.partial.*"))
+    assert len(commands.read_text().splitlines()) == 1
