@@ -13,14 +13,11 @@ from tunnels.errors import InvalidCredential
 from .rate_limits import consume_api_operation
 
 
-def _return_postgresql_connection_before_wait() -> None:
-    """Return a production connection without breaking an outer test transaction."""
-
-    if connection.vendor == "postgresql" and not connection.in_atomic_block:
-        connection.close()
-
-
 class AgentBearer(HttpBearer):
+    def __init__(self, *, release_before_wait: bool = False) -> None:
+        super().__init__()
+        self.release_before_wait = release_before_wait
+
     def authenticate(self, request: object, token: str) -> AgentCredential:
         try:
             try:
@@ -31,8 +28,14 @@ class AgentBearer(HttpBearer):
             consume_api_operation(credential, limits)
             return credential
         finally:
-            # Return the authentication connection before a bounded wait begins.
-            _return_postgresql_connection_before_wait()
+            # The async activity worker uses its own database connection.
+            if (
+                self.release_before_wait
+                and connection.vendor == "postgresql"
+                and not connection.in_atomic_block
+            ):
+                connection.close()
 
 
 agent_bearer = AgentBearer()
+activity_bearer = AgentBearer(release_before_wait=True)

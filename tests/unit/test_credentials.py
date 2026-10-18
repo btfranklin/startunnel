@@ -16,7 +16,7 @@ from agents.services import (
     parse_key,
     revoke_credential,
 )
-from api.auth import agent_bearer
+from api.auth import activity_bearer, agent_bearer
 from tunnels.errors import InvalidCredential
 
 pytestmark = pytest.mark.django_db
@@ -124,7 +124,7 @@ def test_revoke_is_idempotent(user_factory: Any, credential_factory: Any) -> Non
     assert AgentCredential.objects.get(pk=credential.pk).revoked_at is not None
 
 
-def test_api_authentication_closes_postgres_connection(
+def test_only_activity_authentication_releases_postgres_connection(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
@@ -135,6 +135,8 @@ def test_api_authentication_closes_postgres_connection(
     monkeypatch.setattr("api.auth.connection.in_atomic_block", False)
     monkeypatch.setattr("api.auth.connection.close", lambda: closed.append(True))
     assert agent_bearer.authenticate(object(), "key") == credential
+    assert closed == []
+    assert activity_bearer.authenticate(object(), "key") == credential
     assert closed == [True]
 
 
@@ -145,7 +147,7 @@ def test_api_authentication_maps_bad_key_and_preserves_outer_transaction(
         "api.auth.authenticate_key", lambda token: (_ for _ in ()).throw(CredentialError())
     )
     with pytest.raises(InvalidCredential):
-        agent_bearer.authenticate(object(), "bad")
+        activity_bearer.authenticate(object(), "bad")
     credential, _ = credential_factory()
     closed: list[bool] = []
     monkeypatch.setattr("api.auth.authenticate_key", lambda token: credential)
@@ -153,5 +155,5 @@ def test_api_authentication_maps_bad_key_and_preserves_outer_transaction(
     monkeypatch.setattr("api.auth.connection.vendor", "postgresql")
     monkeypatch.setattr("api.auth.connection.in_atomic_block", True)
     monkeypatch.setattr("api.auth.connection.close", lambda: closed.append(True))
-    assert agent_bearer.authenticate(object(), "key") == credential
+    assert activity_bearer.authenticate(object(), "key") == credential
     assert closed == []

@@ -53,7 +53,7 @@ from tunnels.services import (
 )
 
 from .admin import router as admin_router
-from .auth import agent_bearer
+from .auth import activity_bearer, agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
 from .schemas import (
     ActivityRequest,
@@ -964,6 +964,7 @@ async def _activity(request: HttpRequest, payload: ActivityRequest) -> dict[str,
 
 @router.post(
     "/activity",
+    auth=activity_bearer,
     response={
         200: ActivityResponse,
         400: ErrorResponse,

@@ -13,6 +13,8 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from django.db import close_old_connections, connection, transaction
+from django.db.backends.signals import connection_created
+from django.test import Client
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -362,3 +364,20 @@ def test_runtime_role_has_no_direct_history_delete_privilege() -> None:
             "SELECT has_table_privilege(current_user, 'public.tunnels_message', 'DELETE')"
         )
         assert cursor.fetchone() == (True,)
+
+
+def test_normal_api_request_reuses_its_authentication_connection(credential_factory: Any) -> None:
+    _, key = credential_factory()
+    opened: list[int] = []
+
+    def record_connection(sender: object, connection: Any, **kwargs: Any) -> None:
+        opened.append(connection.connection.info.backend_pid)
+
+    connection.close()
+    connection_created.connect(record_connection)
+    try:
+        response = Client().get("/api/v1/me", HTTP_AUTHORIZATION="Bearer " + key)
+        assert response.status_code == 200
+        assert len(opened) == 1
+    finally:
+        connection_created.disconnect(record_connection)
