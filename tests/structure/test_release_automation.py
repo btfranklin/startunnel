@@ -26,11 +26,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize(
-    "candidate_image", [None, "registry.example/startunnel@sha256:" + "a" * 64]
+    ("candidate_image", "build_images"),
+    [(None, False), (None, True), ("registry.example/startunnel@sha256:" + "a" * 64, False)],
 )
 def test_system_outage_proof_checks_online_backup_availability_before_database_loss(
     monkeypatch: pytest.MonkeyPatch,
     candidate_image: str | None,
+    build_images: bool,
 ) -> None:
     class Stack:
         project_name = "stproof-online-backup"
@@ -79,11 +81,16 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     monkeypatch.setattr(system_proof, "_system_image_ids", lambda value: {})
     monkeypatch.setattr(system_proof, "required_output", lambda *args, **kwargs: "28.4.0")
 
-    report = system_proof.run_system_proof(stack, build_images=False)
+    report = system_proof.run_system_proof(stack, build_images=build_images)
     assert report["status"] == "passed"
     assert stack.availability_checked
     if candidate_image:
         assert stack.builds == [("build", "example-tests", "agent-e2e", "browser-tests")]
+    elif build_images:
+        assert stack.builds == [
+            ("build", "--no-cache", "web", "maintenance"),
+            ("build", "example-tests", "agent-e2e", "browser-tests"),
+        ]
     else:
         assert stack.builds == []
 

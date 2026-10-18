@@ -578,6 +578,21 @@ def run_system_proof(
     candidate_image = getattr(stack, "candidate_image", None)
     if candidate_image:
         step("pull immutable candidate", stack.pull_candidate)
+    elif build_images:
+        step(
+            "no-cache image build",
+            lambda: stack.run(
+                "No-cache system image build",
+                "build",
+                "--no-cache",
+                "web",
+                "maintenance",
+                timeout_seconds=3_600,
+            ),
+        )
+    else:
+        step("verified current images", lambda: _assert_reusable_images(stack))
+    if candidate_image or build_images:
         step(
             "proof helper image build",
             lambda: stack.run(
@@ -588,26 +603,6 @@ def run_system_proof(
                 "browser-tests",
                 timeout_seconds=3_600,
             ),
-        )
-    elif build_images:
-        step(
-            "no-cache image build",
-            lambda: stack.run(
-                "No-cache system image build",
-                "build",
-                "--no-cache",
-                "web",
-                "maintenance",
-                "example-tests",
-                "agent-e2e",
-                "browser-tests",
-                timeout_seconds=3_600,
-            ),
-        )
-    else:
-        step(
-            "verified current images",
-            lambda: _assert_reusable_images(stack),
         )
     step(
         "healthy clean-stack startup",
