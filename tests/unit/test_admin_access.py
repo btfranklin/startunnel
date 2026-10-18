@@ -439,7 +439,17 @@ def test_secret_file_failure_rolls_back_bootstrap(tmp_path: Any, monkeypatch: An
         call_command("recover_instance_admin", owner.username, key_file=str(path))
     assert not AdminCredential.objects.filter(owner=owner).exists()
     assert not path.exists()
-    unsafe = tmp_path / "link"
-    unsafe.symlink_to(tmp_path, target_is_directory=True)
-    with pytest.raises(CommandError):
-        call_command("recover_instance_admin", owner.username, key_file=str(unsafe / "nested.key"))
+
+
+def test_recovery_key_can_use_a_symlinked_output_parent(tmp_path: Any) -> None:
+    owner = User.objects.create_user(username="linked-recovery")
+    directory = tmp_path / "actual"
+    directory.mkdir()
+    linked_directory = tmp_path / "linked"
+    linked_directory.symlink_to(directory, target_is_directory=True)
+    key_file = linked_directory / "recovery.key"
+
+    call_command("recover_instance_admin", owner.username, key_file=str(key_file))
+
+    assert (directory / "recovery.key").is_file()
+    assert key_file.stat().st_mode & 0o777 == 0o600

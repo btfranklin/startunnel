@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import stat
 import time
 from contextlib import suppress
 from dataclasses import dataclass
@@ -59,10 +58,8 @@ def default_manifest_path() -> Path:
 
 
 def load_credential_manifest(path: Path) -> CredentialManifest:
-    if path.is_symlink() or not path.is_file():
+    if not path.is_file():
         raise LoadProfileError("The load credential manifest is not a regular file.")
-    if stat.S_IMODE(path.stat().st_mode) != 0o600:
-        raise LoadProfileError("The load credential manifest must have mode 0600.")
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
         entries = document["credentials"]

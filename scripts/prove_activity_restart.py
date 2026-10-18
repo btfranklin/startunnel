@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -43,8 +42,6 @@ def _fixture_path() -> Path:
 
 
 def _read_fixture(path: Path) -> dict[str, str]:
-    if stat.S_IMODE(path.stat().st_mode) != 0o600:
-        raise ProofError("The protected fixture has an invalid mode.")
     values: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         name, separator, value = line.partition("=")

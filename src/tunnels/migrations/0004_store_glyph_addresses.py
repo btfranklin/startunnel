@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import json
 import os
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -38,8 +37,7 @@ def restore_addresses(apps: Any, schema_editor: Any) -> None:
         return
     try:
         path = Path(os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"])
-        status = path.lstat()
-        if not stat.S_ISREG(status.st_mode) or stat.S_IMODE(status.st_mode) != 0o600:
+        if not path.is_file():
             raise ValueError
         bundle = json.loads(path.read_text(encoding="utf-8"))
         secret = bundle["address_secret"].encode()
@@ -56,7 +54,7 @@ def restore_addresses(apps: Any, schema_editor: Any) -> None:
                 raise ValueError
     except KeyError, OSError, ValueError, TypeError, AttributeError:
         raise RuntimeError(
-            "Supply a mode-0600 STARTUNNEL_ADDRESS_MIGRATION_FILE with the old address secret "
+            "Supply a readable STARTUNNEL_ADDRESS_MIGRATION_FILE with the old address secret "
             "and every original glyph address. See docs/setup/address-storage.md. "
             "No addresses were changed."
         ) from None

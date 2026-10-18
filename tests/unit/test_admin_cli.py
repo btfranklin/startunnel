@@ -47,24 +47,21 @@ def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPat
             assert parsed.admin_command == command["command"][6:]
 
 
-def test_admin_key_file_requires_private_regular_file(
+def test_admin_key_file_accepts_readonly_and_symlinked_regular_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     filename = tmp_path / "key"
     filename.write_text("sta_disposable-test-value\n")
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY", raising=False)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(filename))
-    filename.chmod(0o600)
+    filename.chmod(0o400)
     assert cli.require_admin_key() == "sta_disposable-test-value"
     filename.chmod(0o644)
-    with pytest.raises(cli.CliError):
-        cli.require_admin_key()
-    filename.chmod(0o600)
+    assert cli.require_admin_key() == "sta_disposable-test-value"
     symlink = tmp_path / "link"
     symlink.symlink_to(filename)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(symlink))
-    with pytest.raises(cli.CliError):
-        cli.require_admin_key()
+    assert cli.require_admin_key() == "sta_disposable-test-value"
 
 
 def test_admin_key_configuration_conflict(
@@ -100,6 +97,30 @@ def test_secret_saved_privately_and_removed_from_result(
     assert result["secret_output"] == str(filename)
 
 
+def test_secret_output_accepts_symlinked_parent_and_keeps_new_file_private(
+    configured: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    directory = tmp_path / "actual"
+    directory.mkdir()
+    linked_directory = tmp_path / "linked"
+    linked_directory.symlink_to(directory, target_is_directory=True)
+    filename = linked_directory / "issued.key"
+    stdin(monkeypatch, {"name": "worker"})
+    monkeypatch.setattr(
+        cli.StarTunnelTransport,
+        "request",
+        lambda *a, **kw: {"resource": {"id": "safe-id"}, "secret": "st_disposable-value"},
+    )
+
+    cli.run_admin(
+        arguments(
+            "agents", "create", "--idempotency-key", "test-key-1", "--secret-output", str(filename)
+        )
+    )
+    assert (directory / "issued.key").read_text() == "st_disposable-value\n"
+    assert filename.stat().st_mode & 0o777 == 0o600
+
+
 def test_existing_secret_file_never_deleted_or_requested(
     configured: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -123,6 +144,35 @@ def test_existing_secret_file_never_deleted_or_requested(
             )
         )
     assert filename.read_text() == "keep this"
+
+
+def test_secret_output_refuses_an_existing_leaf_symlink(
+    configured: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / "existing.key"
+    target.write_text("keep this")
+    filename = tmp_path / "issued.key"
+    filename.symlink_to(target)
+    stdin(monkeypatch, {"name": "worker"})
+    monkeypatch.setattr(
+        cli.StarTunnelTransport,
+        "request",
+        lambda *a, **kw: pytest.fail("No request may precede secret file reservation."),
+    )
+
+    with pytest.raises(cli.CliError, match="secret_output_failed"):
+        cli.run_admin(
+            arguments(
+                "agents",
+                "create",
+                "--idempotency-key",
+                "test-key-1",
+                "--secret-output",
+                str(filename),
+            )
+        )
+    assert filename.is_symlink()
+    assert target.read_text() == "keep this"
 
 
 def test_failed_request_removes_reserved_file(

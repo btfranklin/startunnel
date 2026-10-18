@@ -128,7 +128,7 @@ def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "mode", ["preview", "no-backup", "apply", "bad-image", "migration-failure"]
+    "mode", ["preview", "no-backup", "apply", "apply-link", "bad-image", "migration-failure"]
 )
 def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     tmp_path: Path,
@@ -141,8 +141,16 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     old_image = "ghcr.io/btfranklin/startunnel@sha256:" + "c" * 64
     original = f"STARTUNNEL_APP_IMAGE={old_image}\nSTARTUNNEL_DOMAIN=tunnel.example\n"
     configuration = tmp_path / "production.env"
-    configuration.write_text(original)
-    configuration.chmod(0o600)
+    if mode == "apply-link":
+        managed = tmp_path / "managed"
+        managed.mkdir()
+        target = managed / "production.env"
+        target.write_text(original)
+        target.chmod(0o644)
+        configuration.symlink_to(target)
+    else:
+        configuration.write_text(original)
+        configuration.chmod(0o600)
     monkeypatch.setattr(upgrade, "ROOT", tmp_path)
     monkeypatch.setenv("STARTUNNEL_APP_IMAGE", old_image)
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", "startunnel-team")
@@ -172,15 +180,17 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         args.append("--apply")
     if mode not in ("preview", "no-backup"):
         args.append("--backup-verified")
-    assert upgrade.main(args) == (0 if mode in ("preview", "apply") else 2)
-    mutated = mode in ("apply", "migration-failure")
+    assert upgrade.main(args) == (0 if mode in ("preview", "apply", "apply-link") else 2)
+    mutated = mode in ("apply", "apply-link", "migration-failure")
     assert configuration.read_text() == (
         original.replace(old_image, candidate["image"]) if mutated else original
     )
     if mutated:
-        saved = tmp_path / "production.env.before-v0.1.0"
+        saved = configuration.resolve().with_name("production.env.before-v0.1.0")
         assert saved.read_text() == original
         assert saved.stat().st_mode & 0o777 == 0o600
+        if mode == "apply-link":
+            assert configuration.is_symlink()
         stop_index = next(index for index, command in enumerate(commands) if "stop" in command)
         migration_index = next(index for index, command in enumerate(commands) if "rm" in command)
         startup_index = next(index for index, command in enumerate(commands) if "up" in command)

@@ -21,7 +21,7 @@ docker() {
 
 
 @pytest.mark.parametrize("parent_mode", [0o700, 0o755])
-def test_backup_checks_native_permissions_before_database_access(
+def test_backup_accepts_accessible_parent_and_keeps_new_outputs_private(
     tmp_path: Path, parent_mode: int
 ) -> None:
     commands = tmp_path / "commands"
@@ -40,13 +40,6 @@ def test_backup_checks_native_permissions_before_database_access(
         text=True,
         check=False,
     )
-
-    if parent_mode != 0o700:
-        assert result.returncode == 2
-        assert "0700" in result.stderr
-        assert not commands.exists()
-        assert not backup.exists()
-        return
 
     assert result.returncode == 0, result.stdout + result.stderr
     dump = backup / "postgres.dump"

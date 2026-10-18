@@ -77,8 +77,8 @@ migrations and checks account IDs and passwords, agent-key digests and
 authentication, message IDs and ancestry, historical audit records, private
 recovery-key issuance, admin authentication, and a new message write. Address
 conversion must preserve the original glyph strings, including retired rows.
-The proof checks refusal and transaction rollback for a missing conversion
-file, invalid file permissions, and an incorrect old lookup secret. It also
+The proof checks transaction rollback for a missing conversion file and an
+incorrect old lookup secret. A read-only file through a symlink must work. It also
 checks that an unexpired old-format reply receipt causes a conflict on retry
 without another message, while a new write succeeds immediately.
 

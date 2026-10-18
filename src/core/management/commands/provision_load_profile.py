@@ -73,21 +73,14 @@ def _validated_existing_tmpfs_path(raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
         raise CommandError("--cleanup-manifest must be an absolute path on a tmpfs mount.")
-    if path.is_symlink():
-        raise CommandError("The load credential manifest must be a regular file.")
     try:
         path = path.resolve(strict=True)
     except OSError as error:
         raise CommandError("The load credential manifest does not exist.") from error
-    if not path.is_file() or path.is_symlink():
+    if not path.is_file():
         raise CommandError("The load credential manifest must be a regular file.")
     if _tmpfs_mount_for(path.parent) is None:
         raise CommandError("The load credential manifest is not on a verified tmpfs mount.")
-    status = path.stat()
-    if status.st_uid != os.geteuid():
-        raise CommandError("The load credential manifest must belong to the current user.")
-    if status.st_mode & 0o777 != 0o600:
-        raise CommandError("The load credential manifest must have mode 0600.")
     return path
 
 

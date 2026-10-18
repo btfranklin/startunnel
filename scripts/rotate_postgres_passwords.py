@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,19 +160,7 @@ def _require_absolute(path: Path, *, label: str) -> Path:
     return path
 
 
-def _require_private_directory(path: Path) -> None:
-    try:
-        status = path.lstat()
-    except OSError as error:
-        raise ValueError("The credential file directory is not accessible.") from error
-    if stat.S_ISLNK(status.st_mode) or not stat.S_ISDIR(status.st_mode):
-        raise ValueError("The credential file directory must be a non-symlink directory.")
-    if stat.S_IMODE(status.st_mode) & 0o077:
-        raise ValueError("The credential file directory must not allow group or other access.")
-
-
 def _write_exclusive(path: Path, value: str) -> None:
-    _require_private_directory(path.parent)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o600)
@@ -204,7 +191,6 @@ def write_rollback_bundle(path: Path, current: PasswordPair, replacement: Passwo
 def prepare_replacement_files(directory: Path) -> tuple[Path, Path]:
     """Create two new independent password files without displaying values."""
 
-    _require_private_directory(directory)
     admin_file = directory / "postgres_admin_password.new"
     runtime_file = directory / "postgres_runtime_password.new"
     created: list[Path] = []
@@ -341,6 +327,7 @@ def verify_transition(command: list[str], *, previous: PasswordPair, current: Pa
 
 
 def _atomic_replace_secret(path: Path, value: str) -> None:
+    path = path.resolve()
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(temporary, flags, 0o600)

@@ -165,7 +165,7 @@ instances cannot accept divergent writes under the same domain.
 3. Complete installation steps 1–5 with the recorded source commit and image.
    Pull that image using installation step 6, but **skip secret generation**.
    Do not start `web`, `maintenance`, or `migrate` yet.
-4. Copy the decrypted `recovered.tar` over SSH to a mode-`0700` directory on the
+4. Copy the decrypted `recovered.tar` over SSH to a private directory on the
    replacement server's encrypted disk. For example, create
    `/srv/startunnel/recovery-upload` with `install -d -o ubuntu -g ubuntu -m 700`
    on the server, then use `scp` from the workstation to that directory. Use

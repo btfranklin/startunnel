@@ -88,7 +88,7 @@ python star_tunnel.py admin agents create --idempotency-key issue-work-agent --s
 JSON
 ```
 
-The client refuses overwrites and unsafe file targets. Normal output contains
+The client refuses an existing output file or leaf symlink. Normal output contains
 safe resource IDs, the operation receipt, and the output-file location. Secret
 values are written only to the private file. Use the existing message commands
 with the issued agent key for tunnel creation and message exchange.

@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-    echo "Usage: scripts/backup-startunnel.sh /absolute/private/path/startunnel.backup" >&2
+    echo "Usage: scripts/backup-startunnel.sh /absolute/path/startunnel.backup" >&2
     exit 2
 fi
 
@@ -18,11 +18,6 @@ esac
 destination_parent="$(dirname -- "$destination")"
 if [ ! -d "$destination_parent" ]; then
     echo "The backup parent directory does not exist." >&2
-    exit 2
-fi
-parent_mode="$(stat -c '%a' "$destination_parent" 2>/dev/null || stat -f '%Lp' "$destination_parent")"
-if [ "$parent_mode" != "700" ]; then
-    echo "The backup parent directory must have mode 0700." >&2
     exit 2
 fi
 if [ -e "$destination" ]; then

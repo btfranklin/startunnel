@@ -105,7 +105,7 @@ def test_production_secret_preflight_inventory_matches_compose() -> None:
     assert set(PRODUCTION_SECRET_NAMES) == compose_secret_names
 
 
-@pytest.mark.parametrize("unsafe_kind", ["empty", "mode", "directory", "symlink"])
+@pytest.mark.parametrize("unsafe_kind", ["empty", "directory"])
 def test_production_secret_preflight_rejects_unsafe_sources(
     tmp_path: Path,
     unsafe_kind: str,
@@ -115,17 +115,29 @@ def test_production_secret_preflight_rejects_unsafe_sources(
     target = tmp_path / PRODUCTION_SECRET_NAMES[0]
     if unsafe_kind == "empty":
         target.write_text("", encoding="utf-8")
-    elif unsafe_kind == "mode":
-        target.chmod(0o640)
-    elif unsafe_kind == "directory":
-        target.unlink()
-        target.mkdir()
     else:
         target.unlink()
-        target.symlink_to(tmp_path / PRODUCTION_SECRET_NAMES[1])
+        target.mkdir()
 
     with pytest.raises(ValueError, match=PRODUCTION_SECRET_NAMES[0]):
         validate_production_secret_files(tmp_path)
+
+
+def test_production_secret_preflight_accepts_readonly_files_and_managed_links(
+    tmp_path: Path,
+) -> None:
+    for name in PRODUCTION_SECRET_NAMES:
+        _write_secret(tmp_path / name)
+    first = tmp_path / PRODUCTION_SECRET_NAMES[0]
+    first.chmod(0o400)
+    second = tmp_path / PRODUCTION_SECRET_NAMES[1]
+    second.unlink()
+    second.symlink_to(first)
+    linked_directory = tmp_path / "linked-directory"
+    linked_directory.symlink_to(tmp_path, target_is_directory=True)
+
+    validate_production_secret_files(linked_directory)
+    assert read_validated_secret_file(second) == "safe-test-secret"
 
 
 def test_secret_reader_rejects_multiline_and_binary_values(tmp_path: Path) -> None:

@@ -376,9 +376,12 @@ def test_load_manifest_paths_and_parser_fail_closed(
         ),
         encoding="utf-8",
     )
-    os.chmod(manifest, 0o600)
-    assert provision_load_profile._validated_existing_tmpfs_path(str(manifest)) == manifest
+    os.chmod(manifest, 0o400)
+    linked_manifest = tmp_path / "manifest-link.json"
+    linked_manifest.symlink_to(manifest)
+    assert provision_load_profile._validated_existing_tmpfs_path(str(linked_manifest)) == manifest
     assert provision_load_profile._load_run_id(manifest) == run_id
+    manifest.chmod(0o600)
     manifest.write_text('{"run_id":"bad"}', encoding="utf-8")
     with pytest.raises(CommandError, match="not valid"):
         provision_load_profile._load_run_id(manifest)

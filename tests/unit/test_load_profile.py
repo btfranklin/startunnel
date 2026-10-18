@@ -1,11 +1,41 @@
 """The fixed load workload stays paced and bounded under slow HTTP responses."""
 
 import asyncio
+import json
 import time
+from pathlib import Path
 
 import httpx
 import pytest
-from tests.load.profile import Credential, CredentialManifest, LoadConfig, run_load_profile
+from tests.load.profile import (
+    Credential,
+    CredentialManifest,
+    LoadConfig,
+    load_credential_manifest,
+    run_load_profile,
+)
+
+
+def test_load_manifest_accepts_readonly_symlinked_input(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "run_id": "proof-run",
+                "user_count": 1,
+                "credential_count": 1,
+                "credentials": [{"credential_id": "agent-1", "key": "st_disposable"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest.chmod(0o400)
+    linked_manifest = tmp_path / "linked-manifest.json"
+    linked_manifest.symlink_to(manifest)
+
+    assert load_credential_manifest(linked_manifest).credentials == (
+        Credential("agent-1", "st_disposable"),
+    )
 
 
 @pytest.mark.asyncio

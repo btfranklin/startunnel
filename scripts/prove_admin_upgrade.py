@@ -235,16 +235,17 @@ def upgraded(snapshot_path: Path) -> None:
         assert "address_digest" in columns and "address" not in columns
 
     os.environ.pop("STARTUNNEL_ADDRESS_MIGRATION_FILE", None)
-    rejected_conversion("Supply a mode-0600")
+    rejected_conversion("Supply a readable")
     os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"] = str(snapshot_path)
-    snapshot_path.chmod(0o644)
-    rejected_conversion("Supply a mode-0600")
-    snapshot_path.chmod(0o600)
     original = snapshot_path.read_text(encoding="utf-8")
     wrong = dict(expected, address_secret="incorrect-proof-secret")
     snapshot_path.write_text(json.dumps(wrong), encoding="utf-8")
-    rejected_conversion("Supply a mode-0600")
+    rejected_conversion("Supply a readable")
     snapshot_path.write_text(original, encoding="utf-8")
+    snapshot_path.chmod(0o400)
+    linked_snapshot = snapshot_path.with_name(snapshot_path.name + ".link")
+    linked_snapshot.symlink_to(snapshot_path)
+    os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"] = str(linked_snapshot)
     try:
         executor = MigrationExecutor(connection)
         executor.migrate(executor.loader.graph.leaf_nodes())

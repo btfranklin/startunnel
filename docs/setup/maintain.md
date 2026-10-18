@@ -54,7 +54,7 @@ docker compose exec -T web /app/.venv/bin/python manage.py recover_instance_admi
 
 Select an existing account and a new private container file. Recovery activates
 that account and issues a non-expiring key; it does not restore revoked keys.
-Transfer the file through an approved private channel, keep it at mode `0600`,
+Transfer the file through an approved private channel, keep it private,
 and remove the temporary container copy after transfer. Verify `admin me` and
 `admin doctor`, then inspect the `admin.recovered` audit event. The command does
 not recover deployment secrets or a lost database. Use the

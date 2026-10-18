@@ -60,29 +60,18 @@ def production_secret_directory(value: str | None = None) -> Path:
 
 
 def read_validated_secret_file(path: Path, *, name: str | None = None) -> str:
-    """Read one small text secret after strict filesystem checks."""
+    """Read one small text secret from an accessible regular file."""
 
     label = name or path.name
-    try:
-        path_status = path.lstat()
-    except OSError as error:
-        raise ValueError(f"Secret source {label!r} is not an accessible regular file.") from error
-    if stat.S_ISLNK(path_status.st_mode) or not stat.S_ISREG(path_status.st_mode):
-        raise ValueError(f"Secret source {label!r} must be a regular non-symlink file.")
-    if stat.S_IMODE(path_status.st_mode) != 0o600:
-        raise ValueError(f"Secret source {label!r} must have mode 0600.")
-
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
-        raise ValueError(f"Secret source {label!r} could not be opened safely.") from error
+        raise ValueError(f"Secret source {label!r} could not be opened.") from error
     try:
         opened_status = os.fstat(descriptor)
         if not stat.S_ISREG(opened_status.st_mode):
             raise ValueError(f"Secret source {label!r} must be a regular file.")
-        if stat.S_IMODE(opened_status.st_mode) != 0o600:
-            raise ValueError(f"Secret source {label!r} must have mode 0600.")
         data = os.read(descriptor, MAX_SECRET_FILE_BYTES + 1)
     finally:
         os.close(descriptor)
@@ -100,14 +89,10 @@ def read_validated_secret_file(path: Path, *, name: str | None = None) -> str:
 
 
 def validate_production_secret_files(directory: Path) -> None:
-    """Fail closed unless all enabled production secret sources are safe."""
+    """Check each enabled production secret source."""
 
-    try:
-        directory_status = directory.lstat()
-    except OSError as error:
-        raise ValueError("The production secret directory is not accessible.") from error
-    if stat.S_ISLNK(directory_status.st_mode) or not stat.S_ISDIR(directory_status.st_mode):
-        raise ValueError("The production secret directory must be a non-symlink directory.")
+    if not directory.is_dir():
+        raise ValueError("The production secret directory is not accessible.")
     for name in PRODUCTION_SECRET_NAMES:
         read_validated_secret_file(directory / name, name=name)
 

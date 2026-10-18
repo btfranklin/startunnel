@@ -14,7 +14,7 @@ docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin
 ```
 
 The file is inside the container. Transfer it through a private channel to the
-CLI machine, keep mode `0600`, and remove the temporary container copy. Follow
+CLI machine, keep the key private, and remove the temporary container copy. Follow
 the [admin quickstart](/docs/admin-quickstart/) to verify access.
 
 For interactive browser-password setup, omit both `-T` and `--key-file`. Choose

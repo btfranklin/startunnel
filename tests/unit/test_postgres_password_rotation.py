@@ -251,18 +251,14 @@ def test_database_passwords_are_sent_only_through_subprocess_input(
     assert observed["stderr"] is subprocess.DEVNULL
 
 
-def test_rollback_bundle_must_be_new_and_in_a_private_directory(tmp_path: Path) -> None:
+def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_path: Path) -> None:
     current = PasswordPair(admin="A" * 40, runtime="B" * 40)
     replacement = PasswordPair(admin="C" * 40, runtime="D" * 40)
     public_directory = tmp_path / "public"
     public_directory.mkdir(mode=0o755)
     public_directory.chmod(0o755)
-    with pytest.raises(ValueError, match="group or other"):
-        rotation.write_rollback_bundle(
-            public_directory / "rollback.json",
-            current,
-            replacement,
-        )
+    rotation.write_rollback_bundle(public_directory / "rollback.json", current, replacement)
+    assert (public_directory / "rollback.json").stat().st_mode & 0o777 == 0o600
 
     private_directory = tmp_path / "private"
     private_directory.mkdir(mode=0o700)
@@ -270,6 +266,11 @@ def test_rollback_bundle_must_be_new_and_in_a_private_directory(tmp_path: Path) 
     rotation.write_rollback_bundle(rollback_file, current, replacement)
     with pytest.raises(ValueError, match="must be a new regular file"):
         rotation.write_rollback_bundle(rollback_file, current, replacement)
+
+    linked_directory = tmp_path / "linked"
+    linked_directory.symlink_to(private_directory, target_is_directory=True)
+    rotation.write_rollback_bundle(linked_directory / "linked-rollback.json", current, replacement)
+    assert (private_directory / "linked-rollback.json").stat().st_mode & 0o777 == 0o600
 
 
 def test_prepare_creates_two_independent_non_echoing_inputs(tmp_path: Path) -> None:
@@ -313,12 +314,37 @@ def test_rollback_rejects_a_bundle_for_another_replacement(
         )
 
 
-def test_replacement_secret_files_require_mode_0600(tmp_path: Path) -> None:
+def test_replacement_secret_files_accept_readonly_and_symlinked_inputs(tmp_path: Path) -> None:
     admin = tmp_path / "admin"
     runtime = tmp_path / "runtime"
     _write_secret(admin, "A" * 40)
     _write_secret(runtime, "B" * 40)
-    runtime.chmod(0o640)
+    runtime.chmod(0o400)
+    linked_runtime = tmp_path / "runtime-link"
+    linked_runtime.symlink_to(runtime)
 
-    with pytest.raises(ValueError, match="mode 0600"):
-        rotation.read_replacement_pair(admin, runtime)
+    assert rotation.read_replacement_pair(admin, linked_runtime) == rotation.PasswordPair(
+        admin="A" * 40, runtime="B" * 40
+    )
+
+
+def test_replacement_keeps_managed_leaf_symlinks(tmp_path: Path) -> None:
+    secret_directory = tmp_path / "secrets"
+    secret_directory.mkdir()
+    target_directory = tmp_path / "managed"
+    target_directory.mkdir()
+    admin_target = target_directory / rotation.ADMIN_SECRET_NAME
+    runtime_target = target_directory / rotation.RUNTIME_SECRET_NAME
+    _write_secret(admin_target, "old-admin")
+    _write_secret(runtime_target, "old-runtime")
+    (secret_directory / rotation.ADMIN_SECRET_NAME).symlink_to(admin_target)
+    (secret_directory / rotation.RUNTIME_SECRET_NAME).symlink_to(runtime_target)
+
+    pair = PasswordPair(admin="A" * 40, runtime="B" * 40)
+    rotation.replace_secret_pair(secret_directory, pair)
+
+    assert (secret_directory / rotation.ADMIN_SECRET_NAME).is_symlink()
+    assert (secret_directory / rotation.RUNTIME_SECRET_NAME).is_symlink()
+    assert rotation.read_password_pair(secret_directory) == pair
+    assert admin_target.stat().st_mode & 0o777 == 0o600
+    assert runtime_target.stat().st_mode & 0o777 == 0o600

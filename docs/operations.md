@@ -28,8 +28,8 @@ docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin
 ```
 
 The new private file is inside the `web` container. Transfer it through the
-operator's approved private secret channel to the CLI machine. Preserve mode
-`0600`, then remove the temporary container copy. Do not print the key or put it
+operator's approved private secret channel to the CLI machine. Keep the copy
+private, then remove the temporary container copy. Do not print the key or put it
 in chat. The command refuses an existing account or file. Use the
 [admin quickstart](user/admin-quickstart.md) for CLI access and verification.
 
@@ -130,7 +130,7 @@ scripts/verify-startunnel-restore.sh /absolute/private/path/startunnel.backup
 ```
 
 The backup path is a directory with `postgres.dump` and `manifest.sha256`.
-The parent directory must have mode `0700`. The helper makes an online dump
+The parent directory must be accessible. The helper makes an online dump
 while the application stays available. It defaults to development Compose
 files unless `COMPOSE_FILE` is set. The database backup does not include the
 secret files required for recovery; preserve them as described in the

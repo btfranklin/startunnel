@@ -146,14 +146,14 @@ COMPOSE_PROJECT_NAME=startunnel-team
 COMPOSE_FILE=/opt/startunnel/compose.yaml:/opt/startunnel/compose.prod.yaml
 COMPOSE_PROFILES=edge
 EOF
-chmod 600 /opt/startunnel/production.env
 set -a
 . /opt/startunnel/production.env
 set +a
 ```
 
-Use only the hostname and image-reference formats shown above. This file is
-shell configuration owned by root. Do not put passwords or arbitrary pasted
+Use only the hostname and image-reference formats shown above. This file has
+no secret values. It can be a readable regular file or a managed symlink.
+Do not put passwords or arbitrary pasted
 commands in it. It is ignored by Git. Every new server shell must load this
 file before running production Compose or backup commands.
 
@@ -239,7 +239,7 @@ docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin
 
 This writes a new mode `0600` file inside the `web` container and refuses an
 existing file. Transfer it through an approved private secret channel to the
-admin agent's machine. Preserve mode `0600`, keep it outside Git, and remove
+admin agent's machine. Keep it private and outside Git, and remove
 the temporary container copy after transfer. Do not print the key or put it
 in chat. Use the [admin quickstart](../user/admin-quickstart.md) to connect
 with the downloaded CLI and verify `admin me` and `admin doctor`.

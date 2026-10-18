@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 import re
-import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -111,9 +110,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         if run(["git", "status", "--porcelain", "--untracked-files=no"], capture=True):
             raise ValueError("Resolve tracked source changes before upgrading.")
-        env_file = ROOT / "production.env"
-        if env_file.is_symlink() or stat.S_IMODE(env_file.stat().st_mode) != 0o600:
-            raise ValueError("production.env must be a regular file with mode 0600.")
+        env_file = (ROOT / "production.env").resolve(strict=True)
+        if not env_file.is_file():
+            raise ValueError("production.env must be a readable regular file.")
         text = env_file.read_text()
         old_image = validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
         if replace_image(text, old_image) != text:
@@ -188,11 +187,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if revision != record["source_commit"]:
             raise ValueError("New image revision label does not match the release record.")
-        saved = ROOT / f"production.env.before-{record['version']}"
+        saved = env_file.with_name(f"production.env.before-{record['version']}")
         with saved.open("x") as stream:
             os.chmod(saved, 0o600)
             stream.write(text)
-        temporary = ROOT / "production.env.upgrade"
+        temporary = env_file.with_name("production.env.upgrade")
         with temporary.open("x") as stream:
             os.chmod(temporary, 0o600)
             stream.write(new_text)
