@@ -21,6 +21,9 @@ LISTEN/NOTIFY ---- maintenance deadlines
   typed responses from domain results. Shared message, cycle, Beacon, and entry
   payloads keep their canonical serialization for byte accounting and retries.
 - Domain services in `accounts`, `agents`, and `tunnels` own business rules.
+- `accounts.admin_commands` owns typed admin inputs and their domain actions.
+- `accounts.admin_data` owns canonical admin resource data.
+- `tunnels.payloads` owns the typed text and JSON content shared by transports.
 - `tunnels.messages` owns message creation and tree reads.
 - `tunnels.cycles` owns tunnel creation, cycle lifecycle, and cycle status reads.
 - `tunnels.admin_actions` owns admin lifecycle controls and address changes.
@@ -48,6 +51,10 @@ Admin credentials belong to an admin account. Authentication checks the key and
 its active owner on each request. Admin writes and failed authentication use
 PostgreSQL-backed limits. The write limit is shared across an account's keys.
 Admin reads do not use the write allowance.
+
+Admin transports construct typed commands. Each command calls its domain action
+directly. Receipt execution uses a separate canonical request mapping so existing
+API serialization and browser field omissions keep the same request digest.
 
 Mutations require an idempotency key. A transaction stores the keyed request
 digest, safe result, target references, and audit-event ID with the domain change.

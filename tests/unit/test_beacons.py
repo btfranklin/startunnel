@@ -11,6 +11,8 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from accounts.admin_commands import BeaconWithdraw
+from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminOperation
 from core.cursors import decode_cursor, encode_cursor
@@ -434,12 +436,13 @@ def test_retention_clears_admin_beacon_summary_and_rejects_replay(
         text="Temporary Beacon text.",
     )
 
-    def withdraw() -> dict[str, Any]:
+    def withdraw() -> AdminOperationResult:
+        request_data = {"beacon_id": result["id"]}
         return execute_admin_operation(
             actor=creator.created_by,
-            operation="beacons.withdraw",
+            command=BeaconWithdraw.model_validate(request_data),
             key="withdraw-admin-retention",
-            data={"beacon_id": result["id"]},
+            request_data=request_data,
         )
 
     response = withdraw()

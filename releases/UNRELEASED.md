@@ -208,3 +208,6 @@ one cursor parser with the same request bindings and error codes.
 
 Immediate activity reads and wait continuations now share event queries and
 page construction. Each path keeps its authorization and cursor rules.
+
+Admin writes now use typed commands with explicit actions. Admin API responses
+use concrete response types. Existing retry fingerprints and JSON remain unchanged.

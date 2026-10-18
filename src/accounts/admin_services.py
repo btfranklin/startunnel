@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hmac
 import json
 import secrets
@@ -10,148 +9,43 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from django.conf import settings
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, connection, transaction
 from django.db.models import Prefetch
 from django.utils import timezone
 
 from agents.models import AgentCredential
-from agents.services import create_credential, revoke_credential
 from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
-from tunnels.admin_actions import (
-    close_cycle_as_admin,
-    retire_tunnel_as_admin,
-    retirement_confirmation,
-    rollover_cycle_as_admin,
-    rotate_address_as_admin,
-    start_cycle_as_admin,
-)
-from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_admin
+from tunnels.beacons import beacon_data, beacon_queryset
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
 from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
 
-from .admin_access import (
-    change_admin_state,
-    issue_admin_key,
-    validate_actor,
+from .admin_access import validate_actor
+from .admin_commands import AdminCommand, TunnelStart, derive_secret
+from .admin_data import (
+    AdminOperationResult,
+    AdminPageData,
+    AdminStatusData,
+    OperationReference,
+    _tunnel_list_resource,
+    admin_resource,
+    agent_resource,
+    audit_resource,
+    key_resource,
 )
 from .models import AdminCredential, AdminOperation, User
 
-ADMIN_OPERATION_TARGETS = {
-    "accounts.create": ("user", None),
-    "accounts.state": ("user", "admin_id"),
-    "accounts.password": ("user", "admin_id"),
-    "keys.create": ("user", "admin_id"),
-    "keys.revoke": ("admin_credential", "key_id"),
-    "agents.create": ("agent_credential", None),
-    "agents.revoke": ("agent_credential", "credential_id"),
-    "tunnels.start": ("tunnel", "tunnel_id"),
-    "tunnels.close": ("tunnel", "tunnel_id"),
-    "tunnels.rollover": ("tunnel", "tunnel_id"),
-    "tunnels.rotate": ("tunnel", "tunnel_id"),
-    "tunnels.retire": ("tunnel", "tunnel_id"),
-    "beacons.withdraw": ("beacon", "beacon_id"),
-}
 
-
-def admin_resource(account: User) -> dict[str, Any]:
-    return {
-        "id": str(account.id),
-        "username": account.username,
-        "active": account.is_active,
-        "browser_access": account.has_usable_password(),
-        "created_at": account.date_joined.isoformat(),
-    }
-
-
-def key_resource(key: AdminCredential) -> dict[str, Any]:
-    return {
-        "id": str(key.id),
-        "admin_id": str(key.owner_id),
-        "name": key.name,
-        "display_prefix": key.display_prefix,
-        "created_at": key.created_at.isoformat(),
-        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
-        "expires_at": key.expires_at.isoformat() if key.expires_at else None,
-        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
-        "available": key.owner.is_active
-        and key.revoked_at is None
-        and (key.expires_at is None or key.expires_at > timezone.now()),
-    }
-
-
-def agent_resource(key: AgentCredential) -> dict[str, Any]:
-    return {
-        "id": str(key.id),
-        "name": key.name,
-        "display_prefix": key.display_prefix,
-        "created_at": key.created_at.isoformat(),
-        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
-        "expires_at": key.expires_at.isoformat() if key.expires_at else None,
-        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
-        "available": key.is_available,
-    }
-
-
-def _serialize_tunnel(
-    tunnel: Tunnel, address: TunnelAddress | None, cycle: Cycle | None
-) -> dict[str, Any]:
-    return {
-        "id": str(tunnel.id),
-        "label": tunnel.label,
-        "state": tunnel.state,
-        "creator_id": str(tunnel.creator_id),
-        "created_at": tunnel.created_at.isoformat(),
-        "address": address.address if address else None,
-        "address_generation": address.generation if address else None,
-        "active_cycle_id": str(cycle.id) if cycle else None,
-        "retirement_confirmation": retirement_confirmation(tunnel),
-    }
-
-
-def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
-    address = TunnelAddress.objects.filter(tunnel=tunnel, state=TunnelAddress.State.CURRENT).first()
-    cycle = Cycle.objects.filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
-    return _serialize_tunnel(tunnel, address, cycle)
-
-
-def _tunnel_list_resource(tunnel: Tunnel) -> dict[str, Any]:
-    prefetched = cast(Any, tunnel)
-    addresses: list[TunnelAddress] = prefetched.current_addresses
-    cycles: list[Cycle] = prefetched.active_cycles
-    return _serialize_tunnel(
-        tunnel, addresses[0] if addresses else None, cycles[0] if cycles else None
-    )
-
-
-def audit_resource(event: AuditEvent) -> dict[str, Any]:
-    return {
-        "id": str(event.id),
-        "actor_id": str(event.actor_user_id) if event.actor_user_id else None,
-        "credential_id": str(event.actor_admin_credential_id or event.actor_credential_id)
-        if event.actor_admin_credential_id or event.actor_credential_id
-        else None,
-        "channel": event.channel,
-        "action": event.action,
-        "target_type": event.target_type,
-        "target_id": str(event.target_id) if event.target_id else None,
-        "request_id": str(event.request_id) if event.request_id else None,
-        "created_at": event.created_at.isoformat(),
-        "metadata": event.metadata,
-    }
-
-
-def admin_status() -> dict[str, Any]:
+def admin_status() -> AdminStatusData:
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -193,7 +87,7 @@ def list_admin_resources(
     target_type: str | None = None,
     target_id: UUID | None = None,
     credential_id: UUID | None = None,
-) -> dict[str, Any]:
+) -> AdminPageData:
     from core.cursors import decode_cursor, encode_cursor
 
     validate_actor(actor)
@@ -326,18 +220,7 @@ def list_admin_resources(
     }
 
 
-def _derived_secret(receipt: AdminOperation, kind: str) -> str:
-    raw = hmac.digest(
-        settings.IDEMPOTENCY_SECRET.encode(),
-        b"admin-secret:" + kind.encode() + receipt.id.bytes + bytes(receipt.derivation_nonce),
-        "sha256",
-    )
-    return ("sta_" if kind == "admin_key" else "st_") + base64.urlsafe_b64encode(
-        raw
-    ).decode().rstrip("=")
-
-
-def _replay(receipt: AdminOperation) -> dict[str, Any]:
+def _replay(receipt: AdminOperation) -> AdminOperationResult:
     response = dict(receipt.response)
     if receipt.operation == "beacons.withdraw":
         beacon = (
@@ -365,11 +248,11 @@ def _replay(receipt: AdminOperation) -> dict[str, Any]:
         secret = ""
         available = False
         if receipt.secret_kind == "admin_key":
-            secret = _derived_secret(receipt, receipt.secret_kind)
+            secret = derive_secret(receipt, receipt.secret_kind)
             row = AdminCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = row is not None and key_resource(row)["available"]
         elif receipt.secret_kind == "agent_key":
-            secret = _derived_secret(receipt, receipt.secret_kind)
+            secret = derive_secret(receipt, receipt.secret_kind)
             agent_row = AgentCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = agent_row is not None and agent_row.is_available
         if not available:
@@ -377,66 +260,46 @@ def _replay(receipt: AdminOperation) -> dict[str, Any]:
                 "This operation secret is no longer available. Inspect the resource."
             )
         response["secret"] = secret
-    return response
-
-
-def _id(data: dict[str, Any], field: str) -> UUID:
-    try:
-        return UUID(str(data[field]))
-    except (KeyError, ValueError, TypeError) as error:
-        raise InvalidRequest(f"Supply a valid {field}.") from error
-
-
-def _expiry(data: dict[str, Any]) -> datetime | None:
-    value = data.get("expires_at")
-    if value is None:
-        return None
-    try:
-        parsed = (
-            value
-            if isinstance(value, datetime)
-            else datetime.fromisoformat(value.replace("Z", "+00:00"))
-        )
-        if timezone.is_naive(parsed) or parsed <= timezone.now():
-            raise ValueError
-        return parsed
-    except (ValueError, TypeError, AttributeError) as error:
-        raise InvalidRequest("Supply a future expiry with a time zone.") from error
+    result = AdminOperationResult(
+        resource=response["resource"],
+        operation=OperationReference(
+            id=response["operation"]["id"],
+            audit_event_id=response["operation"]["audit_event_id"],
+        ),
+    )
+    if "secret" in response:
+        result["secret"] = response["secret"]
+    return result
 
 
 def execute_admin_operation(
     *,
     actor: User,
     credential: AdminCredential | None = None,
-    operation: str,
+    command: AdminCommand,
     key: str,
-    data: dict[str, Any],
-) -> dict[str, Any]:
+    request_data: dict[str, Any],
+) -> AdminOperationResult:
     try:
         consume_admin_operation(actor.id)
         return _execute_admin_operation(
-            actor=actor, credential=credential, operation=operation, key=key, data=data
+            actor=actor, credential=credential, command=command, key=key, request_data=request_data
         )
     except TunnelDomainError as error:
         with suppress(DatabaseError):
             if User.objects.filter(pk=actor.pk).exists():
-                target_type, field = ADMIN_OPERATION_TARGETS.get(
-                    operation, ("admin_operation", None)
-                )
-                target_id = None
-                if field is not None:
-                    with suppress(ValueError, TypeError):
-                        target_id = UUID(str(data.get(field)))
-                metadata = {"outcome": "failure", "code": error.code}
-                if operation in ADMIN_OPERATION_TARGETS:
-                    metadata["operation"] = operation
+                metadata = {
+                    "outcome": "failure",
+                    "code": error.code,
+                    "operation": command.operation,
+                }
                 record_event(
                     actor_user=actor,
                     actor_admin_credential=credential,
                     channel="admin_api" if credential else "browser",
                     action="admin.operation_failed",
-                    target_type=target_type,
-                    target_id=target_id,
+                    target_type=command.target_type,
+                    target_id=command.target_id,
                     metadata=metadata,
                 )
         raise
@@ -447,18 +310,20 @@ def _execute_admin_operation(
     *,
     actor: User,
     credential: AdminCredential | None = None,
-    operation: str,
+    command: AdminCommand,
     key: str,
-    data: dict[str, Any],
-) -> dict[str, Any]:
+    request_data: dict[str, Any],
+) -> AdminOperationResult:
     validate_idempotency_key(key)
-    if operation in {"tunnels.start", "tunnels.rollover"} and data.get("root_session") is None:
-        data = {field: value for field, value in data.items() if field != "root_session"}
+    if isinstance(command, TunnelStart) and request_data.get("root_session") is None:
+        request_data = {
+            field: value for field, value in request_data.items() if field != "root_session"
+        }
     actor = validate_actor(actor, credential)
     digest = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), key.encode(), "sha256")
     try:
         canonical = json.dumps(
-            {"operation": operation, "data": data},
+            {"operation": command.operation, "data": request_data},
             sort_keys=True,
             separators=(",", ":"),
             default=str,
@@ -468,7 +333,7 @@ def _execute_admin_operation(
         raise InvalidRequest("The request is not valid JSON.") from error
     request_digest = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), canonical, "sha256")
     defaults = {
-        "operation": operation,
+        "operation": command.operation,
         "request_digest": request_digest,
         "derivation_nonce": secrets.token_bytes(32),
         "expires_at": timezone.now() + timedelta(hours=24),
@@ -485,14 +350,14 @@ def _execute_admin_operation(
         receipt = AdminOperation.objects.create(owner=actor, key_digest=digest, **defaults)
     with admin_audit_context(credential, "admin_api" if credential else "browser"):
         try:
-            resource, target_type, target_id = _perform(actor, receipt, operation, data)
+            resource, target_type, target_id = command.perform(actor, receipt)
         except ObjectDoesNotExist as error:
             raise InvalidRequest("The requested admin resource is not available.") from error
     event = record_event(
         actor_user=actor,
         actor_admin_credential=credential,
         channel="admin_api" if credential else "browser",
-        action=operation,
+        action=command.operation,
         target_type=target_type,
         target_id=target_id,
         metadata={"operation_id": str(receipt.id), "outcome": "success"},
@@ -503,120 +368,3 @@ def _execute_admin_operation(
     }
     receipt.save(update_fields=["response", "secret_kind", "secret_resource_id"])
     return _replay(receipt)
-
-
-def _perform(
-    actor: User, receipt: AdminOperation, operation: str, data: dict[str, Any]
-) -> tuple[dict[str, Any], str, UUID]:
-    if operation == "accounts.create":
-        username = User.normalize_username(str(data.get("username", ""))).strip()
-        account = User(username=username)
-        password = data.get("password")
-        try:
-            account.full_clean(exclude={"password"})
-            if password:
-                validate_password(password, user=account)
-        except ValidationError as error:
-            raise InvalidRequest(" ".join(error.messages)) from error
-        account.set_password(password or None)
-        account.save()
-        resource = admin_resource(account)
-        if not password:
-            receipt.secret_kind = "admin_key"
-            created, _ = issue_admin_key(
-                owner=account,
-                name=str(data.get("key_name", "initial")),
-                key=_derived_secret(receipt, "admin_key"),
-            )
-            receipt.secret_resource_id = created.id
-            resource["initial_key"] = key_resource(created)
-        return resource, "user", account.id
-    if operation == "accounts.state":
-        if not isinstance(data.get("active"), bool) or not isinstance(
-            data.get("expected_active"), bool
-        ):
-            raise InvalidRequest("Supply active and expected_active as booleans.")
-        account = change_admin_state(
-            actor=actor,
-            admin_id=_id(data, "admin_id"),
-            active=data["active"],
-            expected_active=data["expected_active"],
-        )
-        return admin_resource(account), "user", account.id
-    if operation == "accounts.password":
-        account = User.objects.get(pk=_id(data, "admin_id"))
-        password = data.get("password")
-        if password:
-            try:
-                validate_password(password, user=account)
-            except ValidationError as error:
-                raise InvalidRequest(" ".join(error.messages)) from error
-        account.set_password(password or None)
-        account.save(update_fields=["password"])
-        return admin_resource(account), "user", account.id
-    if operation == "keys.create":
-        account = User.objects.get(pk=_id(data, "admin_id"))
-        receipt.secret_kind = "admin_key"
-        created, _ = issue_admin_key(
-            owner=account,
-            name=str(data.get("name", "")),
-            expires_at=_expiry(data),
-            key=_derived_secret(receipt, "admin_key"),
-        )
-        receipt.secret_resource_id = created.id
-        return key_resource(created), "admin_credential", created.id
-    if operation == "keys.revoke":
-        created = AdminCredential.objects.get(pk=_id(data, "key_id"))
-        created.revoked_at = created.revoked_at or timezone.now()
-        created.save(update_fields=["revoked_at"])
-        return key_resource(created), "admin_credential", created.id
-    if operation == "agents.create":
-        receipt.secret_kind = "agent_key"
-        issued = create_credential(
-            actor=actor,
-            name=str(data.get("name", "")),
-            expires_at=_expiry(data),
-            key=_derived_secret(receipt, "agent_key"),
-        )
-        receipt.secret_resource_id = issued.credential.id
-        return agent_resource(issued.credential), "agent_credential", issued.credential.id
-    if operation == "agents.revoke":
-        agent = AgentCredential.objects.get(pk=_id(data, "credential_id"))
-        revoke_credential(actor=actor, credential=agent)
-        agent.refresh_from_db()
-        return agent_resource(agent), "agent_credential", agent.id
-    if operation == "beacons.withdraw":
-        beacon_id = _id(data, "beacon_id")
-        resource = withdraw_beacon_as_admin(actor=actor, beacon_id=beacon_id)
-        return resource, "beacon", beacon_id
-    tunnel_id = _id(data, "tunnel_id")
-    common: dict[str, Any] = {"actor": actor, "tunnel_id": tunnel_id}
-    if operation == "tunnels.close":
-        close_cycle_as_admin(**common, expected_cycle_id=_id(data, "expected_cycle_id"))
-    elif operation in {"tunnels.start", "tunnels.rollover"}:
-        arguments = {
-            **common,
-            "expected_address_generation": data.get("expected_address_generation"),
-            "root_content": data.get("root_content", {}),
-            "root_session": data.get("root_session"),
-            "cycle_label": data.get("cycle_label", ""),
-            "expires_in_seconds": data.get("expires_in_seconds"),
-        }
-        if operation == "tunnels.rollover":
-            rollover_cycle_as_admin(**arguments, expected_cycle_id=_id(data, "expected_cycle_id"))
-        else:
-            start_cycle_as_admin(**arguments)
-    elif operation == "tunnels.rotate":
-        rotate_address_as_admin(
-            **common,
-            expected_address_generation=int(data["expected_address_generation"]),
-        )
-    elif operation == "tunnels.retire":
-        retire_tunnel_as_admin(
-            **common,
-            confirmation=str(data.get("confirmation", "")),
-            expected_address_generation=int(data["expected_address_generation"]),
-        )
-    else:
-        raise InvalidRequest("The admin operation is not supported.")
-    return tunnel_resource(Tunnel.objects.get(pk=tunnel_id)), "tunnel", tunnel_id

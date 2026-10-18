@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from tunnels.errors import TunnelDomainError
 
+from .admin_commands import AccountPassword
 from .admin_services import execute_admin_operation
 from .forms import ThrottledAuthenticationForm
 from .models import User
@@ -40,11 +41,15 @@ def password_change(request: HttpRequest) -> HttpResponse:
     key = request.POST.get("idempotency_key", "") if request.method == "POST" else str(uuid4())
     if request.method == "POST" and form.is_valid():
         try:
+            request_data = {
+                "admin_id": str(user.id),
+                "password": form.cleaned_data["new_password1"],
+            }
             result = execute_admin_operation(
                 actor=user,
-                operation="accounts.password",
+                command=AccountPassword.model_validate(request_data),
                 key=key,
-                data={"admin_id": str(user.id), "password": form.cleaned_data["new_password1"]},
+                request_data=request_data,
             )
         except TunnelDomainError as error:
             form.add_error(None, error.safe_message)

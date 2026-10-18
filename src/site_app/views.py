@@ -16,6 +16,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
+from accounts.admin_commands import (
+    AccountCreate,
+    AccountState,
+    AdminCommand,
+    AgentCreate,
+    AgentRevoke,
+    TunnelClose,
+    TunnelRetire,
+    TunnelRollover,
+    TunnelRotate,
+    TunnelStart,
+)
 from accounts.admin_services import admin_status, execute_admin_operation, list_admin_resources
 from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
@@ -121,14 +133,15 @@ def create_admin_account(request: HttpRequest) -> HttpResponse:
     form = InstanceAdminCreationForm(request.POST)
     if form.is_valid():
         try:
+            request_data = {
+                "username": form.cleaned_data["username"],
+                "password": form.cleaned_data["password1"] or None,
+            }
             result = execute_admin_operation(
                 actor=actor,
-                operation="accounts.create",
+                command=AccountCreate.model_validate(request_data),
                 key=request.POST.get("idempotency_key", ""),
-                data={
-                    "username": form.cleaned_data["username"],
-                    "password": form.cleaned_data["password1"] or None,
-                },
+                request_data=request_data,
             )
         except TunnelDomainError as error:
             form.add_error(None, str(error))
@@ -161,15 +174,16 @@ def set_admin_state(request: HttpRequest) -> HttpResponse:
     try:
         if request.POST.get("expected_active") not in {"on", ""}:
             raise InvalidRequest("Reload the account page before changing its state.")
+        request_data = {
+            "admin_id": str(form.cleaned_data["admin_id"]),
+            "active": form.cleaned_data["active"],
+            "expected_active": request.POST.get("expected_active") == "on",
+        }
         execute_admin_operation(
             actor=actor,
-            operation="accounts.state",
+            command=AccountState.model_validate(request_data),
             key=request.POST.get("idempotency_key", ""),
-            data={
-                "admin_id": str(form.cleaned_data["admin_id"]),
-                "active": form.cleaned_data["active"],
-                "expected_active": request.POST.get("expected_active") == "on",
-            },
+            request_data=request_data,
         )
     except TunnelDomainError as error:
         messages.error(request, str(error))
@@ -200,11 +214,12 @@ def create_agent(request: HttpRequest) -> HttpResponse:
     form = AgentCredentialForm(request.POST)
     if form.is_valid():
         try:
+            request_data = {"name": form.cleaned_data["name"]}
             result = execute_admin_operation(
                 actor=user,
-                operation="agents.create",
+                command=AgentCreate.model_validate(request_data),
                 key=request.POST.get("idempotency_key", ""),
-                data={"name": form.cleaned_data["name"]},
+                request_data=request_data,
             )
         except TunnelDomainError as error:
             form.add_error(None, str(error))
@@ -237,11 +252,12 @@ def revoke_agent(request: HttpRequest) -> HttpResponseRedirect:
         pk=credential_id,
     )
     try:
+        request_data = {"credential_id": str(credential.id)}
         execute_admin_operation(
             actor=user,
-            operation="agents.revoke",
+            command=AgentRevoke.model_validate(request_data),
             key=request.POST.get("idempotency_key", ""),
-            data={"credential_id": str(credential.id)},
+            request_data=request_data,
         )
     except TunnelDomainError as error:
         messages.error(request, str(error))
@@ -280,16 +296,25 @@ def tunnels(request: HttpRequest) -> HttpResponse:
                     data["root_session"] = form.cleaned_data["root_session"]
             if action == "retire":
                 data["confirmation"] = request.POST.get("confirmation", "")
-            if action in {"close", "start", "rollover", "rotate", "retire"}:
-                execute_admin_operation(
-                    actor=user,
-                    operation=f"tunnels.{action}",
-                    key=request.POST.get("idempotency_key", ""),
-                    data=data,
-                )
-                messages.success(request, "The tunnel operation is complete.")
+            if action == "close":
+                command: AdminCommand = TunnelClose.model_validate(data)
+            elif action == "start":
+                command = TunnelStart.model_validate(data)
+            elif action == "rollover":
+                command = TunnelRollover.model_validate(data)
+            elif action == "rotate":
+                command = TunnelRotate.model_validate(data)
+            elif action == "retire":
+                command = TunnelRetire.model_validate(data)
             else:
                 raise InvalidRequest("The tunnel action is not valid.")
+            execute_admin_operation(
+                actor=user,
+                command=command,
+                key=request.POST.get("idempotency_key", ""),
+                request_data=data,
+            )
+            messages.success(request, "The tunnel operation is complete.")
         except ValueError:
             messages.error(request, "That tunnel is not available.")
         except TunnelUnavailable:

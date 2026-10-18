@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from ninja import Field, HeaderEx, P, Schema
 from pydantic import ConfigDict
+
+from tunnels.payloads import MessageContent
 
 IdempotencyKey = HeaderEx[
     str,
@@ -22,17 +24,6 @@ class PublicSchema(Schema):
     model_config = ConfigDict(extra="forbid")
 
 
-class TextContent(PublicSchema):
-    type: Literal["text"]
-    text: str = Field(examples=["Ready for review."])
-
-
-class JsonContent(PublicSchema):
-    type: Literal["json"]
-    value: Any = Field(examples=[{"task": "review", "artifact": "report-42"}])
-
-
-MessageContent = Annotated[TextContent | JsonContent, Field(discriminator="type")]
 ActivityEventType = Literal[
     "message_posted",
     "cycle_started",

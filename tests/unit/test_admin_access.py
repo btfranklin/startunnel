@@ -13,8 +13,25 @@ from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.utils import timezone
+from pydantic import ValidationError as CommandValidationError
 
 from accounts.admin_access import authenticate_admin_key, issue_admin_key
+from accounts.admin_commands import (
+    AccountCreate,
+    AccountPassword,
+    AccountState,
+    AdminCommand,
+    AgentCreate,
+    AgentRevoke,
+    KeyCreate,
+    KeyRevoke,
+    TunnelClose,
+    TunnelRetire,
+    TunnelRollover,
+    TunnelRotate,
+    TunnelStart,
+)
+from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import AdminCredential, AdminOperation, User
 from tunnels.errors import IdempotencyConflict, InvalidCredential, InvalidRequest, LifecycleConflict
@@ -24,10 +41,13 @@ pytestmark = pytest.mark.django_db
 
 
 def run(
-    actor: User, operation: str, data: dict[str, Any], key: str | None = None
-) -> dict[str, Any]:
+    actor: User, command_type: type[AdminCommand], data: dict[str, Any], key: str | None = None
+) -> AdminOperationResult:
     return execute_admin_operation(
-        actor=actor, operation=operation, key=key or str(uuid4()), data=data
+        actor=actor,
+        command=command_type.model_validate(data),
+        key=key or str(uuid4()),
+        request_data=data,
     )
 
 
@@ -45,7 +65,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
     )
     run(
         actor,
-        "tunnels.close",
+        TunnelClose,
         {"tunnel_id": str(created.tunnel.id), "expected_cycle_id": str(created.cycle.id)},
     )
     data = {
@@ -56,7 +76,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
         "expires_in_seconds": None,
     }
     key = "admin-session-retry"
-    first = run(actor, "tunnels.start", data, key)
+    first = run(actor, TunnelStart, data, key)
     old_body = json.dumps(
         {"operation": "tunnels.start", "data": data},
         sort_keys=True,
@@ -67,9 +87,9 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
     expected = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), old_body, "sha256")
     receipt = AdminOperation.objects.get(pk=first["operation"]["id"])
     assert bytes(receipt.request_digest) == expected
-    assert run(actor, "tunnels.start", {**data, "root_session": None}, key) == first
+    assert run(actor, TunnelStart, {**data, "root_session": None}, key) == first
     with pytest.raises(IdempotencyConflict):
-        run(actor, "tunnels.start", {**data, "root_session": "chat-a"}, key)
+        run(actor, TunnelStart, {**data, "root_session": "chat-a"}, key)
 
     from tunnels.models import Cycle
 
@@ -77,7 +97,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
     assert cycle.root_message is not None and cycle.root_message.session is None
     labeled = run(
         actor,
-        "tunnels.rollover",
+        TunnelRollover,
         {
             **data,
             "expected_cycle_id": str(cycle.id),
@@ -95,8 +115,8 @@ def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
     actor = user_factory()
     key = str(uuid4())
     data = {"username": "automation", "key_name": "runner"}
-    created = run(actor, "accounts.create", data, key)
-    assert run(actor, "accounts.create", data, key) == created
+    created = run(actor, AccountCreate, data, key)
+    assert run(actor, AccountCreate, data, key) == created
     target = User.objects.get(pk=created["resource"]["id"])
     assert not target.has_usable_password()
     credential = authenticate_admin_key(created["secret"])
@@ -107,25 +127,25 @@ def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
     assert event.actor_user == actor
     assert event.channel == "browser"
     with pytest.raises(IdempotencyConflict):
-        run(actor, "accounts.create", {"username": "different"}, key)
+        run(actor, AccountCreate, {"username": "different"}, key)
     with pytest.raises(LifecycleConflict):
         run(
             actor,
-            "accounts.state",
+            AccountState,
             {"admin_id": str(target.id), "active": False, "expected_active": False},
         )
     run(
         actor,
-        "accounts.state",
+        AccountState,
         {"admin_id": str(target.id), "active": False, "expected_active": True},
     )
     with pytest.raises(InvalidCredential):
         authenticate_admin_key(created["secret"])
     with pytest.raises(LifecycleConflict):
-        run(actor, "accounts.create", data, key)
+        run(actor, AccountCreate, data, key)
     run(
         actor,
-        "accounts.state",
+        AccountState,
         {"admin_id": str(target.id), "active": True, "expected_active": False},
     )
     assert AdminCredential.objects.get(pk=credential.id).revoked_at is not None
@@ -147,12 +167,13 @@ def test_admin_key_isolation_expiry_and_stale_actor(
     with pytest.raises(InvalidCredential):
         authenticate_admin_key(secret)
     with pytest.raises(InvalidCredential):
+        request_data = {"name": "unused"}
         execute_admin_operation(
             actor=actor,
             credential=credential,
-            operation="agents.create",
+            command=AgentCreate.model_validate(request_data),
             key=str(uuid4()),
-            data={"name": "unused"},
+            request_data=request_data,
         )
 
 
@@ -164,20 +185,21 @@ def test_creation_validation_and_cursor(user_factory: Any) -> None:
         {"username": "short", "password": "x"},
     ]:
         with pytest.raises(InvalidRequest):
-            run(actor, "accounts.create", data)
+            run(actor, AccountCreate, data)
     created = run(
         actor,
-        "accounts.create",
+        AccountCreate,
         {"username": "password-user", "password": "proper-long-password-8295"},
     )
     assert "secret" not in created
+    with pytest.raises(InvalidRequest):
+        run(actor, KeyCreate, {"admin_id": str(actor.id), "name": ""})
     for data in [
-        {"admin_id": str(actor.id), "name": ""},
         {"admin_id": str(actor.id), "name": "expired", "expires_at": "yesterday"},
         {"admin_id": "bad", "name": "invalid"},
     ]:
-        with pytest.raises(InvalidRequest):
-            run(actor, "keys.create", data)
+        with pytest.raises(CommandValidationError):
+            run(actor, KeyCreate, data)
     page = list_admin_resources("accounts", actor=actor, limit=1)
     assert page["next_cursor"]
     rest = list_admin_resources("accounts", actor=actor, limit=1, cursor=page["next_cursor"])
@@ -193,30 +215,31 @@ def test_receipts_are_owner_scoped_and_keys_replay_only_when_available(user_fact
     actor = user_factory()
     replacement, _ = issue_admin_key(owner=actor, name="replacement")
     key = str(uuid4())
-    result = run(actor, "agents.create", {"name": "worker"}, key)
+    result = run(actor, AgentCreate, {"name": "worker"}, key)
+    request_data = {"name": "worker"}
     assert (
         execute_admin_operation(
             actor=actor,
             credential=replacement,
-            operation="agents.create",
+            command=AgentCreate.model_validate(request_data),
             key=key,
-            data={"name": "worker"},
+            request_data=request_data,
         )["secret"]
         == result["secret"]
     )
-    run(actor, "agents.revoke", {"credential_id": result["resource"]["id"]})
+    run(actor, AgentRevoke, {"credential_id": result["resource"]["id"]})
     with pytest.raises(LifecycleConflict):
-        run(actor, "agents.create", {"name": "worker"}, key)
+        run(actor, AgentCreate, {"name": "worker"}, key)
     other = user_factory()
     assert (
-        run(other, "agents.create", {"name": "worker"}, key)["operation"]["id"]
+        run(other, AgentCreate, {"name": "worker"}, key)["operation"]["id"]
         != result["operation"]["id"]
     )
     receipt = AdminOperation.objects.get(pk=result["operation"]["id"])
     receipt.expires_at = timezone.now() - timedelta(seconds=1)
     receipt.save(update_fields=["expires_at"])
     assert (
-        run(actor, "agents.create", {"name": "worker"}, key)["operation"]["id"]
+        run(actor, AgentCreate, {"name": "worker"}, key)["operation"]["id"]
         != result["operation"]["id"]
     )
 
@@ -243,7 +266,7 @@ def test_bootstrap_and_recovery_private_files(tmp_path: Any) -> None:
 def test_tunnel_operations_replay_and_revoked_addresses(
     user_factory: Any, credential_factory: Any
 ) -> None:
-    from accounts.admin_services import tunnel_resource
+    from accounts.admin_data import tunnel_resource
     from tunnels.cycles import create_tunnel
 
     actor = user_factory()
@@ -259,12 +282,12 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     assert inspected["address"] == created.address
     run(
         actor,
-        "tunnels.close",
+        TunnelClose,
         {"tunnel_id": identifier, "expected_cycle_id": inspected["active_cycle_id"]},
     )
     run(
         actor,
-        "tunnels.start",
+        TunnelStart,
         {
             "tunnel_id": identifier,
             "expected_address_generation": 1,
@@ -274,7 +297,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     inspected = tunnel_resource(created.tunnel)
     rolled = run(
         actor,
-        "tunnels.rollover",
+        TunnelRollover,
         {
             "tunnel_id": identifier,
             "expected_cycle_id": inspected["active_cycle_id"],
@@ -285,24 +308,24 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     assert rolled["resource"]["active_cycle_id"] != inspected["active_cycle_id"]
     key = str(uuid4())
     data = {"tunnel_id": identifier, "expected_address_generation": 1}
-    rotated = run(actor, "tunnels.rotate", data, key)
+    rotated = run(actor, TunnelRotate, data, key)
     assert rotated["resource"]["address_generation"] == 2
     assert rotated["resource"]["address"]
     assert "secret" not in rotated
-    assert run(actor, "tunnels.rotate", data, key) == rotated
+    assert run(actor, TunnelRotate, data, key) == rotated
     run(
         actor,
-        "tunnels.rotate",
+        TunnelRotate,
         {"tunnel_id": identifier, "expected_address_generation": 2},
         str(uuid4()),
     )
     with pytest.raises(LifecycleConflict):
-        run(actor, "tunnels.rotate", data, key)
+        run(actor, TunnelRotate, data, key)
     assert list_admin_resources("cycles", actor=actor, tunnel_id=created.tunnel.id)["items"]
     current = tunnel_resource(created.tunnel)
     run(
         actor,
-        "tunnels.retire",
+        TunnelRetire,
         {
             "tunnel_id": identifier,
             "confirmation": "admin-cycle",
@@ -310,7 +333,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
         },
     )
     with pytest.raises(LifecycleConflict):
-        run(actor, "tunnels.rotate", data, key)
+        run(actor, TunnelRotate, data, key)
     assert (
         list_admin_resources("tunnels", actor=actor, state="retired")["items"][0]["id"]
         == identifier
@@ -342,12 +365,12 @@ def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
 
     run(
         actor,
-        "tunnels.close",
+        TunnelClose,
         {"tunnel_id": str(created.tunnel.id), "expected_cycle_id": str(created.cycle.id)},
     )
     started = run(
         actor,
-        "tunnels.start",
+        TunnelStart,
         {
             "tunnel_id": str(created.tunnel.id),
             "expected_address_generation": 1,
@@ -357,7 +380,7 @@ def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
     started_cycle_id = started["resource"]["active_cycle_id"]
     rolled = run(
         actor,
-        "tunnels.rollover",
+        TunnelRollover,
         {
             "tunnel_id": str(created.tunnel.id),
             "expected_cycle_id": started_cycle_id,
@@ -386,35 +409,40 @@ def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
     actor = user_factory()
     initial = User.objects.count()
     with pytest.raises(InvalidRequest):
-        run(actor, "accounts.create", {"username": "invalid-key-owner", "key_name": ""})
+        run(actor, AccountCreate, {"username": "invalid-key-owner", "key_name": ""})
     assert User.objects.count() == initial
     assert AdminOperation.objects.count() == 0
-    cases: list[tuple[str, dict[str, Any]]] = [
-        ("accounts.state", {"admin_id": str(actor.id), "active": True}),
-        ("accounts.password", {"admin_id": str(actor.id), "password": "x"}),
+    cases: list[tuple[type[AdminCommand], dict[str, Any]]] = [
+        (AccountPassword, {"admin_id": str(actor.id), "password": "x"}),
         (
-            "keys.create",
+            KeyCreate,
             {
                 "admin_id": str(actor.id),
                 "name": "past",
                 "expires_at": (timezone.now() - timedelta(seconds=1)).isoformat(),
             },
         ),
-        ("keys.revoke", {"key_id": str(uuid4())}),
-        ("unknown", {"tunnel_id": str(uuid4())}),
+        (KeyRevoke, {"key_id": str(uuid4())}),
     ]
-    for operation, data in cases:
+    for command_type, data in cases:
         with pytest.raises(InvalidRequest):
-            run(actor, operation, data)
+            run(actor, command_type, data)
+    with pytest.raises(CommandValidationError):
+        AccountState.model_validate({"admin_id": actor.id, "active": True})
     with pytest.raises(InvalidRequest):
-        run(actor, "agents.create", {"name": "nonfinite", "bad": float("nan")})
+        execute_admin_operation(
+            actor=actor,
+            command=AgentCreate(name="nonfinite"),
+            key=str(uuid4()),
+            request_data={"name": "nonfinite", "bad": float("nan")},
+        )
     assert AdminOperation.objects.count() == 0
 
 
 def test_audit_pages_are_chronological_and_filtered(user_factory: Any) -> None:
     actor = user_factory()
-    first = run(actor, "agents.create", {"name": "first"})
-    second = run(actor, "agents.create", {"name": "second"})
+    first = run(actor, AgentCreate, {"name": "first"})
+    second = run(actor, AgentCreate, {"name": "second"})
     page = list_admin_resources("audit", actor=actor, limit=1, action="agents.create")
     assert page["items"][0]["id"] == second["operation"]["audit_event_id"]
     other = list_admin_resources(
@@ -442,12 +470,13 @@ def test_safe_failure_audit_and_filters(user_factory: Any) -> None:
     actor = user_factory()
     credential, _ = issue_admin_key(owner=actor, name="automation")
     with pytest.raises(LifecycleConflict):
+        request_data = {"admin_id": str(actor.id), "active": False, "expected_active": False}
         execute_admin_operation(
             actor=actor,
             credential=credential,
-            operation="accounts.state",
+            command=AccountState.model_validate(request_data),
             key=str(uuid4()),
-            data={"admin_id": str(actor.id), "active": False, "expected_active": False},
+            request_data=request_data,
         )
     event = AuditEvent.objects.get(action="admin.operation_failed")
     assert event.actor_admin_credential == credential

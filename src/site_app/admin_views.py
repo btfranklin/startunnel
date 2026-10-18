@@ -10,13 +10,15 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST, require_safe
 
+from accounts.admin_commands import AccountPassword, AdminCommand, KeyCreate, KeyRevoke
+from accounts.admin_data import AdminOperationResult, OperationReference
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import User
 from tunnels.errors import TunnelDomainError
 
 
 def private_download(
-    secret: str, filename: str, operation: dict[str, str] | None = None
+    secret: str, filename: str, operation: OperationReference | None = None
 ) -> HttpResponse:
     response = HttpResponse(secret + "\n", content_type="application/octet-stream")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -28,14 +30,16 @@ def private_download(
     return response
 
 
-def browser_operation(request: HttpRequest, operation: str, data: dict[str, Any]) -> dict[str, Any]:
+def browser_operation(
+    request: HttpRequest, command_type: type[AdminCommand], data: dict[str, Any]
+) -> AdminOperationResult:
     if not isinstance(request.user, User):
         raise Http404
     return execute_admin_operation(
         actor=request.user,
-        operation=operation,
+        command=command_type.model_validate(data),
         key=request.POST.get("idempotency_key", ""),
-        data=data,
+        request_data=data,
     )
 
 
@@ -48,7 +52,7 @@ def admin_access(request: HttpRequest) -> HttpResponse:
         if action == "create-key":
             result = browser_operation(
                 request,
-                "keys.create",
+                KeyCreate,
                 {
                     "admin_id": admin_id,
                     "name": request.POST.get("name", ""),
@@ -59,12 +63,12 @@ def admin_access(request: HttpRequest) -> HttpResponse:
                 result["secret"], "startunnel-admin-key.txt", result["operation"]
             )
         if action == "revoke-key":
-            browser_operation(request, "keys.revoke", {"key_id": request.POST.get("key_id", "")})
+            browser_operation(request, KeyRevoke, {"key_id": request.POST.get("key_id", "")})
             messages.success(request, "The admin key was revoked.")
         elif action in {"set-password", "remove-password"}:
             password = request.POST.get("password", "") if action == "set-password" else None
             browser_operation(
-                request, "accounts.password", {"admin_id": admin_id, "password": password}
+                request, AccountPassword, {"admin_id": admin_id, "password": password}
             )
             messages.success(request, "Browser access was updated. Sign in again if required.")
         else:

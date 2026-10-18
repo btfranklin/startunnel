@@ -8,13 +8,24 @@ import pytest
 from scripts import check_structure
 
 
-@pytest.mark.parametrize("owner", ["messages", "cycles", "admin_actions"])
-@pytest.mark.parametrize("dependency", ["django.http", "django.template", "openai"])
+@pytest.mark.parametrize(
+    ("package_name", "owner"),
+    [
+        ("tunnels", "messages"),
+        ("tunnels", "cycles"),
+        ("tunnels", "admin_actions"),
+        ("tunnels", "payloads"),
+        ("accounts", "admin_commands"),
+        ("accounts", "admin_data"),
+        ("accounts", "admin_services"),
+    ],
+)
+@pytest.mark.parametrize("dependency", ["api", "ninja", "django.http", "django.template", "openai"])
 def test_domain_owners_reject_transport_and_provider_imports(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner: str, dependency: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package_name: str, owner: str, dependency: str
 ) -> None:
     source = tmp_path / "src"
-    package = source / "tunnels"
+    package = source / package_name
     package.mkdir(parents=True)
     module = package / f"{owner}.py"
     module.write_text(f"import {dependency}\n", encoding="utf-8")

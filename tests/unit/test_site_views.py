@@ -186,7 +186,7 @@ def test_agent_page_renders_form_and_domain_errors(
     client.force_login(user_factory())
     assert client.post("/app/agents/create/", {"name": ""}).status_code == 400
     monkeypatch.setattr(
-        "accounts.admin_services.create_credential",
+        "accounts.admin_commands.create_credential",
         lambda **kwargs: (_ for _ in ()).throw(QuotaExceeded("No capacity.")),
     )
     response = client.post(

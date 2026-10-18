@@ -4,12 +4,31 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import InvalidRequest, PayloadTooLarge
 
 MAX_DEPTH = 32
 MAX_BYTES = 65_536
+
+
+class TextContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text"]
+    text: str = Field(examples=["Ready for review."])
+
+
+class JsonContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["json"]
+    value: Any = Field(examples=[{"task": "review", "artifact": "report-42"}])
+
+
+MessageContent = Annotated[TextContent | JsonContent, Field(discriminator="type")]
 
 
 @dataclass(frozen=True, slots=True)

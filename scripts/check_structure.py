@@ -61,17 +61,25 @@ def check_import_directions() -> list[Failure]:
                         "A model imports an API or browser-layer module.",
                     )
                 )
-        if path.name == "services.py" or (
-            path.parent.name == "tunnels"
-            and path.name
-            in {
-                "access.py",
-                "admin_actions.py",
-                "cycles.py",
-                "idempotency.py",
-                "maintenance.py",
-                "messages.py",
-            }
+        if (
+            path.name == "services.py"
+            or (
+                path.parent.name == "tunnels"
+                and path.name
+                in {
+                    "access.py",
+                    "admin_actions.py",
+                    "cycles.py",
+                    "idempotency.py",
+                    "maintenance.py",
+                    "messages.py",
+                    "payloads.py",
+                }
+            )
+            or (
+                path.parent.name == "accounts"
+                and path.name in {"admin_commands.py", "admin_data.py", "admin_services.py"}
+            )
         ):
             forbidden = sorted(name for name in imports if name.startswith(service_forbidden))
             if forbidden:
