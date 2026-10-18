@@ -140,14 +140,14 @@ def test_real_postgres_rejects_old_credentials_and_accepts_rollback() -> None:
                 _CHECK_CREDENTIAL_PROGRAM,
                 _check_payload(connection, role=admin_role, password=old_admin),
             )
-            != 0
+            == 10
         )
         assert (
             _run_program(
                 _CHECK_CREDENTIAL_PROGRAM,
                 _check_payload(connection, role=runtime_role, password=old_runtime),
             )
-            != 0
+            == 10
         )
         assert (
             _run_program(
@@ -197,14 +197,14 @@ def test_real_postgres_rejects_old_credentials_and_accepts_rollback() -> None:
                 _CHECK_CREDENTIAL_PROGRAM,
                 _check_payload(connection, role=admin_role, password=new_admin),
             )
-            != 0
+            == 10
         )
         assert (
             _run_program(
                 _CHECK_CREDENTIAL_PROGRAM,
                 _check_payload(connection, role=runtime_role, password=new_runtime),
             )
-            != 0
+            == 10
         )
     finally:
         with psycopg.connect(database_url, autocommit=True) as database:

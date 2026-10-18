@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 from scripts import rotate_postgres_passwords as rotation
 from scripts.rotate_postgres_passwords import PasswordPair, RotationError
@@ -171,7 +175,7 @@ def test_failed_restart_restores_the_previous_pair(
         fail_first_restart=True,
     )
 
-    with pytest.raises(RotationError, match="previous credentials are active"):
+    with pytest.raises(RotationError, match="previous credentials are active") as failure:
         rotation.rotate(
             directory=secret_directory,
             new_admin_file=new_admin_file,
@@ -180,6 +184,7 @@ def test_failed_restart_restores_the_previous_pair(
             command=["safe-compose"],
         )
 
+    assert "safe simulated restart failure" in str(failure.value)
     assert state["pair"] == old
     assert rotation.read_password_pair(secret_directory) == old
     assert events == [
@@ -249,7 +254,102 @@ def test_database_passwords_are_sent_only_through_subprocess_input(
     assert authentication_password in observed["input"]
     assert "env" not in observed
     assert observed["stdout"] is subprocess.DEVNULL
-    assert observed["stderr"] is subprocess.DEVNULL
+    assert "stderr" not in observed
+
+
+def test_credential_check_distinguishes_rejection_from_database_and_compose_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = 10
+    monkeypatch.setattr(rotation, "_run_private_input", lambda *args, **kwargs: result)
+    assert not rotation.credential_works(["safe-compose"], role="startunnel", password="test")
+
+    result = 11
+    with pytest.raises(RotationError, match="exit status 11"):
+        rotation.credential_works(["safe-compose"], role="startunnel", password="test")
+
+    result = 125
+    with pytest.raises(RotationError, match="exit status 125"):
+        rotation.credential_works(["safe-compose"], role="startunnel", password="test")
+
+
+def test_database_child_reports_safe_failure_without_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "host": "postgres",
+        "port": "5432",
+        "database": "startunnel",
+        "admin_role": "startunnel_admin",
+        "runtime_role": "startunnel",
+        "authenticate_with": "synthetic-old",
+        "admin_password": "synthetic-new-admin",
+        "runtime_password": "synthetic-new-runtime",
+        "role": "startunnel",
+        "password": "synthetic-password",
+    }
+
+    def execute(program: str, error: psycopg.Error) -> tuple[int, str]:
+        def fail_connect(**kwargs: Any) -> None:
+            raise error
+
+        monkeypatch.setattr(psycopg, "connect", fail_connect)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        with pytest.raises(SystemExit) as exit_status:
+            exec(program, {})
+        code = exit_status.value.code
+        assert isinstance(code, int)
+        return code, capsys.readouterr().err
+
+    code, diagnostic = execute(
+        rotation._UPDATE_ROLES_PROGRAM,
+        psycopg.errors.InsufficientPrivilege("sensitive synthetic exception text"),
+    )
+    assert code == 11
+    assert "InsufficientPrivilege" in diagnostic
+    assert "42501" in diagnostic
+    assert "sensitive synthetic exception text" not in diagnostic
+
+    code, diagnostic = execute(
+        rotation._CHECK_CREDENTIAL_PROGRAM,
+        psycopg.OperationalError("FATAL: password authentication failed for user synthetic"),
+    )
+    assert code == 10
+    assert diagnostic == ""
+
+    code, diagnostic = execute(
+        rotation._CHECK_CREDENTIAL_PROGRAM,
+        psycopg.OperationalError("connection refused; sensitive synthetic exception text"),
+    )
+    assert code == 11
+    assert "OperationalError" in diagnostic
+    assert "SQLSTATE none" in diagnostic
+    assert "sensitive synthetic exception text" not in diagnostic
+
+
+def test_compose_restart_and_inspection_show_normal_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        assert "stdout" not in kwargs
+        assert "stderr" not in kwargs
+        print("safe Compose diagnostic", file=sys.stderr)
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(RotationError, match="did not restart cleanly"):
+        rotation.restart_database_clients(["safe-compose"])
+    with pytest.raises(RotationError, match="did not pass runtime inspection"):
+        rotation.inspect_runtime(["safe-compose"])
+
+    assert "safe Compose diagnostic" in capsys.readouterr().err
+    assert commands[0][1] == "up"
+    assert commands[1][1] == "exec"
 
 
 def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_path: Path) -> None:

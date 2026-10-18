@@ -175,3 +175,35 @@ Do not rewrite applied migrations. Confirm the installed source and migration
 prefix before an upgrade, then test a restored backup. Other migration graphs
 need an explicit conversion. See [release policy](releases.md). Admin accounts
 are not editable in Django admin because that would bypass access protection.
+
+## Rotate PostgreSQL passwords
+
+Use the configured production shell from [Maintain the instance](setup/maintain.md#start-each-server-session).
+Make a verified backup and select a new private directory for each rotation.
+The helper writes new password files without showing their values. It saves a
+private rollback file before it changes either database role.
+
+```shell
+umask 077
+mkdir -m 0700 /srv/startunnel/password-rotation
+python3 scripts/rotate_postgres_passwords.py prepare --directory /srv/startunnel/password-rotation
+python3 scripts/rotate_postgres_passwords.py rotate \
+  --new-admin-file /srv/startunnel/password-rotation/postgres_admin_password.new \
+  --new-runtime-file /srv/startunnel/password-rotation/postgres_runtime_password.new \
+  --rollback-file /srv/startunnel/password-rotation/rollback.json
+```
+
+The helper tests both new passwords, replaces the secret files, restarts the
+database clients, and checks the running application. If a step fails, it
+tries to restore the prior passwords. Read the database and Compose errors
+shown on stderr. If automatic restore does not complete, correct the reported
+fault and run the saved rollback command:
+
+```shell
+python3 scripts/rotate_postgres_passwords.py rollback \
+  --rollback-file /srv/startunnel/password-rotation/rollback.json
+```
+
+The rollback command also reverses an accepted rotation. Keep the rollback
+file private until the new credentials pass the production checks. Do not put
+the password values in commands or shell history.

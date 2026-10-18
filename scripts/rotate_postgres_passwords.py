@@ -43,27 +43,34 @@ import psycopg
 from psycopg import sql
 
 payload = json.load(sys.stdin)
-with psycopg.connect(
-    host=payload["host"],
-    port=payload["port"],
-    dbname=payload["database"],
-    user=payload["admin_role"],
-    password=payload["authenticate_with"],
-    connect_timeout=5,
-) as connection:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            sql.SQL("ALTER ROLE {} PASSWORD {}").format(
-                sql.Identifier(payload["admin_role"]),
-                sql.Literal(payload["admin_password"]),
+try:
+    with psycopg.connect(
+        host=payload["host"],
+        port=payload["port"],
+        dbname=payload["database"],
+        user=payload["admin_role"],
+        password=payload["authenticate_with"],
+        connect_timeout=5,
+    ) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("ALTER ROLE {} PASSWORD {}").format(
+                    sql.Identifier(payload["admin_role"]),
+                    sql.Literal(payload["admin_password"]),
+                )
             )
-        )
-        cursor.execute(
-            sql.SQL("ALTER ROLE {} PASSWORD {}").format(
-                sql.Identifier(payload["runtime_role"]),
-                sql.Literal(payload["runtime_password"]),
+            cursor.execute(
+                sql.SQL("ALTER ROLE {} PASSWORD {}").format(
+                    sql.Identifier(payload["runtime_role"]),
+                    sql.Literal(payload["runtime_password"]),
+                )
             )
-        )
+except psycopg.Error as error:
+    print(
+        f"PostgreSQL {type(error).__name__} (SQLSTATE {error.sqlstate or 'none'})",
+        file=sys.stderr,
+    )
+    raise SystemExit(11) from None
 """.strip()
 
 _CHECK_CREDENTIAL_PROGRAM = """
@@ -83,8 +90,17 @@ try:
         connect_timeout=5,
     ) as connection:
         connection.execute("SELECT 1")
-except psycopg.Error:
-    raise SystemExit(1) from None
+except psycopg.Error as error:
+    if error.sqlstate == "28P01" or (
+        isinstance(error, psycopg.OperationalError)
+        and "password authentication failed for user" in str(error)
+    ):
+        raise SystemExit(10) from None
+    print(
+        f"PostgreSQL {type(error).__name__} (SQLSTATE {error.sqlstate or 'none'})",
+        file=sys.stderr,
+    )
+    raise SystemExit(11) from None
 """.strip()
 
 
@@ -244,9 +260,7 @@ def read_rollback_bundle(path: Path) -> RollbackBundle:
     )
 
 
-def _run_private_input(
-    command: list[str], *, program: str, payload: dict[str, str], args: list[str]
-) -> int:
+def _run_private_input(command: list[str], *, program: str, payload: dict[str, str]) -> int:
     result = subprocess.run(
         [
             *command,
@@ -259,13 +273,11 @@ def _run_private_input(
             "migrate",
             "-c",
             program,
-            *args,
         ],
         cwd=ROOT,
         input=json.dumps(payload, separators=(",", ":")),
         text=True,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
         check=False,
     )
     return result.returncode
@@ -292,28 +304,28 @@ def apply_database_passwords(
             "admin_password": replacement.admin,
             "runtime_password": replacement.runtime,
         },
-        args=[],
     )
     if return_code != 0:
-        raise RotationError("PostgreSQL did not accept the coordinated role update.")
+        raise RotationError(f"Role update failed (exit status {return_code}). See stderr.")
 
 
 def credential_works(command: list[str], *, role: str, password: str) -> bool:
-    return (
-        _run_private_input(
-            command,
-            program=_CHECK_CREDENTIAL_PROGRAM,
-            payload={
-                "host": "postgres",
-                "port": "5432",
-                "database": "startunnel",
-                "role": role,
-                "password": password,
-            },
-            args=[],
-        )
-        == 0
+    return_code = _run_private_input(
+        command,
+        program=_CHECK_CREDENTIAL_PROGRAM,
+        payload={
+            "host": "postgres",
+            "port": "5432",
+            "database": "startunnel",
+            "role": role,
+            "password": password,
+        },
     )
+    if return_code == 0:
+        return True
+    if return_code == 10:
+        return False
+    raise RotationError(f"Credential check failed (exit status {return_code}). See stderr.")
 
 
 def verify_transition(command: list[str], *, previous: PasswordPair, current: PasswordPair) -> None:
@@ -377,8 +389,6 @@ def restart_database_clients(command: list[str]) -> None:
         ],
         cwd=ROOT,
         text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
         check=False,
     )
     if result.returncode != 0:
@@ -398,8 +408,6 @@ def inspect_runtime(command: list[str]) -> None:
         ],
         cwd=ROOT,
         text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
         check=False,
     )
     if result.returncode != 0:
@@ -457,6 +465,7 @@ def rotate(
         verify_transition(command, previous=current, current=replacement)
         inspect_runtime(command)
     except (OSError, RotationError, ValueError) as error:
+        detail = f"{error} "
         restored = not database_changed or _automatic_restore(
             command,
             authenticate_with=replacement.admin,
@@ -466,10 +475,12 @@ def rotate(
         )
         if restored:
             raise RotationError(
-                "PostgreSQL credential rotation failed. The previous credentials are active."
+                "PostgreSQL credential rotation failed. "
+                f"{detail}The previous credentials are active."
             ) from error
         raise RotationError(
-            "PostgreSQL credential rotation failed and automatic rollback did not complete. "
+            "PostgreSQL credential rotation failed. "
+            f"{detail}Automatic rollback did not complete. "
             "Keep the rollback file and use the documented recovery procedure."
         ) from error
 
@@ -529,6 +540,7 @@ def rollback(
         )
         inspect_runtime(command)
     except (OSError, RotationError, ValueError) as error:
+        detail = f"{error} "
         restored = not database_changed and not mutation_started
         if not restored:
             authentication = bundle.previous.admin if database_changed else initial.admin
@@ -541,10 +553,12 @@ def rollback(
             )
         if restored:
             raise RotationError(
-                "PostgreSQL rollback failed. The pre-rollback credential state was restored."
+                "PostgreSQL rollback failed. "
+                f"{detail}The pre-rollback credential state was restored."
             ) from error
         raise RotationError(
-            "PostgreSQL rollback failed and automatic recovery did not complete. "
+            "PostgreSQL rollback failed. "
+            f"{detail}Automatic recovery did not complete. "
             "Keep the rollback file and recover the database before another attempt."
         ) from error
 
