@@ -20,6 +20,7 @@ from core.cursors import cursor_uuid as _cursor_uuid
 from core.cursors import decode_cursor as _decoded_cursor
 from core.cursors import encode_cursor as _cursor
 from tunnels.activity import commit_checkpoint, read_activity_async
+from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
 from tunnels.entry import enter_tunnel, entry_payload
@@ -58,6 +59,11 @@ from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCu
 from .schemas import (
     ActivityRequest,
     ActivityResponse,
+    BeaconBoardRequest,
+    BeaconBoardResponse,
+    BeaconPublishRequest,
+    BeaconWithdrawRequest,
+    BeaconWriteResponse,
     BranchRequest,
     BranchResponse,
     CheckpointRequest,
@@ -1500,6 +1506,79 @@ def close_tunnel_cycle(
     ],
 ) -> HttpResponse:
     return _close_cycle(request, payload, idempotency_key)
+
+
+@router.post(
+    "/beacons",
+    response={
+        201: BeaconWriteResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        409: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def light_beacon(
+    request: HttpRequest,
+    payload: BeaconPublishRequest,
+    idempotency_key: HeaderEx[
+        str,
+        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
+    ],
+) -> Status[dict[str, Any]]:
+    data, replay = publish_beacon(
+        credential=_credential(request),
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        text=payload.text,
+        lifetime_seconds=payload.lifetime_seconds,
+    )
+    return Status(201, {"beacon": data, "idempotent_replay": replay})
+
+
+@router.post(
+    "/beacons/withdraw",
+    response={
+        200: BeaconWriteResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        409: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def dim_beacon(
+    request: HttpRequest,
+    payload: BeaconWithdrawRequest,
+    idempotency_key: HeaderEx[
+        str,
+        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
+    ],
+) -> dict[str, Any]:
+    data, replay = withdraw_beacon(
+        credential=_credential(request),
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        beacon_id=payload.beacon_id,
+    )
+    return {"beacon": data, "idempotent_replay": replay}
+
+
+@router.post(
+    "/beacons/board",
+    response={200: BeaconBoardResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> dict[str, Any]:
+    page = read_board(
+        credential=_credential(request),
+        limit=payload.limit,
+        page_cursor=payload.page_cursor,
+    )
+    return {
+        "items": page.items,
+        "snapshot_position": page.snapshot_position,
+        "next_page_cursor": page.next_cursor,
+        "complete": page.complete,
+    }
 
 
 api.add_router("/v1", router)

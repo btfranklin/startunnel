@@ -242,6 +242,8 @@ class TunnelEvent(models.Model):
         CYCLE_STARTED = "cycle_started", "Cycle started"
         ADDRESS_ROTATED = "address_rotated", "Address rotated"
         TUNNEL_RETIRED = "tunnel_retired", "Tunnel retired"
+        BEACON_LIT = "beacon_lit", "Beacon lit"
+        BEACON_ENDED = "beacon_ended", "Beacon ended"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tunnel = models.ForeignKey(Tunnel, on_delete=models.CASCADE, related_name="events")
@@ -266,6 +268,54 @@ class TunnelEvent(models.Model):
 
     def __str__(self) -> str:
         return f"Event {self.position} for {self.tunnel_id}"
+
+
+class BoardState(models.Model):
+    """Transactionally ordered instance-wide Beacon board revision."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    position = models.PositiveBigIntegerField(default=0)
+
+    def __str__(self) -> str:
+        return f"Beacon board position {self.position}"
+
+
+class Beacon(models.Model):
+    class EndReason(models.TextChoices):
+        WITHDRAWN = "withdrawn", "Withdrawn"
+        EXPIRED = "expired", "Expired"
+        CYCLE_CLOSED = "cycle_closed", "Cycle closed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cycle = models.OneToOneField(Cycle, on_delete=models.CASCADE, related_name="beacon")
+    publisher = models.ForeignKey(
+        AgentCredential, on_delete=models.PROTECT, related_name="published_beacons"
+    )
+    text = models.CharField(max_length=280)
+    publication_sequence = models.PositiveBigIntegerField()
+    board_position = models.PositiveBigIntegerField(unique=True)
+    published_at = models.DateTimeField()
+    expires_at = models.DateTimeField(db_index=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=16, choices=EndReason.choices, blank=True)
+
+    class Meta:
+        ordering = ["-board_position", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(ended_at__isnull=True, end_reason="")
+                    | Q(
+                        ended_at__isnull=False,
+                        end_reason__in=["withdrawn", "expired", "cycle_closed"],
+                    )
+                ),
+                name="beacon_end_state_matches",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Beacon {self.id} for cycle {self.cycle_id}"
 
 
 class ActivityCheckpoint(models.Model):

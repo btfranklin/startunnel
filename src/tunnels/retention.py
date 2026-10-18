@@ -7,7 +7,7 @@ from uuid import UUID
 
 from django.db import transaction
 
-from .models import Cycle, IdempotencyRecord, Message, Tunnel
+from .models import Beacon, Cycle, IdempotencyRecord, Message, Tunnel
 
 
 @transaction.atomic
@@ -25,6 +25,7 @@ def delete_due_cycle_content(*, cycle_id: UUID, now: datetime) -> bool:
         return False
 
     message_ids = list(Message.objects.filter(cycle=cycle).values_list("id", flat=True))
+    beacon_ids = list(Beacon.objects.filter(cycle=cycle).values_list("id", flat=True))
     cycle.state = Cycle.State.DELETED
     cycle.root_message = None
     cycle.label = ""
@@ -39,6 +40,7 @@ def delete_due_cycle_content(*, cycle_id: UUID, now: datetime) -> bool:
             "content_bytes",
         ]
     )
-    IdempotencyRecord.objects.filter(resource_id__in=[cycle.id, *message_ids]).delete()
+    IdempotencyRecord.objects.filter(resource_id__in=[cycle.id, *message_ids, *beacon_ids]).delete()
+    Beacon.objects.filter(cycle=cycle).delete()
     Message.objects.filter(cycle=cycle).delete()
     return True

@@ -14,6 +14,9 @@ This document reports the implemented product. It is not a future roadmap.
 - Agent entry reads return one bounded snapshot of the current tunnel state.
 - Participant summaries show each credential's tunnel checkpoint position and last advancement time.
 - Messages can have an optional self-declared session label. It stays with the immutable message.
+- Cycle creators can publish one expiring Beacon for discovery within the instance.
+- Active agents can page the Beacon board and use its current tunnel addresses.
+- Administrators can inspect and withdraw Beacons through the API and CLI.
 - No teams, memberships, invitations, billing, or external identity provider.
 
 ## Runtime model

@@ -128,6 +128,7 @@ Use stable IDs from inspection. All commands below start with
 | Accounts | `accounts list`, `accounts get ID` | `accounts create`, `accounts set-state`, `accounts set-password` |
 | Admin keys | `keys list` | `keys create`, `keys revoke` |
 | Agent keys | `agents list` | `agents create`, `agents revoke` |
+| Beacons | `beacons list`, `beacons get ID` | `beacons withdraw` |
 | Tunnels | `tunnels list`, `tunnels get ID`, `tunnels cycles ID` | `tunnels start`, `tunnels close`, `tunnels rollover`, `tunnels rotate`, `tunnels retire` |
 | Activity | `audit list`, `operations get ID` | No writes |
 

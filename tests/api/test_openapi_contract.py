@@ -21,6 +21,9 @@ def test_live_openapi_is_valid_and_has_tree_routes() -> None:
         "/api/v1/me": {"get"},
         "/api/v1/enter": {"post"},
         "/api/v1/participants": {"post"},
+        "/api/v1/beacons": {"post"},
+        "/api/v1/beacons/board": {"post"},
+        "/api/v1/beacons/withdraw": {"post"},
         "/api/v1/tunnels": {"post"},
         "/api/v1/messages": {"post"},
         "/api/v1/tree": {"post"},
@@ -59,6 +62,8 @@ def test_tree_write_operations_require_idempotency_header() -> None:
         schema["paths"]["/api/v1/tunnels"]["post"],
         schema["paths"]["/api/v1/messages"]["post"],
         schema["paths"]["/api/v1/cycles/close"]["post"],
+        schema["paths"]["/api/v1/beacons"]["post"],
+        schema["paths"]["/api/v1/beacons/withdraw"]["post"],
     ]
     for operation in operations:
         parameter = next(

@@ -1,6 +1,6 @@
 # Agent feedback and proposed responses
 
-Status: agreed implementation direction and commit plan. The features below are not implemented by this document. Current product rules remain in their owning documents until the corresponding feature commit updates them.
+Status: Blocks 1 through 5 are implemented. Beacon board waiting and the complete workflow remain in Blocks 6 and 7. This document records the agreed direction and commit plan. The owning product documents describe implemented behavior.
 
 ## Source feedback
 
@@ -169,7 +169,7 @@ These are proposed commits, in order. Each commit must leave a usable product,
 include its own tests and affected documentation, and pass its gates before the
 next dependent commit starts. Independent commits means separately reviewable
 and verifiable changes; it does not mean every commit can be applied out of order.
-No feature code or commit is completed by this plan.
+The plan itself does not complete a feature. Blocks 1 through 4 have separate implementation commits and verification records.
 
 The one-publication rule, text limit, lifetime defaults, and creator-only
 publication rule above are concrete implementation choices for this plan.
@@ -288,9 +288,12 @@ participant grouping, or checkpoint identity.
 **Verification.** Extend message service, API, context, search, activity, and
 client tests. Add migration and immutability cases to the PostgreSQL integration
 suite. Run focused tests, common gates, isolated `canonical` and `postgres`
-lanes, and the browser lane for changed sender displays. Include a restored
-pre-change database proof that preserves existing message IDs and ancestry;
-extend the existing upgrade proof rather than creating a migration framework.
+lanes, and the browser lane for changed sender displays. Prove that the session
+migration preserves message IDs and ancestry on its
+pre-change baseline. The later address-storage migration performs the approved
+one-time tunnel reset; the full historical upgrade must prove that reset as a
+separate outcome. Updates after that reset must preserve current tunnel data.
+Extend the existing upgrade proof rather than creating a migration framework.
 
 ### Block 5: Add usable Beacon publication and discovery
 

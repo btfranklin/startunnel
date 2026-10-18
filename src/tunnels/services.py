@@ -1517,6 +1517,13 @@ def _close_locked_cycle(
             ),
         ]
     )
+    from .beacons import end_beacon_for_cycle_locked
+
+    end_beacon_for_cycle_locked(
+        tunnel=tunnel,
+        cycle=cycle,
+        reason="expired" if reason == "expired" else "cycle_closed",
+    )
     notify(ACTIVITY_CHANNEL, str(tunnel.id))
     record_event(
         actor_credential=actor_credential,

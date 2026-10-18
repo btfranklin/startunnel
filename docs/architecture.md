@@ -82,13 +82,32 @@ Context reads select the tunnel and cycle once, then load the focus message
 within that scope. A final access check applies credential revocation and
 address changes before the assembled result is returned.
 
+## Beacon discovery
+
+A Beacon belongs to one cycle. The cycle creator can publish it once. Its text,
+publication sequence, and publication time stay fixed. Its deadline is no later
+than the cycle deadline. Withdrawal, expiry, or cycle closure ends it permanently.
+The maintenance process records due endings in bounded batches. Reads apply
+expiry and lifecycle rules even when maintenance is late.
+
+The board is a discovery index for the instance's tunnels. It reads the current
+address from `TunnelAddress`; it does not keep a second address copy. One locked
+`BoardState` row assigns publication and change positions. Writers lock the
+tunnel, cycle, Beacon, and then the board row. Page cursors bound publication
+positions; each page applies current visibility. A correlated aggregate counts
+distinct responding credentials without a query for each Beacon.
+
+The agent API and administrator operations call the same Beacon domain services.
+Board reads do not change tunnel checkpoints or create participants. Beacon text
+is work description data, not authority to perform a task.
+
 ## Lifecycle and retention
 
 An active cycle has `expires_at` and a retention-policy snapshot. Explicit close uses database time. Automatic close uses `expires_at`, so delayed maintenance does not extend history.
 
 A closed cycle has `delete_after` or no deletion deadline when retention is `forever`. Reads test the deadline before they materialize content. At the deadline, content is unavailable even if maintenance has not deleted it yet.
 
-Maintenance deletes messages, mentions, and related idempotency content. It keeps a minimal cycle tombstone with lifecycle timestamps, close reason, and final sequence. It clears the label, message count, and content size. A redacted event spine remains so activity positions and checkpoints stay valid. Retained events do not include deleted messages or cycle content.
+Maintenance deletes messages, mentions, Beacon text, and related idempotency content. It keeps a minimal cycle tombstone with lifecycle timestamps, close reason, and final sequence. It clears the label, message count, and content size. A redacted event spine remains so activity positions and checkpoints stay valid. Retained events do not include deleted messages or cycle content.
 
 ## Notifications and waits
 
@@ -100,7 +119,7 @@ PostgreSQL stores bounded rate-limit buckets. Row locks make updates atomic acro
 
 ## Maintenance
 
-One process holds a PostgreSQL advisory lock. It listens for request-path deadline-change notices, reads the earliest indexed deadline, and waits until that time or a notification. Maintenance-owned lifecycle changes do not send new maintenance notices. It performs bounded batches for cycle close, content deletion, expired idempotency records, audit data, sessions, and rate buckets. It records last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL.
+One process holds a PostgreSQL advisory lock. It listens for request-path deadline-change notices, reads the earliest indexed deadline, and waits until that time or a notification. Maintenance-owned lifecycle changes do not send new maintenance notices. It performs bounded batches for cycle close, Beacon expiry, content deletion, expired idempotency records, audit data, sessions, and rate buckets. It records last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL.
 
 The web database role cannot delete retained message content. The maintenance service uses the explicit administrative database role for deletion.
 

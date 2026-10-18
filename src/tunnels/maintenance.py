@@ -15,7 +15,7 @@ from accounts.models import AdminOperation
 from core.maintenance_liveness import publish_local_maintenance_heartbeat
 from core.models import MaintenanceState, RateLimitBucket
 
-from .models import AuditEvent, Cycle, IdempotencyRecord, Tunnel
+from .models import AuditEvent, Beacon, Cycle, IdempotencyRecord, Tunnel
 from .retention import delete_due_cycle_content
 from .services import _close_locked_cycle
 
@@ -35,6 +35,12 @@ def next_deadline() -> datetime | None:
 
     active_expiry = (
         Cycle.objects.filter(state=Cycle.State.ACTIVE)
+        .order_by("expires_at")
+        .values_list("expires_at", flat=True)
+        .first()
+    )
+    beacon_expiry = (
+        Beacon.objects.filter(ended_at__isnull=True)
         .order_by("expires_at")
         .values_list("expires_at", flat=True)
         .first()
@@ -65,6 +71,7 @@ def next_deadline() -> datetime | None:
     return _minimum(
         [
             active_expiry,
+            beacon_expiry,
             history_delete,
             idempotency_expiry,
             admin_operation_expiry,
@@ -112,6 +119,42 @@ def _close_expired_cycles(*, now: datetime) -> tuple[int, int]:
             _close_locked_cycle(tunnel=tunnel, cycle=cycle, reason="expired")
             closed += 1
     return closed, len(cycle_ids)
+
+
+def _expire_beacons(*, now: datetime) -> tuple[int, int]:
+    """End a bounded batch of due Beacons using tunnel-first lock order."""
+
+    candidates = list(
+        Beacon.objects.filter(ended_at__isnull=True, expires_at__lte=now)
+        .order_by("expires_at", "id")
+        .values_list("id", "cycle__tunnel_id")[:MAINTENANCE_BATCH_SIZE]
+    )
+    from .beacons import _end_locked
+
+    expired = 0
+    for beacon_id, tunnel_id in candidates:
+        with transaction.atomic():
+            tunnel = Tunnel.objects.select_for_update(of=("self",)).filter(pk=tunnel_id).first()
+            if tunnel is None:
+                continue
+            cycle = Cycle.objects.select_for_update().filter(beacon__pk=beacon_id).first()
+            if cycle is None:
+                continue
+            beacon = (
+                Beacon.objects.select_for_update()
+                .filter(pk=beacon_id, ended_at__isnull=True, expires_at__lte=now)
+                .first()
+            )
+            if beacon is None:
+                continue
+            _end_locked(
+                tunnel=tunnel,
+                cycle=cycle,
+                beacon=beacon,
+                reason=Beacon.EndReason.EXPIRED,
+            )
+            expired += 1
+    return expired, len(candidates)
 
 
 def _delete_due_cycles(*, now: datetime) -> tuple[int, int, int]:
@@ -182,6 +225,7 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
     checked_at = now or timezone.now()
     publish_local_maintenance_heartbeat()
     closed, close_candidates = _close_expired_cycles(now=checked_at)
+    expired_beacons, beacon_candidates = _expire_beacons(now=checked_at)
     lag = oldest_overdue_deletion_seconds(now=checked_at)
     deleted, deletion_failures, delete_candidates = _delete_due_cycles(now=checked_at)
     idempotency = _delete_batch(
@@ -207,6 +251,7 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
     due_work_count = (
         close_candidates
         + delete_candidates
+        + beacon_candidates
         + idempotency
         + admin_operations
         + audit
@@ -225,6 +270,7 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
     publish_local_maintenance_heartbeat()
     return {
         "cycles_closed": closed,
+        "beacons_expired": expired_beacons,
         "cycle_content_deleted": deleted,
         "cycle_delete_failures": deletion_failures,
         "idempotency_purged": idempotency,

@@ -172,6 +172,30 @@ def run_cli(
             {"advanced": True},
         ),
         (
+            "beacon-publish",
+            ["--idempotency-key", "beacon-publish-001"],
+            {"address": "glyphs", "text": "Review the draft."},
+            "/beacons",
+            201,
+            {"beacon": {"id": "beacon-id"}, "idempotent_replay": False},
+        ),
+        (
+            "beacon-withdraw",
+            ["--idempotency-key", "beacon-withdraw-001"],
+            {"address": "glyphs", "beacon_id": "beacon-id"},
+            "/beacons/withdraw",
+            200,
+            {"beacon": {"id": "beacon-id"}, "idempotent_replay": False},
+        ),
+        (
+            "beacon-board",
+            [],
+            {},
+            "/beacons/board",
+            200,
+            {"items": [], "next_page_cursor": None, "complete": True},
+        ),
+        (
             "close",
             ["--idempotency-key", "close-test-001"],
             {"address": "glyphs", "expected_cycle_id": "cycle"},
@@ -202,7 +226,7 @@ def test_commands_preserve_public_request_bodies_and_map_scope(
         expected_body["wait_seconds"] = 20
     assert request["body"] == expected_body
     assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
-    if action in {"create", "reply", "close"}:
+    if action in {"create", "reply", "close", "beacon-publish", "beacon-withdraw"}:
         assert request["headers"]["Idempotency-Key"] == arguments[1]
     else:
         assert "Idempotency-Key" not in request["headers"]
@@ -676,6 +700,9 @@ def test_admin_cycle_commands_forward_root_session(
         "read-context",
         "checkpoint",
         "close",
+        "beacon-publish",
+        "beacon-withdraw",
+        "beacon-board",
         "tutorial",
     ],
 )

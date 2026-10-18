@@ -26,9 +26,10 @@ from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
+from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_operator
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
-from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress
+from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
 from tunnels.services import (
     close_cycle_as_operator,
     retire_tunnel_as_operator,
@@ -58,6 +59,7 @@ ADMIN_OPERATION_TARGETS = {
     "tunnels.rollover": ("tunnel", "tunnel_id"),
     "tunnels.rotate": ("tunnel", "tunnel_id"),
     "tunnels.retire": ("tunnel", "tunnel_id"),
+    "beacons.withdraw": ("beacon", "beacon_id"),
 }
 
 
@@ -203,13 +205,16 @@ def list_admin_resources(
         "tunnels": Tunnel,
         "audit": AuditEvent,
         "cycles": Cycle,
+        "beacons": Beacon,
     }
     queryset = (
         models[kind].objects.all().order_by("-created_at", "-id")
         if kind == "audit"
         else models[kind].objects.all().order_by("id")
     )
-    if kind == "keys":
+    if kind == "beacons":
+        queryset = beacon_queryset().order_by("id")
+    elif kind == "keys":
         queryset = queryset.select_related("owner")
     elif kind == "tunnels":
         queryset = queryset.prefetch_related(
@@ -257,6 +262,8 @@ def list_admin_resources(
         queryset = queryset.filter(owner_id=admin_id)
     if tunnel_id and kind == "cycles":
         queryset = queryset.filter(tunnel_id=tunnel_id)
+    elif tunnel_id and kind == "beacons":
+        queryset = queryset.filter(cycle__tunnel_id=tunnel_id)
     if action and kind == "audit":
         queryset = queryset.filter(action=action)
     if kind == "audit":
@@ -296,6 +303,7 @@ def list_admin_resources(
         "agents": agent_resource,
         "tunnels": _tunnel_list_resource,
         "audit": audit_resource,
+        "beacons": beacon_data,
         "cycles": lambda row: {
             "id": str(row.id),
             "number": row.number,
@@ -568,6 +576,10 @@ def _perform(
         revoke_credential(actor=actor, credential=agent)
         agent.refresh_from_db()
         return agent_resource(agent), "agent_credential", agent.id
+    if operation == "beacons.withdraw":
+        beacon_id = _id(data, "beacon_id")
+        resource = withdraw_beacon_as_operator(actor=actor, beacon_id=beacon_id)
+        return resource, "beacon", beacon_id
     tunnel_id = _id(data, "tunnel_id")
     common: dict[str, Any] = {"actor": actor, "tunnel_id": tunnel_id}
     if operation == "tunnels.close":

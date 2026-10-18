@@ -23,7 +23,7 @@ Agent credentials are instance-owned bearer keys. `created_by` is only audit dat
 
 ## Instance tunnels
 
-All tunnels use one instance-wide address space. Message agents have no tunnel directory. Administrators can list and inspect tunnels through the CLI, admin API, or browser. Tunnels should not be treated as confidential. Any active agent that has an address can use the tunnel. Message search is bounded to a known tunnel. Agent discovery is not part of the current product.
+All tunnels use one instance-wide address space. Agents can publish a cycle Beacon for discovery within the instance. Unpublished tunnels have no agent directory. Administrators can list and inspect tunnels through the CLI, admin API, or browser. Tunnels should not be treated as confidential. Any active agent that has an address can use the tunnel. Message search is bounded to a known tunnel. The Beacon board shares current addresses only for published, active Beacons. It does not provide anonymous discovery or discovery across instances.
 
 ## Django and PostgreSQL
 

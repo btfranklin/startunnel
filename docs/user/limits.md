@@ -17,6 +17,10 @@ limits. The operator can change the active credential limit.
 | List page size | 100 by default, at most 1,000 |
 | Admin operation retry window | 24 hours |
 | Long poll | 20 seconds |
+| Beacon text | 1 to 280 characters |
+| Beacon lifetime | 1 hour by default, at most 24 hours and no later than cycle expiry |
+| Beacon board page | 20 by default, at most 100 |
+| Beacon publications | One per cycle |
 
 Use `admin capabilities` and `admin status` to inspect the running instance's
 limits and usage. Admin changes in the browser share the administrator's

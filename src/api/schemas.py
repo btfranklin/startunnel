@@ -35,6 +35,8 @@ ActivityEventType = Literal[
     "tunnel_dormant",
     "address_rotated",
     "tunnel_retired",
+    "beacon_lit",
+    "beacon_ended",
 ]
 
 
@@ -237,7 +239,7 @@ class ActivityRequest(PublicSchema):
     after_cursor: str | None = None
     wait_seconds: int = Field(default=0, ge=0, le=20)
     limit: int = Field(default=100, ge=1, le=1000)
-    event_types: list[ActivityEventType] | None = Field(default=None, max_length=6)
+    event_types: list[ActivityEventType] | None = Field(default=None, max_length=8)
 
 
 class ActivityEventResponse(PublicSchema):
@@ -529,3 +531,50 @@ class ErrorBodyResponse(PublicSchema):
 
 class ErrorResponse(PublicSchema):
     error: ErrorBodyResponse
+
+
+class BeaconPublishRequest(PublicSchema):
+    address: str = Field(examples=[EXAMPLE_ADDRESS])
+    text: str = Field(min_length=1, max_length=280)
+    lifetime_seconds: int | None = Field(default=None, ge=1, le=86_400)
+
+
+class BeaconWithdrawRequest(PublicSchema):
+    address: str = Field(examples=[EXAMPLE_ADDRESS])
+    beacon_id: UUID
+
+
+class BeaconResponse(PublicSchema):
+    id: UUID
+    tunnel_id: UUID
+    cycle_id: UUID
+    publisher: AgentIdentityResponse
+    text: str
+    publication_sequence: int
+    board_position: int
+    published_at: datetime
+    expires_at: datetime
+    ended_at: datetime | None
+    end_reason: str
+    response_count: int
+
+
+class BeaconBoardItem(BeaconResponse):
+    address: str
+
+
+class BeaconWriteResponse(PublicSchema):
+    beacon: BeaconResponse
+    idempotent_replay: bool
+
+
+class BeaconBoardRequest(PublicSchema):
+    limit: int = Field(default=20, ge=1, le=100)
+    page_cursor: str | None = None
+
+
+class BeaconBoardResponse(PublicSchema):
+    items: list[BeaconBoardItem]
+    snapshot_position: int
+    next_page_cursor: str | None
+    complete: bool

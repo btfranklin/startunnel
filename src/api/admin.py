@@ -26,10 +26,11 @@ from accounts.models import AdminCredential, AdminOperation, User
 from core import limits as instance_limits
 from core.rate_limits import _consume
 from core.security import client_ip
+from tunnels.beacons import beacon_data, beacon_queryset
 from tunnels.errors import InvalidCredential, InvalidRequest
 from tunnels.models import Tunnel
 
-from .schemas import ErrorResponse, MessageContent, PublicSchema
+from .schemas import BeaconResponse, ErrorResponse, MessageContent, PublicSchema
 
 ADMIN_ERRORS = {
     400: ErrorResponse,
@@ -164,13 +165,18 @@ class CyclePage(Schema):
     next_cursor: str | None
 
 
+class BeaconPage(Schema):
+    items: list[BeaconResponse]
+    next_cursor: str | None
+
+
 class OperationReceipt(Schema):
     id: UUID
     audit_event_id: UUID
 
 
 class SafeAdminResult(Schema):
-    resource: AccountResource | KeyResource | AgentResource | TunnelResource
+    resource: AccountResource | KeyResource | AgentResource | TunnelResource | BeaconResponse
     operation: OperationReceipt
 
 
@@ -281,6 +287,10 @@ class TunnelRotate(PublicSchema):
 
 class TunnelRetire(TunnelRotate):
     confirmation: str
+
+
+class BeaconWithdraw(PublicSchema):
+    beacon_id: UUID
 
 
 def _execute(request: AdminRequest, operation: str, data: Schema, key: str) -> dict[str, Any]:
@@ -580,3 +590,39 @@ def retire_tunnel(
     ],
 ) -> dict[str, Any]:
     return _execute(request, "tunnels.retire", data, idempotency_key)
+
+
+@router.get("/beacons", response={200: BeaconPage, **ADMIN_ERRORS})
+def beacons(
+    request: AdminRequest,
+    limit: int = 100,
+    cursor: str | None = None,
+    tunnel_id: UUID | None = None,
+) -> dict[str, Any]:
+    return list_admin_resources(
+        "beacons",
+        actor=request.auth.owner,
+        limit=limit,
+        cursor=cursor,
+        tunnel_id=tunnel_id,
+    )
+
+
+@router.get("/beacons/{uuid:beacon_id}", response={200: BeaconResponse, **ADMIN_ERRORS})
+def beacon(request: AdminRequest, beacon_id: UUID) -> dict[str, Any]:
+    row = beacon_queryset().filter(pk=beacon_id).first()
+    if row is None:
+        raise InvalidRequest("This beacon is not available.")
+    return beacon_data(row)
+
+
+@router.post("/beacons/withdraw", response={200: AdminResult, 404: ErrorResponse, **ADMIN_ERRORS})
+def withdraw_beacon(
+    request: AdminRequest,
+    data: BeaconWithdraw,
+    idempotency_key: HeaderEx[
+        str,
+        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
+    ],
+) -> dict[str, Any]:
+    return _execute(request, "beacons.withdraw", data, idempotency_key)

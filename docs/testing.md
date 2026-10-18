@@ -89,6 +89,14 @@ records. Tunnel control receipts are removed; other admin receipts remain.
 Existing credentials must create a new tunnel and exchange new messages. A
 second migration run must preserve that new tunnel, its address, and messages.
 
+The restored historical baseline first passes through the session migration.
+That step must preserve message IDs, ancestry, and absent labels. The later
+address-storage reset is a separate expected outcome. The proof then dumps the
+current pre-Beacon schema with new messages, session labels, a checkpoint, and
+its current address. It restores that data into a third database, applies the
+Beacon migration, verifies those records, and publishes a Beacon. Accounts,
+credentials, and historical audit records must remain across both restores.
+
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private
 and are removed at exit. Output reports safe check names, not keys or content.
@@ -114,6 +122,7 @@ before an installation upgrade. The first release keeps `supported_from` empty.
 - Lifecycle changes: exact deadline access, delayed close semantics, `forever`, tombstone deletion, and idempotent cleanup.
 - Notification changes: register-before-reread, commit wakeup, listener reconnect, and bounded polling fallback.
 - Rate changes: exact limits and atomic concurrent updates with real PostgreSQL.
+- Beacon publication changes: domain and API tests, populated-page query bounds, real PostgreSQL write races, canonical and PostgreSQL lanes, and the restored current-database upgrade proof.
 - Docker changes: fresh build, startup, healthy services, dynamic host-port output, backup, restore, and runtime-role denial.
 
 ## Performance acceptance

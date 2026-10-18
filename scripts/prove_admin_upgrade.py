@@ -18,6 +18,14 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = [(name, "0001_initial") for name in ("accounts", "agents", "core", "tunnels")]
+SESSION_MIGRATION = ("tunnels", "0003_message_session")
+PRE_BEACON_MIGRATION = ("tunnels", "0007_limit_cycle_root_checks_to_root_changes")
+
+
+def targets_through(executor: Any, tunnel_migration: tuple[str, str]) -> list[tuple[str, str]]:
+    return [node for node in executor.loader.graph.leaf_nodes() if node[0] != "tunnels"] + [
+        tunnel_migration
+    ]
 
 
 def baseline(snapshot_path: Path) -> None:
@@ -198,6 +206,11 @@ def baseline(snapshot_path: Path) -> None:
                 "kept_admin_operation_id": str(kept_operation.pk),
                 "removed_admin_operation_id": str(removed_operation.pk),
                 "audit_id": str(audit.pk),
+                "historical_tunnel_id": str(tunnel.pk),
+                "historical_cycle_id": str(cycle.pk),
+                "historical_root_id": str(messages[0].pk),
+                "historical_reply_id": str(messages[1].pk),
+                "historical_parent_id": str(messages[1].parent_id),
             }
         ),
         encoding="utf-8",
@@ -206,12 +219,35 @@ def baseline(snapshot_path: Path) -> None:
     connection.close()
 
 
+def session_preserved(snapshot_path: Path) -> None:
+    import django
+
+    django.setup()
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    executor = MigrationExecutor(connection)
+    targets = targets_through(executor, SESSION_MIGRATION)
+    executor.migrate(targets)
+    apps = executor.loader.project_state(targets).apps
+    message_model = apps.get_model("tunnels", "Message")
+    root = message_model.objects.get(pk=expected["historical_root_id"])
+    reply = message_model.objects.get(pk=expected["historical_reply_id"])
+    assert str(root.tunnel_id) == str(reply.tunnel_id) == expected["historical_tunnel_id"]
+    assert str(root.cycle_id) == str(reply.cycle_id) == expected["historical_cycle_id"]
+    assert root.parent_id is None and str(reply.parent_id) == expected["historical_parent_id"]
+    assert reply.parent_id == root.pk
+    assert root.session is None and reply.session is None
+    connection.close()
+
+
 def upgraded(snapshot_path: Path) -> None:
     import django
 
     django.setup()
     from django.core.management import call_command
-    from django.db import connection
+    from django.db import connection, transaction
     from django.db.migrations.executor import MigrationExecutor
 
     from accounts.admin_access import authenticate_admin_key
@@ -232,12 +268,13 @@ def upgraded(snapshot_path: Path) -> None:
         TunnelAddress,
         TunnelEvent,
     )
-    from tunnels.services import create_tunnel, post_reply
+    from tunnels.services import create_tunnel
 
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)
     assert ("tunnels", "0004_store_glyph_addresses") not in executor.loader.applied_migrations
-    executor.migrate(executor.loader.graph.leaf_nodes())
+    targets = targets_through(executor, PRE_BEACON_MIGRATION)
+    executor.migrate(targets)
 
     user = User.objects.get(pk=expected["user_id"])
     assert user.password == expected["password_hash"] and user.check_password(expected["password"])
@@ -277,27 +314,68 @@ def upgraded(snapshot_path: Path) -> None:
         credential=credential,
         idempotency_key="upgrade-proof-new-tunnel",
         root_content={"type": "text", "text": "Fresh root"},
+        root_session="proof-root-session",
     )
     inspected = list_admin_resources("tunnels", actor=user)["items"]
     assert len(inspected) == 1 and inspected[0]["address"] == created.address
     assert resolve_tunnel(credential=credential, address=created.address).pk == created.tunnel.pk
-    reply = post_reply(
-        credential=credential,
-        idempotency_key="upgrade-proof-new-reply",
-        address=created.address,
-        parent_id=created.root.pk,
-        content={"type": "text", "text": "Fresh reply"},
-    ).message
-    assert reply.parent_id == created.root.pk
+    historical_apps = executor.loader.project_state(targets).apps
+    historical_cycle = historical_apps.get_model("tunnels", "Cycle")
+    historical_message = historical_apps.get_model("tunnels", "Message")
+    historical_event = historical_apps.get_model("tunnels", "TunnelEvent")
+    historical_tunnel = historical_apps.get_model("tunnels", "Tunnel")
+    reply_text = "Fresh reply"
+    with transaction.atomic():
+        historical_cycle.objects.filter(pk=created.cycle.pk).update(
+            next_sequence=3,
+            message_count=2,
+            content_bytes=created.root.byte_count + len(reply_text.encode()),
+        )
+        historical_tunnel.objects.filter(pk=created.tunnel.pk).update(next_event_position=4)
+        reply = historical_message.objects.create(
+            tunnel_id=created.tunnel.pk,
+            cycle_id=created.cycle.pk,
+            parent_id=created.root.pk,
+            sender_id=credential.pk,
+            sender_name=credential.name,
+            session="proof-reply-session",
+            sequence=2,
+            depth=1,
+            payload_type="text",
+            text_payload=reply_text,
+            byte_count=len(reply_text.encode()),
+        )
+        historical_event.objects.create(
+            tunnel_id=created.tunnel.pk,
+            cycle_id=created.cycle.pk,
+            message_id=reply.pk,
+            position=3,
+            event_type="message_posted",
+        )
+    checkpoint = ActivityCheckpoint.objects.create(
+        tunnel=created.tunnel, credential=credential, last_event_position=3
+    )
+    assert reply.parent_id == created.root.pk and reply.session == "proof-reply-session"
     assert Message.objects.filter(cycle=created.cycle).count() == 2
 
     executor = MigrationExecutor(connection)
-    executor.migrate(executor.loader.graph.leaf_nodes())
+    executor.migrate(targets)
     assert ("tunnels", "0004_store_glyph_addresses") in executor.loader.applied_migrations
     assert Tunnel.objects.count() == 1
     assert TunnelAddress.objects.get(tunnel=created.tunnel).address == created.address
     assert Message.objects.filter(cycle=created.cycle).count() == 2
     assert Message.objects.get(pk=reply.pk).text_payload == "Fresh reply"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot.update(
+        fresh_tunnel_id=str(created.tunnel.pk),
+        fresh_cycle_id=str(created.cycle.pk),
+        fresh_root_id=str(created.root.pk),
+        fresh_reply_id=str(reply.pk),
+        fresh_reply_parent_id=str(reply.parent_id),
+        fresh_address=created.address,
+        fresh_checkpoint_id=str(checkpoint.pk),
+        fresh_checkpoint_position=checkpoint.last_event_position,
+    )
 
     recovery_path = snapshot_path.parent / "recovery.key"
     call_command("recover_instance_admin", user.username, key_file=str(recovery_path), verbosity=0)
@@ -305,18 +383,100 @@ def upgraded(snapshot_path: Path) -> None:
     recovered = authenticate_admin_key(recovery_path.read_text().strip())
     assert recovered.owner_id == user.pk
     assert AuditEvent.objects.filter(action="admin.recovered", channel="server").exists()
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    snapshot_path.chmod(0o600)
+    connection.close()
+
+
+def beacon_upgraded(snapshot_path: Path) -> None:
+    import django
+
+    django.setup()
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    from accounts.admin_access import authenticate_admin_key
+    from accounts.models import AdminCredential, AdminOperation, User
+    from agents.models import AgentCredential
+    from tunnels.access import resolve_tunnel
+    from tunnels.beacons import publish_beacon
+    from tunnels.models import (
+        ActivityCheckpoint,
+        AuditEvent,
+        Beacon,
+        Cycle,
+        Message,
+        Tunnel,
+        TunnelAddress,
+        TunnelEvent,
+    )
+
+    expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    executor = MigrationExecutor(connection)
+    assert PRE_BEACON_MIGRATION in executor.loader.applied_migrations
+    executor.migrate(executor.loader.graph.leaf_nodes())
+
+    user = User.objects.get(pk=expected["user_id"])
+    credential = AgentCredential.objects.get(pk=expected["credential_id"])
+    tunnel = Tunnel.objects.get(pk=expected["fresh_tunnel_id"])
+    cycle = Cycle.objects.get(pk=expected["fresh_cycle_id"])
+    root = Message.objects.get(pk=expected["fresh_root_id"])
+    reply = Message.objects.get(pk=expected["fresh_reply_id"])
+    assert tunnel.id == cycle.tunnel_id == root.tunnel_id == reply.tunnel_id
+    assert cycle.root_message_id == root.pk and root.parent_id is None
+    assert str(reply.parent_id) == expected["fresh_reply_parent_id"] == str(root.pk)
+    assert root.session == "proof-root-session"
+    assert reply.session == "proof-reply-session"
+    assert root.text_payload == "Fresh root" and reply.text_payload == "Fresh reply"
+    assert root.cycle_id == reply.cycle_id == cycle.pk
+    assert not Beacon.objects.exists()
+    assert TunnelAddress.objects.get(tunnel=tunnel).address == expected["fresh_address"]
+    assert resolve_tunnel(credential=credential, address=expected["fresh_address"]).pk == tunnel.pk
+    checkpoint = ActivityCheckpoint.objects.get(pk=expected["fresh_checkpoint_id"])
+    assert checkpoint.tunnel_id == tunnel.pk
+    assert checkpoint.last_event_position == expected["fresh_checkpoint_position"]
+    audit = AuditEvent.objects.get(pk=expected["audit_id"])
+    assert audit.actor_user_id == user.pk and audit.action == "human.created"
+    admin_credential = AdminCredential.objects.get(pk=expected["admin_credential_id"])
+    assert authenticate_admin_key(expected["admin_key"]).pk == admin_credential.pk
+    assert AdminOperation.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
+    assert (
+        AgentCredential.objects.get(pk=expected["credential_id"]).key_digest.hex()
+        == expected["key_digest"]
+    )
+
+    result, replay = publish_beacon(
+        credential=credential,
+        idempotency_key="upgrade-proof-beacon",
+        address=expected["fresh_address"],
+        text="Beacon migration proof",
+    )
+    assert replay is False
+    beacon = Beacon.objects.get(pk=result["id"])
+    assert beacon.cycle_id == cycle.pk and beacon.publisher_id == credential.pk
+    assert TunnelEvent.objects.filter(
+        tunnel=tunnel, event_type=TunnelEvent.Type.BEACON_LIT
+    ).exists()
     connection.close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("baseline", "upgrade"))
+    parser.add_argument(
+        "--phase", choices=("baseline", "session-preserved", "upgrade", "beacon-upgrade")
+    )
     parser.add_argument("--snapshot", type=Path)
     arguments = parser.parse_args()
     if arguments.phase:
         if arguments.snapshot is None:
             parser.error("--snapshot is required with --phase")
-        (baseline if arguments.phase == "baseline" else upgraded)(arguments.snapshot)
+        phases = {
+            "baseline": baseline,
+            "session-preserved": session_preserved,
+            "upgrade": upgraded,
+            "beacon-upgrade": beacon_upgraded,
+        }
+        phases[arguments.phase](arguments.snapshot)
         return 0
 
     sys.path.insert(0, str(ROOT))
@@ -338,7 +498,11 @@ def main() -> int:
             port = stack.capture("Local database port", "port", "postgres", "5432").rsplit(":", 1)[
                 1
             ]
-            for database in ("admin_upgrade_source", "admin_upgrade_restored"):
+            for database in (
+                "admin_upgrade_source",
+                "admin_upgrade_restored",
+                "admin_upgrade_beacon_restored",
+            ):
                 stack.run(
                     "Create disposable proof database",
                     "exec",
@@ -356,11 +520,17 @@ def main() -> int:
                 PYTHONPATH=str(ROOT / "src"),
             )
             snapshot = temporary / "snapshot.json"
-            for phase, database in (
-                ("baseline", "admin_upgrade_source"),
-                ("upgrade", "admin_upgrade_restored"),
+            for phase, source_database, target_database in (
+                ("baseline", None, "admin_upgrade_source"),
+                ("session-preserved", "admin_upgrade_source", "admin_upgrade_restored"),
+                ("upgrade", None, "admin_upgrade_restored"),
+                (
+                    "beacon-upgrade",
+                    "admin_upgrade_restored",
+                    "admin_upgrade_beacon_restored",
+                ),
             ):
-                if phase == "upgrade":
+                if source_database is not None:
                     dump_directory = stack.capture(
                         "Create private container dump directory",
                         "exec",
@@ -371,7 +541,7 @@ def main() -> int:
                     ).strip()
                     dump_file = str(Path(dump_directory) / "admin-upgrade.dump")
                     stack.run(
-                        "Dump pre-change baseline",
+                        "Dump restored migration baseline",
                         "exec",
                         "-T",
                         "postgres",
@@ -381,7 +551,7 @@ def main() -> int:
                         "--format=custom",
                         "--file",
                         dump_file,
-                        "admin_upgrade_source",
+                        source_database,
                         timeout_seconds=60,
                     )
                     stack.run(
@@ -392,13 +562,13 @@ def main() -> int:
                         "pg_restore",
                         "--username",
                         "startunnel_admin",
-                        "--dbname=admin_upgrade_restored",
+                        f"--dbname={target_database}",
                         "--exit-on-error",
                         dump_file,
                         timeout_seconds=60,
                     )
                 environment["TEST_DATABASE_URL"] = (
-                    f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/{database}"
+                    f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/{target_database}"
                 )
                 subprocess.run(
                     [
@@ -426,6 +596,10 @@ def main() -> int:
                         "one-time tunnel data reset",
                         "old glyph addresses unavailable",
                         "new tunnel and reply remain after a repeat migration",
+                        "message UUIDs and ancestry survive session migration",
+                        "fresh tunnel, sessions, credentials, audit, and checkpoint survive "
+                        "Beacon migration",
+                        "Beacon publication works after the forward upgrade",
                         "admin credentials and non-tunnel receipts retained",
                         "tunnel admin receipts removed",
                         "historical audit",
