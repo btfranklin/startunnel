@@ -225,10 +225,10 @@ def prepare_replacement_files(directory: Path) -> tuple[Path, Path]:
 
 
 def read_rollback_bundle(path: Path) -> RollbackBundle:
-    raw = read_validated_secret_file(path, name="rollback file")
     try:
-        payload: Any = json.loads(raw)
-    except json.JSONDecodeError as error:
+        with path.open(encoding="utf-8") as source:
+            payload: Any = json.load(source)
+    except (UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("The rollback file is malformed.") from error
     required = {
         "previous_admin_password",

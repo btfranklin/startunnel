@@ -364,8 +364,8 @@ def test_compose_restart_and_inspection_show_normal_diagnostics(
 
 
 def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_path: Path) -> None:
-    current = PasswordPair(admin="old ' ü " + "A" * 130, runtime="old $ é " + "B" * 130)
-    replacement = PasswordPair(admin="new \\ ♥ " + "C" * 130, runtime="new % ☀ " + "D" * 130)
+    current = PasswordPair(admin="old ' ü " + "A" * 2100, runtime="old $ é " + "B" * 2100)
+    replacement = PasswordPair(admin="new \\ ♥ " + "C" * 2100, runtime="new % ☀ " + "D" * 2100)
     public_directory = tmp_path / "public"
     public_directory.mkdir(mode=0o755)
     public_directory.chmod(0o755)
@@ -376,6 +376,11 @@ def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_pa
     private_directory.mkdir(mode=0o700)
     rollback_file = private_directory / "rollback.json"
     rotation.write_rollback_bundle(rollback_file, current, replacement)
+    assert rotation.read_rollback_bundle(rollback_file) == rotation.RollbackBundle(
+        previous=current, replacement=replacement
+    )
+    assert rollback_file.stat().st_size > 8192
+    rollback_file.write_text(json.dumps(json.loads(rollback_file.read_text()), indent=2))
     assert rotation.read_rollback_bundle(rollback_file) == rotation.RollbackBundle(
         previous=current, replacement=replacement
     )
@@ -500,3 +505,14 @@ def test_replacement_metadata_failure_keeps_old_file_and_removes_temporary(
 
     assert target.read_text(encoding="utf-8") == "old-admin\n"
     assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize(
+    "document",
+    ["{", "[]", "{}", '{"previous_admin_password": 1}', "\ud800"],
+)
+def test_rollback_rejects_malformed_json_bundles(tmp_path: Path, document: str) -> None:
+    path = tmp_path / "rollback.json"
+    path.write_bytes(document.encode("utf-8", errors="surrogatepass"))
+    with pytest.raises(ValueError, match="malformed"):
+        rotation.read_rollback_bundle(path)
