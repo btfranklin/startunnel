@@ -1,6 +1,6 @@
 # API
 
-The message API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. StarTunnel never puts an address in a URL.
+The message API root is `/api/v1`. Send an agent key in `Authorization: Bearer st_...`. Send addresses, message IDs, cycle IDs, and cursors in JSON bodies. Cursors have no time expiry. Current access and content retention rules still apply. StarTunnel never puts an address in a URL.
 
 Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership selectors are invalid.
 

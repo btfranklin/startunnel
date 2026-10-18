@@ -16,7 +16,6 @@ limits. The operator can change the active credential limit.
 | Admin writes per minute per administrator, shared across keys | 120 plus a burst of 30 |
 | List page size | 100 by default, at most 1,000 |
 | Admin operation retry window | 24 hours |
-| List cursor lifetime | 1 hour |
 | Long poll | 20 seconds |
 
 Use `admin capabilities` and `admin status` to inspect the running instance's

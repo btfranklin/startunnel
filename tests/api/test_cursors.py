@@ -5,10 +5,8 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from django.core import signing
 
-from core.cursors import CURSOR_SALT, cursor_int, cursor_uuid, decode_cursor, encode_cursor
-from core.limits import Limits
+from core.cursors import cursor_int, cursor_uuid, decode_cursor, encode_cursor
 from tunnels.errors import InvalidCursor
 
 
@@ -48,54 +46,6 @@ def test_cursor_uuid_rejects_missing_and_invalid_values(value: object) -> None:
         cursor_uuid(decoded, "tunnel_id")
 
 
-def test_cursor_has_one_fixed_lifetime_and_expires(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("core.cursors.time.time", lambda: 1_000)
-    encoded = encode_cursor("activity", tunnel_id=str(uuid4()), position=2)
-    decoded = decode_cursor(encoded, kind="activity")
-    assert decoded["issued_at"] == 1_000
-    assert decoded["expires_at"] == 1_000 + Limits().cursor_lifetime_seconds
-
-    monkeypatch.setattr(
-        "core.cursors.time.time",
-        lambda: 1_000 + Limits().cursor_lifetime_seconds + 1,
-    )
-    with pytest.raises(InvalidCursor):
-        decode_cursor(encoded, kind="activity")
-
-
-def test_cursor_can_reproduce_one_operation_time_exactly(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("core.cursors.time.time", lambda: 1_100)
-    first = encode_cursor("activity", 1_000, position=2)
-    monkeypatch.setattr("core.cursors.time.time", lambda: 1_200)
-    replay = encode_cursor("activity", 1_000, position=2)
-
-    assert replay == first
-    decoded = decode_cursor(replay, kind="activity")
-    assert decoded["issued_at"] == 1_000
-    assert decoded["expires_at"] == 1_000 + Limits().cursor_lifetime_seconds
-
-
-@pytest.mark.parametrize(
-    ("issued_at", "expires_at"),
-    [(True, 4_600), (1_000, False), (1_000, 4_601), (2_000, 5_600)],
-)
-def test_cursor_rejects_invalid_or_future_policy_times(
-    monkeypatch: pytest.MonkeyPatch, issued_at: object, expires_at: object
-) -> None:
-    monkeypatch.setattr("core.cursors.time.time", lambda: 1_000)
-    encoded = signing.Signer(salt=CURSOR_SALT).sign_object(
-        {
-            "kind": "activity",
-            "issued_at": issued_at,
-            "expires_at": expires_at,
-            "position": 1,
-        },
-        compress=True,
-    )
-
-    with pytest.raises(InvalidCursor):
-        decode_cursor(encoded, kind="activity")
+def test_cursor_replays_the_same_traversal_state() -> None:
+    first = encode_cursor("activity", position=2)
+    assert encode_cursor("activity", position=2) == first

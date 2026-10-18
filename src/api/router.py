@@ -212,10 +212,9 @@ def _credential(request: HttpRequest) -> AgentCredential:
     return request.auth  # type: ignore[no-any-return,attr-defined]
 
 
-def _activity_cursor(tunnel: Tunnel, position: int, *, issued_at: int | None = None) -> str:
+def _activity_cursor(tunnel: Tunnel, position: int) -> str:
     return _cursor(
         "activity",
-        issued_at,
         tunnel_id=str(tunnel.id),
         position=position,
     )
@@ -276,7 +275,6 @@ def _created_tunnel_response(created: CreatedTunnel) -> dict[str, Any]:
         "activity_cursor": _activity_cursor(
             tunnel,
             created.event_position,
-            issued_at=int(tunnel.created_at.timestamp()),
         ),
         "trust_notice": (
             "Tunnels should not be treated as confidential. "
@@ -317,7 +315,6 @@ def _posted_reply_response(posted: PostedReply) -> dict[str, Any]:
         "activity_cursor": _activity_cursor(
             message.tunnel,
             posted.event_position,
-            issued_at=int(message.created_at.timestamp()),
         ),
         "idempotent_replay": posted.replay,
     }
@@ -346,7 +343,6 @@ def _started_cycle_response(started: StartedCycle) -> dict[str, Any]:
         "activity_cursor": _activity_cursor(
             started.tunnel,
             started.event_position,
-            issued_at=int(cycle.created_at.timestamp()),
         ),
         "idempotent_replay": started.replay,
     }

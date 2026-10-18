@@ -24,7 +24,6 @@ class Limits:
     maximum_search_query_characters: int = 512
     maximum_search_response_bytes: int = 1_048_576
     search_statement_timeout_milliseconds: int = 500
-    cursor_lifetime_seconds: int = 3_600
     api_operations_per_minute: int = 120
     api_burst: int = 30
 

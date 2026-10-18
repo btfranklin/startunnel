@@ -40,7 +40,7 @@ SAFE_ERROR_MESSAGES = {
     "input_too_large": "The JSON input is too large.",
     "invalid_address": "The address is not valid.",
     "invalid_credential": "The agent credential is not valid.",
-    "invalid_cursor": "The cursor is not valid or has expired.",
+    "invalid_cursor": "The cursor is not valid.",
     "invalid_input": "Provide one JSON object through standard input.",
     "invalid_request": "The request is not valid.",
     "invalid_response": "The service returned an unexpected response.",

@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+import time_machine
 from django.test import Client
 
-from core.cursors import decode_cursor
 from tunnels.models import Message
 from tunnels.services import (
     close_cycle,
@@ -160,7 +160,6 @@ def test_enter_accepts_exact_wire_size_and_trims_one_byte_below(
     Message.objects.filter(pk=reply.message.id).update(
         created_at=datetime(2026, 10, 18, 1, 2, 4, 123, tzinfo=UTC)
     )
-    monkeypatch.setattr("core.cursors.time.time", lambda: 1_800_000_000)
 
     full = _post(client, "/api/v1/enter", {"address": created.address}, key=key)
     assert full.status_code == 200, full.content
@@ -242,28 +241,26 @@ def test_entry_rechecks_rotated_and_retired_addresses(
     assert retired.status_code == 404
 
 
-def test_entry_history_cursor_expires(
-    client: Client, credential_factory: Any, monkeypatch: Any
+def test_entry_history_and_activity_cursors_work_after_one_hour(
+    client: Client, credential_factory: Any
 ) -> None:
-    creator, key = credential_factory(name="Expired entry creator")
-    created = _create(creator, "entry-expired-create")
-    _reply(created, creator, "entry-expired-reply", "Older than the returned root.")
-    response = _post(
-        client,
-        "/api/v1/enter",
-        {"address": created.address, "limit": 1},
-        key=key,
-    )
-    cursor = response.json()["history_cursor"]
-    decoded = decode_cursor(cursor, kind="tree-page")
-    monkeypatch.setattr("core.cursors.time.time", lambda: decoded["expires_at"] + 1)
-
-    expired = _post(
-        client,
-        "/api/v1/tree",
-        {"address": created.address, "page_cursor": cursor},
-        key=key,
-    )
-
-    assert expired.status_code == 400
-    assert expired.json()["error"]["code"] == "invalid_cursor"
+    creator, key = credential_factory(name="Delayed entry creator")
+    created = _create(creator, "entry-delayed-create")
+    _reply(created, creator, "entry-delayed-reply", "Older than the returned root.")
+    response = _post(client, "/api/v1/enter", {"address": created.address, "limit": 1}, key=key)
+    result = response.json()
+    with time_machine.travel(created.cycle.created_at.timestamp() + 7200, tick=False):
+        history = _post(
+            client,
+            "/api/v1/tree",
+            {"address": created.address, "page_cursor": result["history_cursor"]},
+            key=key,
+        )
+        assert history.status_code == 200
+        checkpoint = _post(
+            client,
+            "/api/v1/activity/checkpoint",
+            {"address": created.address, "cursor": result["activity_cursor"]},
+            key=key,
+        )
+        assert checkpoint.status_code == 200
