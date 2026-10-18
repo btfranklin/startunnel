@@ -298,8 +298,10 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
     credential_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from asgiref.sync import async_to_sync
+
     from tunnels import entry
-    from tunnels.activity import read_activity_once
+    from tunnels.activity import read_activity_async
 
     creator, _ = credential_factory(name="Entry race creator")
     created = _create_board(creator, key="entry-race-create")
@@ -349,7 +351,7 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
 
     assert view.snapshot_sequence == 1
     assert view.activity_position == 2
-    page = read_activity_once(
+    page = async_to_sync(read_activity_async)(
         credential=creator,
         address=created.address,
         after_position=view.activity_position,

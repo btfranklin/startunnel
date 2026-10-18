@@ -6,10 +6,11 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from asgiref.sync import async_to_sync
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from tunnels.activity import commit_checkpoint, read_activity_once
+from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
 from tunnels.models import ActivityCheckpoint
 from tunnels.participants import list_participants
@@ -98,6 +99,7 @@ def test_participants_merge_sends_and_mentions_with_immutable_name_snapshots(
     assert page.complete is True
 
 
+@pytest.mark.django_db(transaction=True)
 def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
     credential_factory: Any,
     user_factory: Any,
@@ -118,7 +120,7 @@ def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
 
     assert reader_summary(created.cycle.id).acknowledged_event_position is None
 
-    filtered = read_activity_once(
+    filtered = async_to_sync(read_activity_async)(
         credential=reader,
         address=created.address,
         event_types=("cycle_started",),

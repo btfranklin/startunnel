@@ -7,8 +7,9 @@ import json
 from typing import Any
 
 import pytest
+from asgiref.sync import async_to_sync
 
-from tunnels.activity import read_activity_once
+from tunnels.activity import read_activity_async
 from tunnels.codec import canonical_address
 from tunnels.context import context_item_payload, get_context
 from tunnels.entry import enter_tunnel, entry_payload
@@ -34,6 +35,7 @@ def _request_digest(data: dict[str, Any]) -> bytes:
     return hashlib.sha256(canonical).digest()
 
 
+@pytest.mark.django_db(transaction=True)
 def test_labels_are_stored_and_shared_reads_keep_sender_identity(
     credential_factory: Any,
 ) -> None:
@@ -70,7 +72,7 @@ def test_labels_are_stored_and_shared_reads_keep_sender_identity(
         context_item_payload(item.message, item.reason)["message"]["sender"]["session"]
         for item in context.items
     ] == ["chat-a", "chat-b"]
-    activity = read_activity_once(credential=credential, address=created.address)
+    activity = async_to_sync(read_activity_async)(credential=credential, address=created.address)
     assert [
         message_payload(item.message)["sender"]["session"]
         for item in activity.events

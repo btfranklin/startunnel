@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from asgiref.sync import async_to_sync
 
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
@@ -17,9 +18,7 @@ from tunnels.activity import (
     _confirm_activity_page_for_async,
     _continue_activity_wait_for_async,
     commit_checkpoint,
-    read_activity,
     read_activity_async,
-    read_activity_once,
 )
 from tunnels.errors import (
     CheckpointRegression,
@@ -51,15 +50,16 @@ def _reply(created: Any, credential: Any, key: str = "activity-reply") -> Any:
     )
 
 
+@pytest.mark.django_db(transaction=True)
 def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
     credential_factory: Any,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
-    page = read_activity_once(credential=creator, address=created.address, limit=1)
+    page = async_to_sync(read_activity_async)(credential=creator, address=created.address, limit=1)
     assert [event.position for event in page.events] == [1]
     assert page.has_more and page.next_position == 1
-    filtered = read_activity_once(
+    filtered = async_to_sync(read_activity_async)(
         credential=creator,
         address=created.address,
         event_types=(TunnelEvent.Type.CYCLE_CLOSED,),
@@ -68,23 +68,33 @@ def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
     assert filtered.next_position == filtered.high_water_position == 2
 
 
+@pytest.mark.django_db(transaction=True)
 def test_activity_validation_rejects_bad_positions_limits_and_types(
     credential_factory: Any,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "activity-validation")
     with pytest.raises(InvalidRequest, match="negative"):
-        read_activity_once(credential=creator, address=created.address, after_position=-1)
+        async_to_sync(read_activity_async)(
+            credential=creator, address=created.address, after_position=-1
+        )
     with pytest.raises(InvalidRequest, match="limit"):
-        read_activity_once(credential=creator, address=created.address, limit=0)
+        async_to_sync(read_activity_async)(credential=creator, address=created.address, limit=0)
     with pytest.raises(InvalidRequest, match="event type"):
-        read_activity_once(credential=creator, address=created.address, event_types=("bad",))
+        async_to_sync(read_activity_async)(
+            credential=creator, address=created.address, event_types=("bad",)
+        )
     with pytest.raises(InvalidRequest, match="not valid"):
-        read_activity_once(credential=creator, address=created.address, after_position=3)
+        async_to_sync(read_activity_async)(
+            credential=creator, address=created.address, after_position=3
+        )
     with pytest.raises(InvalidRequest, match="wait_seconds"):
-        read_activity(credential=creator, address=created.address, wait_seconds=-1)
+        async_to_sync(read_activity_async)(
+            credential=creator, address=created.address, wait_seconds=-1
+        )
 
 
+@pytest.mark.django_db(transaction=True)
 def test_checkpoint_resume_exact_forward_and_regression(credential_factory: Any) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
@@ -92,7 +102,7 @@ def test_checkpoint_resume_exact_forward_and_regression(credential_factory: Any)
     checkpoint, advanced = commit_checkpoint(credential=reader, address=created.address, position=2)
     assert advanced
     _reply(created, creator, "activity-checkpoint-reply")
-    page = read_activity_once(credential=reader, address=created.address)
+    page = async_to_sync(read_activity_async)(credential=reader, address=created.address)
     assert [event.position for event in page.events] == [3]
     checkpoint.refresh_from_db()
     assert checkpoint.last_event_position == 2
@@ -120,29 +130,7 @@ def test_checkpoint_validation(credential_factory: Any) -> None:
     assert not ActivityCheckpoint.objects.filter(last_event_position=4).exists()
 
 
-def test_sync_wait_uses_bounded_database_fallback(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    creator, _ = credential_factory()
-    reader, _ = credential_factory()
-    created = _create(creator, "activity-sync-wait")
-    sleeps: list[float] = []
-
-    def sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-        _reply(created, creator, "activity-sync-wait-reply")
-
-    monkeypatch.setattr("tunnels.activity.time.sleep", sleep)
-    page = read_activity(
-        credential=reader,
-        address=created.address,
-        after_position=2,
-        wait_seconds=1,
-    )
-    assert [event.position for event in page.events] == [3]
-    assert sleeps and sleeps[0] <= 1
-
-
+@pytest.mark.django_db(transaction=True)
 def test_mentions_are_prefetched_only_when_needed(credential_factory: Any) -> None:
     creator, _ = credential_factory()
     mentioned, _ = credential_factory()
@@ -155,7 +143,9 @@ def test_mentions_are_prefetched_only_when_needed(credential_factory: Any) -> No
         content={"type": "text", "text": "Please review."},
         mentions=[mentioned.id],
     )
-    page = read_activity_once(credential=mentioned, address=created.address, after_position=2)
+    page = async_to_sync(read_activity_async)(
+        credential=mentioned, address=created.address, after_position=2
+    )
     message = page.events[0].message
     assert message is not None
     assert [item.display_name for item in message.mentions.all()] == [mentioned.name]
