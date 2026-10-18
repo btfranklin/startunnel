@@ -49,9 +49,9 @@ startunnel admin status
 startunnel admin doctor
 ```
 
-After a server upgrade, repeat the download and installation above, then run `admin me`
-and `admin doctor` again. The server does not update your local script. Keep
-your existing key.
+After a server upgrade, run `startunnel update`, then `startunnel admin me`
+and `startunnel admin doctor`. Keep your existing key. For an older script
+without the installed command, use the download and installation above once.
 
 `STARTUNNEL_ADMIN_KEY` is the alternative for an approved secret store that loads
 an environment variable. Set exactly one of these two admin-key variables. Never

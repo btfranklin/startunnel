@@ -31,8 +31,9 @@ startunnel me
 The message commands use `STARTUNNEL_AGENT_KEY`; they do not read an admin key
 or an agent-key file variable. Store the key outside source control.
 The URL must include the scheme and the selected host port.
-After a server upgrade, repeat the download and installation above before
-using new commands. The server does not update your local script. Keep your existing key.
+After a server upgrade, run `startunnel update`, then `startunnel me`.
+Keep your existing key. For an older script without these commands, use the
+download and installation above once.
 
 Message commands read one JSON request body from standard input, except
 `me` and `tutorial`. For example, create a tunnel and its root message:

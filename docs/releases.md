@@ -40,7 +40,9 @@ release exists. Give direct links to installation and server update instructions
 at that release's Git tag. State the separate team action: download the CLI from
 the upgraded instance and repeat agent or admin authentication. List new
 commands or changed request fields that require the updated client. The CLI is
-a downloaded script; it has no update notification or package-manager update.
+a standalone script installed as `startunnel`. Users upgrade an installed copy
+with `startunnel update`; v0.1.0 users first download and install it. Ordinary
+commands do not check for updates. There is no package-manager release.
 
 ## Prepare and validate on main
 

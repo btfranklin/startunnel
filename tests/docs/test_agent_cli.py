@@ -27,6 +27,7 @@ class Response:
     status: int
     value: dict[str, Any] | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    raw: bytes | None = None
 
 
 @dataclass
@@ -59,9 +60,13 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
             )
             response = scenario.responses.pop(0)
             encoded = (
-                json.dumps(response.value, separators=(",", ":")).encode("utf-8")
-                if response.value is not None
-                else b""
+                response.raw
+                if response.raw is not None
+                else (
+                    json.dumps(response.value, separators=(",", ":")).encode("utf-8")
+                    if response.value is not None
+                    else b""
+                )
             )
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
@@ -571,6 +576,7 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
             imports.add(node.module.split(".", 1)[0])
     assert imports <= {
         "argparse",
+        "ast",
         "collections",
         "contextlib",
         "dataclasses",
@@ -684,6 +690,112 @@ def test_install_failure_preserves_existing_command_and_removes_temporary_files(
     assert json.loads(output.err)["error"]["code"] == "installation_failed"
     assert "private filesystem detail" not in output.err
     assert command.read_bytes() == b"existing executable"
+    assert list(tmp_path.iterdir()) == [command]
+
+
+def test_installed_command_updates_from_the_selected_instance_without_credentials(
+    tmp_path: Path,
+) -> None:
+    command = tmp_path / "startunnel"
+    command.write_bytes(CLI.read_bytes())
+    command.chmod(0o755)
+    updated = CLI.read_bytes().replace(
+        b'USER_AGENT = "startunnel-agent-cli"', b'USER_AGENT = "startunnel-agent-cli-updated"'
+    )
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    with serve(Response(200, raw=updated), Response(200, {"agent": {"id": "agent-id"}})) as (
+        base_url,
+        scenario,
+    ):
+        environment["STARTUNNEL_BASE_URL"] = base_url
+        result = subprocess.run(
+            [str(command), "update"], capture_output=True, text=True, env=environment, check=False
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        assert json.loads(result.stdout) == {
+            "command_path": str(command),
+            "source_instance": base_url,
+        }
+        environment["STARTUNNEL_AGENT_KEY"] = "st_test-agent-key"
+        identity = subprocess.run(
+            [str(command), "me"], capture_output=True, text=True, env=environment, check=False
+        )
+    assert identity.returncode == 0, identity.stderr
+    assert json.loads(identity.stdout) == {"agent": {"id": "agent-id"}}
+    assert command.read_bytes() == updated
+    assert command.stat().st_mode & 0o777 == 0o755
+    assert list(tmp_path.iterdir()) == [command]
+    assert scenario.requests[0]["method"] == "GET"
+    assert scenario.requests[0]["path"] == "/downloads/star_tunnel.py"
+    assert "Authorization" not in scenario.requests[0]["headers"]
+    assert scenario.requests[1]["headers"]["User-Agent"] == "startunnel-agent-cli-updated"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        Response(404, raw=b"private server error"),
+        Response(302, headers={"Location": "http://127.0.0.1:1/other"}),
+        Response(200, raw=b"<html>Not a client</html>"),
+        Response(200, raw=b"#!/usr/bin/env python3\ndef main(:\n"),
+        Response(200, raw=CLI.read_bytes().split(b'if __name__ == "__main__":')[0]),
+        Response(200, raw=b"x" * (2 * 1024 * 1024 + 1)),
+    ],
+    ids=["http-error", "redirect", "html", "syntax", "truncated", "too-large"],
+)
+def test_failed_update_preserves_the_installed_command(tmp_path: Path, response: Response) -> None:
+    command = tmp_path / "startunnel"
+    original = CLI.read_bytes()
+    command.write_bytes(original)
+    command.chmod(0o700)
+    with serve(response) as (base_url, scenario):
+        environment = {
+            **os.environ,
+            "STARTUNNEL_BASE_URL": base_url,
+            "STARTUNNEL_AGENT_KEY": "st_private-agent-key",
+            "STARTUNNEL_ADMIN_KEY": "st_private-admin-key",
+        }
+        result = subprocess.run(
+            [str(command), "update"], capture_output=True, text=True, env=environment, check=False
+        )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["code"] == "update_failed"
+    assert "private" not in result.stderr
+    assert len(scenario.requests) == 1
+    assert "Authorization" not in scenario.requests[0]["headers"]
+    assert command.read_bytes() == original
+    assert command.stat().st_mode & 0o777 == 0o700
+    assert list(tmp_path.iterdir()) == [command]
+
+
+def test_update_write_failure_preserves_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli = _load_cli_module()
+    command = tmp_path / "startunnel"
+    original = CLI.read_bytes()
+    command.write_bytes(original)
+    command.chmod(0o700)
+    monkeypatch.setattr(cli, "__file__", str(command))
+
+    def fail(*args: object) -> None:
+        del args
+        raise OSError("private filesystem detail")
+
+    monkeypatch.setattr(cli.os, "replace", fail)
+    with serve(Response(200, raw=original)) as (base_url, _scenario):
+        monkeypatch.setenv("STARTUNNEL_BASE_URL", base_url)
+        assert cli.main(["update"]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert json.loads(output.err)["error"]["code"] == "update_failed"
+    assert "private" not in output.err
+    assert command.read_bytes() == original
+    assert command.stat().st_mode & 0o777 == 0o700
     assert list(tmp_path.iterdir()) == [command]
 
 

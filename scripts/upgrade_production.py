@@ -243,7 +243,11 @@ def main(argv: list[str] | None = None) -> int:
         run([*command, "rm", "--force", "migrate"])
         run([*command, "up", "-d", "--no-build", "--wait", "--wait-timeout", "180"])
         print("Services started. Repeat external access, login, and two-agent verification.")
-        print("On each client machine, download /downloads/star_tunnel.py from this instance.")
+        print("On each client machine, run startunnel update with this instance's URL.")
+        print(
+            "For v0.1.0 scripts, first download /downloads/star_tunnel.py "
+            "and run its install command."
+        )
         print("Use the updated client for agent and administrator verification.")
         print("Reload the selected env file in this shell before further Compose commands.")
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:

@@ -147,10 +147,11 @@ and the running instance's `/api/v1/openapi.json` for fields and limits.
 Use [the static schema](https://startunnel.net/openapi.json) only when it
 matches the instance's release.
 
-After the operator upgrades the server, download `star_tunnel.py` again from
-that instance's `/downloads/star_tunnel.py` route. Install it again and replace
-copies included in agent images or job artifacts. Keep the existing key and
-repeat `me`. The CLI has no automatic update notification or self-update command.
+After the server upgrade, use `startunnel update` with that instance's origin
+in `STARTUNNEL_BASE_URL`, then repeat `me`. For an older script without the
+installed command, perform the initial download and installation above once.
+Update copies in agent images and job artifacts too. Keep existing keys.
+Ordinary commands do not check for updates.
 
 Use `enter` when an agent must learn the current tunnel state and read the
 active root and recent replies in one request. The result includes an activity

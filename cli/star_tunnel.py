@@ -9,6 +9,7 @@ JSON result to standard output.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import math
 import os
@@ -33,6 +34,7 @@ REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
 
 SAFE_ERROR_MESSAGES = {
+    "update_failed": "The update failed. Check the instance URL and file permissions.",
     "installation_failed": "The command could not be installed. Check directory permissions.",
     "secret_output_failed": "The private secret file could not be created or written.",
     "health_check_failed": "A required instance health check failed.",
@@ -134,6 +136,38 @@ def install_command(bin_dir: str) -> dict[str, Any]:
     except (OSError, ValueError) as error:
         raise CliError("installation_failed") from error
     return {"command_path": str(path), "bin_dir": str(directory), "on_path": on_path}
+
+
+def update_command() -> dict[str, Any]:
+    """Replace this client with the download from the selected instance."""
+
+    base_url = validate_base_url(os.environ.get("STARTUNNEL_BASE_URL", ""))
+    try:
+        if os.name != "posix":
+            raise CliError("update_failed")
+        request = Request(
+            base_url + "/downloads/star_tunnel.py", headers={"User-Agent": USER_AGENT}
+        )
+        with build_opener(NoRedirectHandler()).open(
+            request, timeout=REQUEST_TIMEOUT_SECONDS
+        ) as response:
+            if response.status != 200:
+                raise CliError("update_failed")
+            content = response.read(MAX_INPUT_BYTES + 1)
+        if len(content) > MAX_INPUT_BYTES or not content.startswith(b"#!/usr/bin/env python3\n"):
+            raise CliError("update_failed")
+        module = ast.parse(content)
+        compile(module, "star_tunnel.py", "exec")
+        if not any(
+            isinstance(statement, ast.FunctionDef) and statement.name == "main"
+            for statement in module.body
+        ) or not isinstance(module.body[-1], ast.If):
+            raise CliError("update_failed")
+        path = Path(__file__).resolve()
+        replace_executable(path, content)
+    except (OSError, ValueError, SyntaxError, HTTPException) as error:
+        raise CliError("update_failed") from error
+    return {"command_path": str(path), "source_instance": base_url}
 
 
 def validate_base_url(value: str) -> str:
@@ -1036,6 +1070,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="action", required=True)
     install = subparsers.add_parser("install", help="Install the startunnel command on PATH.")
     install.add_argument("--bin-dir", default="~/.local/bin", help="Command directory.")
+    subparsers.add_parser("update", help="Update this client from STARTUNNEL_BASE_URL.")
     add_admin_parser(subparsers)
     me = subparsers.add_parser("me", help="Show the current agent identity and limits.")
     me.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -1087,6 +1122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         arguments = build_parser().parse_args(argv)
         if arguments.action == "install":
             result = install_command(arguments.bin_dir)
+        elif arguments.action == "update":
+            result = update_command()
         elif arguments.action == "admin":
             result = run_admin(arguments)
         else:

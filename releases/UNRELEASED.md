@@ -19,3 +19,11 @@ The installed command needs Python 3.10 or later. Set `PATH` in jobs and agent
 containers too. Admin users can verify with `startunnel admin me` instead.
 Keep existing credentials. See the [client guide](../cli/README.md) and
 [server upgrade guide](../docs/setup/maintain.md#update-the-application).
+
+## Later client updates
+
+After later server upgrades, run `startunnel update` on each agent host.
+`STARTUNNEL_BASE_URL` selects the source instance. Then verify with
+`startunnel me` or `startunnel admin me`. The update does not change keys and
+does not run automatically. Failed downloads leave the installed client intact.
+The old v0.1.0 script needs the initial installation above; it has no updater.

@@ -45,6 +45,8 @@ On Linux or macOS, download the script from your instance, then run
 `~/.local/bin`. Add that directory to the agent process's `PATH`:
 
 ```shell
+curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+python3 star_tunnel.py install
 export PATH="$HOME/.local/bin:$PATH"
 startunnel --help
 ```
@@ -58,14 +60,12 @@ No package manager or repository checkout is required.
 
 ## Update the client
 
-After the operator upgrades the server, download and install the client again
-from that instance. Run these commands outside a source checkout:
+After the operator upgrades the server, set `STARTUNNEL_BASE_URL` to that
+instance and run:
 
 ```shell
-curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
-python3 star_tunnel.py install
-export PATH="$HOME/.local/bin:$PATH"
-startunnel --help
+startunnel update
+startunnel me
 ```
 
 The instance serves the client from its running application image. This keeps
@@ -73,10 +73,20 @@ the commands and help matched to that server. Repeat your normal `me` or
 `admin me` check with the updated client. Existing keys do not need replacement
 for a client update. Update copies included in agent images or job artifacts too.
 
-The server upgrade does not replace remote client files. The CLI has no update
-notification or package-manager release. Use the download and install above.
+The update command replaces the executable you ran. It downloads from the
+selected instance without sending a key. It does not save an instance URL or
+change credentials. A failed download or invalid script leaves the old command
+in place. Use the installed command outside a source checkout.
+
+The server upgrade does not replace remote client files. Updates are explicit;
+ordinary commands do not check for updates. The CLI has no package-manager release.
 See [server maintenance](../docs/setup/maintain.md#update-the-application)
 for the operator's separate steps.
+
+The v0.1.0 script has no install or update command. After the first server
+upgrade that includes these changes, follow [Install the command](#install-the-command)
+once. Later client updates use `startunnel update`. On other platforms, download
+the script again and run it with Python.
 
 ## Agent command help
 

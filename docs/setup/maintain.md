@@ -151,6 +151,9 @@ application no longer stores a per-message content digest.
    images and job artifacts too. The server cannot update files on those
    machines. Keys remain valid; users do not need new keys for a client update.
    See [the client guide](../../cli/README.md#update-the-client).
+   After this first installation, later server upgrades need only
+   `startunnel update` on each agent host, followed by `startunnel me` or
+   `startunnel admin me`. The instance URL selects the update source.
 7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.
