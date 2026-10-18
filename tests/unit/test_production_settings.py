@@ -183,13 +183,14 @@ def test_production_http_origin_disables_https_only_settings(
             sys.executable,
             "-c",
             "from startunnel.settings.production import *; "
+            "from django.conf import settings; "
             "assert STARTUNNEL_BASE_URL == " + repr(canonical_url) + "; "
             "assert SECURE_SSL_REDIRECT is False; "
             "assert SESSION_COOKIE_SECURE is False; "
             "assert CSRF_COOKIE_SECURE is False; "
-            "assert SECURE_HSTS_SECONDS == 0; "
-            "assert SECURE_HSTS_INCLUDE_SUBDOMAINS is False; "
-            "assert SECURE_HSTS_PRELOAD is False",
+            "assert settings.SECURE_HSTS_SECONDS == 0; "
+            "assert settings.SECURE_HSTS_INCLUDE_SUBDOMAINS is False; "
+            "assert settings.SECURE_HSTS_PRELOAD is False",
         ],
         cwd=ROOT,
         env=environment,
@@ -207,10 +208,13 @@ def test_production_https_defaults_to_secure_settings() -> None:
             sys.executable,
             "-c",
             "from startunnel.settings.production import *; "
+            "from django.conf import settings; "
             "assert SECURE_SSL_REDIRECT is True; "
             "assert SESSION_COOKIE_SECURE is True; "
             "assert CSRF_COOKIE_SECURE is True; "
-            "assert SECURE_HSTS_SECONDS == 31536000",
+            "assert settings.SECURE_HSTS_SECONDS == 0; "
+            "assert not settings.SECURE_HSTS_INCLUDE_SUBDOMAINS; "
+            "assert not settings.SECURE_HSTS_PRELOAD",
         ],
         cwd=ROOT,
         env=environment,

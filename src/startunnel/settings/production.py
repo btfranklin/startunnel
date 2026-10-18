@@ -73,7 +73,4 @@ https_origin = public_url.scheme == "https"
 SECURE_SSL_REDIRECT = env_bool("STARTUNNEL_SECURE_SSL_REDIRECT", https_origin)  # noqa: F405
 SESSION_COOKIE_SECURE = https_origin
 CSRF_COOKIE_SECURE = https_origin
-SECURE_HSTS_SECONDS = 31_536_000 if https_origin else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = https_origin
-SECURE_HSTS_PRELOAD = https_origin
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
