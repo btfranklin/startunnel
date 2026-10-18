@@ -287,6 +287,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     )
     identifier = str(created.tunnel.id)
     inspected = tunnel_resource(created.tunnel)
+    assert inspected["address"] == created.address
     run(
         actor,
         "tunnels.close",
@@ -317,6 +318,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     data = {"tunnel_id": identifier, "expected_address_generation": 1}
     rotated = run(actor, "tunnels.rotate", data, key)
     assert rotated["resource"]["address_generation"] == 2
+    assert rotated["resource"]["address"] == rotated["secret"]
     assert run(actor, "tunnels.rotate", data, key) == rotated
     assert list_admin_resources("cycles", actor=actor, tunnel_id=created.tunnel.id)["items"]
     run(
@@ -330,6 +332,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
         list_admin_resources("tunnels", actor=actor, state="retired")["items"][0]["id"]
         == identifier
     )
+    assert tunnel_resource(created.tunnel)["address"] is None
 
 
 def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:

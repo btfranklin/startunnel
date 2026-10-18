@@ -102,6 +102,7 @@ class TunnelResource(Schema):
     state: str
     creator_id: UUID
     created_at: datetime
+    address: str | None
     address_generation: int | None
     active_cycle_id: UUID | None
     retirement_confirmation: str

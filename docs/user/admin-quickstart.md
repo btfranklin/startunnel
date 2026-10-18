@@ -71,6 +71,10 @@ python star_tunnel.py admin tunnels list
 python star_tunnel.py admin audit list
 ```
 
+Tunnel lists and inspection include the stored current `address`. A retired
+tunnel has no current address and returns `null`. Use this field to recover an
+address without rotating it. Keep addresses out of URLs and logs.
+
 Mutations read JSON from stdin and require an idempotency key. A creation that
 returns a key, or an address rotation, also requires a private output file:
 

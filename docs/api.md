@@ -179,9 +179,10 @@ checks as an exit failure; there is no separate doctor endpoint.
 Mutation results contain `resource` and `operation`, with receipt and audit-event
 IDs. A key issue or address rotation also returns `secret` to the authenticated
 caller. Direct API clients must save it privately. The CLI removes that field
-from stdout and writes the value only to `--secret-output`. Admin inspection
-never returns stored raw keys or the current tunnel address. Message creation
-continues to return its address through the existing message API.
+from stdout and writes the value only to `--secret-output`. Admin tunnel lists
+and inspection return the stored current `address`, or `null` when no current
+address exists. Admin inspection never returns stored raw keys. Keep addresses
+out of URLs and logs.
 
 Account, key, agent, tunnel, cycle, and audit lists return `items` and
 `next_cursor`. Keep the same filters when following a cursor. Admin operations

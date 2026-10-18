@@ -111,6 +111,7 @@ def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
         "state": tunnel.state,
         "creator_id": str(tunnel.creator_id),
         "created_at": tunnel.created_at.isoformat(),
+        "address": address.address if address else None,
         "address_generation": address.generation if address else None,
         "active_cycle_id": str(cycle.id) if cycle else None,
         "retirement_confirmation": retirement_confirmation(tunnel),

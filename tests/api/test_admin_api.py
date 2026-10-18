@@ -15,6 +15,31 @@ from tunnels.models import AuditEvent
 pytestmark = pytest.mark.django_db
 
 
+def test_admin_tunnel_reads_return_the_stored_current_address(
+    client: Any, user_factory: Any, credential_factory: Any
+) -> None:
+    from tunnels.services import create_tunnel, rotate_address_as_operator
+
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    _, secret = issue_admin_key(owner=actor, name="inspection")
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="inspect-admin-address",
+        root_content={"type": "text", "text": "Inspect this tunnel."},
+    )
+    path = f"/api/v1/admin/tunnels/{created.tunnel.id}"
+    assert client.get(path, **headers).json()["address"] == created.address
+    rotated = rotate_address_as_operator(
+        actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
+    )
+    listed = client.get("/api/v1/admin/tunnels", **headers).json()["items"]
+    assert listed[0]["address"] == rotated.address
+    assert client.get(path, **headers).json()["address"] == rotated.address
+    assert rotated.address not in str(list(AuditEvent.objects.values_list("metadata", flat=True)))
+
+
 def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: Any) -> None:
     actor = user_factory()
     credential, secret = issue_admin_key(owner=actor, name="automation")
