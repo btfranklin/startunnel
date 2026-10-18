@@ -42,6 +42,9 @@ admin key.
 
 JSON output escapes non-ASCII characters so it also works with legacy output
 encodings. JSON decoding restores the exact strings, including glyph addresses.
+Requests also preserve Unicode escapes for server validation. Malformed UTF-8,
+invalid JSON, and numbers that exceed the runtime parser limit return
+`invalid_input` errors with exit status `1`.
 
 ## Install the command
 

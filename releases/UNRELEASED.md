@@ -81,3 +81,7 @@ JSON output now escapes non-ASCII characters. This prevents output failures
 on hosts with legacy encodings. Decoded addresses and message strings are
 unchanged. Callers must read the JSON values instead of copying escaped text
 from the serialized document.
+
+Malformed input and numbers that exceed the runtime JSON parser limit now
+return `invalid_input` errors. Escaped Unicode in requests reaches the server's
+validation without a local encoding failure.

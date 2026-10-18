@@ -255,7 +255,7 @@ def read_input_object() -> dict[str, Any]:
         raise CliError("input_too_large")
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except ValueError as error:
         raise CliError("invalid_input") from error
     if not isinstance(value, dict):
         raise CliError("invalid_input")
@@ -393,7 +393,7 @@ class StarTunnelTransport:
             "User-Agent": USER_AGENT,
         }
         if body is not None:
-            encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
             if len(encoded) > MAX_INPUT_BYTES:
                 raise CliError("input_too_large")
             headers["Content-Type"] = "application/json"

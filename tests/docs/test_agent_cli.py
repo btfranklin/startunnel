@@ -424,6 +424,36 @@ def test_unicode_results_work_with_ascii_output_encoding(write: bool) -> None:
     assert len(scenario.requests) == 1
 
 
+@pytest.mark.parametrize("raw", [b'{"value":' + b"1" * 5000 + b"}", b"{", b"\xff"])
+def test_invalid_json_input_returns_a_json_error(raw: bytes) -> None:
+    result = subprocess.run(
+        [sys.executable, str(CLI), "read-tree"],
+        input=raw,
+        env={
+            **os.environ,
+            "STARTUNNEL_BASE_URL": "http://127.0.0.1:1",
+            "STARTUNNEL_AGENT_KEY": "st_test-agent-key",
+            "PYTHONINTMAXSTRDIGITS": "4300",
+        },
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout == b""
+    assert json.loads(result.stderr)["error"]["code"] == "invalid_input"
+
+
+def test_surrogate_input_reaches_server_unicode_validation() -> None:
+    body = {"address": "\ud800"}
+    with serve(Response(400, {"error": {"code": "invalid_address"}})) as (base_url, scenario):
+        result = run_cli(base_url, "read-tree", body=body)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["code"] == "invalid_address"
+    assert scenario.requests[0]["body"] == body
+
+
 def test_missing_command_argument_has_json_usage_error() -> None:
     result = run_cli("http://127.0.0.1:8000", "reply")
 
