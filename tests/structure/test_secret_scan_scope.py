@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,3 +57,38 @@ def test_git_free_source_export_scans_source_without_ignored_outputs(
 
     (export / "module.py").write_text('VALUE = "' + "s" + "k-" + "A" * 32 + '"\n')
     assert check_secrets.main([]) == 1
+
+
+def test_failed_security_tool_shows_diagnostics_and_keeps_report(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; print('report data'); print('tool diagnostic', file=sys.stderr); sys.exit(7)",
+    ]
+    with pytest.raises(run_security_release.SecurityGateError, match="exit status 7"):
+        run_security_release._run("Example scan", command)
+    normal = capfd.readouterr()
+    assert "report data" in normal.out
+    assert "tool diagnostic" in normal.err
+
+    report = tmp_path / "report.json"
+    with pytest.raises(run_security_release.SecurityGateError, match="exit status 7"):
+        run_security_release._run("Example scan", command, output=report)
+    redirected = capfd.readouterr()
+    assert redirected.out == ""
+    assert "tool diagnostic" in redirected.err
+    assert report.read_text(encoding="utf-8") == "report data\n"
+
+
+def test_security_artifact_upload_runs_after_gate_failure() -> None:
+    workflow = (run_security_release.ROOT / ".github/workflows/release-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    security_job = workflow.split("  security:\n", maxsplit=1)[1]
+    security_job = security_job.split("  system:\n", maxsplit=1)[0]
+    upload = security_job.split("      - name: Upload security reports\n", maxsplit=1)[1]
+    assert "        if: always()\n" in upload
+    assert "          path: artifacts/security/\n" in upload
+    assert "          if-no-files-found: warn\n" in upload

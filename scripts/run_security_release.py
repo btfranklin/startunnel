@@ -28,16 +28,12 @@ def _run(
     command: list[str],
     *,
     output: Path | None = None,
-    environment: dict[str, str] | None = None,
 ) -> None:
     if output is None:
         result = subprocess.run(
             command,
             cwd=ROOT,
-            env=environment or os.environ.copy(),
             text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             check=False,
         )
     else:
@@ -45,14 +41,12 @@ def _run(
             result = subprocess.run(
                 command,
                 cwd=ROOT,
-                env=environment or os.environ.copy(),
                 text=True,
                 stdout=stream,
-                stderr=subprocess.DEVNULL,
                 check=False,
             )
     if result.returncode:
-        raise SecurityGateError(f"{label} failed. Run the named tool directly for details.")
+        raise SecurityGateError(f"{label} failed (exit status {result.returncode}).")
 
 
 def _candidate_tree(destination: Path) -> None:

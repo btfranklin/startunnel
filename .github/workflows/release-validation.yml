@@ -95,13 +95,14 @@ jobs:
             args=(--skip-build --image "$CANDIDATE_IMAGE")
           fi
           pdm run security-release "${args[@]}"
-      - name: Upload validated security reports
+      - name: Upload security reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: security-reports-${{ github.run_id }}
           overwrite: true
           path: artifacts/security/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
   system:

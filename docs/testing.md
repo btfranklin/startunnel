@@ -156,6 +156,8 @@ in a Git-free export. It scans current security reports and the runtime image
 separately. Ignored local reports and private input files are outside the
 candidate scan. The lane also checks locked dependencies and blocks high and
 critical image vulnerabilities.
+Tool errors appear in the job log. CI uploads reports that were written before
+a failure. A missing report does not make a failed security job pass.
 
 Replace `IMAGE_DIGEST` with the actual official digest reference. The isolated
 runners pull and inspect the image revision and version before use, build only
