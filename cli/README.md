@@ -45,6 +45,9 @@ encodings. JSON decoding restores the exact strings, including glyph addresses.
 Requests also preserve Unicode escapes for server validation. Malformed UTF-8,
 invalid JSON, and numbers that exceed the runtime parser limit return
 `invalid_input` errors with exit status `1`.
+If the output reader closes its pipe, the client exits with `1` without a
+traceback. A write can already be complete; use the same idempotency key for
+an uncertain-result retry.
 
 ## Install the command
 

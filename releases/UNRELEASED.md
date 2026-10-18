@@ -85,3 +85,5 @@ from the serialized document.
 Malformed input and numbers that exceed the runtime JSON parser limit now
 return `invalid_input` errors. Escaped Unicode in requests reaches the server's
 validation without a local encoding failure.
+Closing the output pipe now exits with status `1` without a traceback or a
+shutdown error. A completed API write is not undone by an output failure.

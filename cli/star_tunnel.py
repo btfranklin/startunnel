@@ -92,6 +92,10 @@ class CliError(Exception):
 class JsonArgumentParser(argparse.ArgumentParser):
     """Report argument errors without reflecting command line values."""
 
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        sys.stdout.flush()
+        super().exit(status, message)
+
     def error(self, message: str) -> NoReturn:
         del message
         raise CliError("usage_error", usage=self.format_usage().strip())
@@ -1288,14 +1292,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_admin(arguments)
         else:
             result = run_tutorial() if arguments.action == "tutorial" else run_action(arguments)
+        print(json.dumps(result, separators=(",", ":")), flush=True)
     except CliError as error:
         print_error(error)
         return 2 if error.code == "usage_error" else 1
     except BrokenPipeError:
+        with open(os.devnull, "w") as output:
+            os.dup2(output.fileno(), sys.stdout.fileno())
         return 1
     except KeyboardInterrupt:
         return 1
-    print(json.dumps(result, separators=(",", ":")))
     return 0
 
 

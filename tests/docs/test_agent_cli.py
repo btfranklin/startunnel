@@ -454,6 +454,20 @@ def test_surrogate_input_reaches_server_unicode_validation() -> None:
     assert scenario.requests[0]["body"] == body
 
 
+@pytest.mark.parametrize("arguments", [("version",), ("schema",), ("--help",)])
+def test_closed_output_pipe_exits_without_a_traceback(arguments: tuple[str, ...]) -> None:
+    with subprocess.Popen(
+        [sys.executable, str(CLI), *arguments],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as process:
+        assert process.stdout is not None
+        assert process.stderr is not None
+        process.stdout.close()
+        assert process.wait(timeout=5) == 1
+        assert process.stderr.read() == b""
+
+
 def test_missing_command_argument_has_json_usage_error() -> None:
     result = run_cli("http://127.0.0.1:8000", "reply")
 
