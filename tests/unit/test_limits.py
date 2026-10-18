@@ -21,7 +21,6 @@ def test_instance_limit_values_match_the_product_contract() -> None:
     assert limits.maximum_search_response_bytes == 1_048_576
     assert limits.search_statement_timeout_milliseconds == 500
     assert limits.api_operations_per_minute == 120
-    assert limits.tunnel_creations_per_hour == 300
     assert limits.address_misses_per_minute == 30
     assert limits.api_burst == 30
 

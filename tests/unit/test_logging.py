@@ -154,10 +154,6 @@ def test_api_lifecycle_logs_only_safe_request_metadata(
     sender, sender_key = credential_factory(user=sender_user, name="Logging sender")
     _, receiver_key = credential_factory(name="Logging receiver")
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr(
-        "api.router.consume_tunnel_creation",
-        lambda credential, limits: None,
-    )
 
     def post(
         path: str,

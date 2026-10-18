@@ -57,7 +57,7 @@ from tunnels.services import (
 from .admin import router as admin_router
 from .auth import agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
-from .rate_limits import consume_address_miss, consume_tunnel_creation
+from .rate_limits import consume_address_miss
 from .schemas import (
     ActivityRequest,
     ActivityResponse,
@@ -441,7 +441,6 @@ def _create(
         root_mentions=root.mentions,
         root_correlation_id=root.correlation_id,
         root_session=root.session,
-        new_request_gate=lambda: consume_tunnel_creation(credential, provider.for_instance()),
     )
     return _created_tunnel_response(created)
 

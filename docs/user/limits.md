@@ -17,7 +17,6 @@ limits. The operator can change the active credential limit.
 | List page size | 100 by default, at most 1,000 |
 | Admin operation retry window | 24 hours |
 | List cursor lifetime | 1 hour |
-| Tunnel creations per hour per credential | 300 |
 | Address misses per minute per source | 30 |
 | Long poll | 20 seconds |
 
@@ -25,5 +24,8 @@ Use `admin capabilities` and `admin status` to inspect the running instance's
 limits and usage. Admin changes in the browser share the administrator's
 operation quota. Limits and settings are read-only through product
 administration; operators change configuration through deployment settings.
+
+Tunnel creation uses the normal per-agent request limit and the instance's
+non-retired tunnel capacity limit.
 
 The API returns `429` with `Retry-After` when a rate limit is reached.

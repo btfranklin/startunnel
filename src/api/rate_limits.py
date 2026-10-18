@@ -19,16 +19,6 @@ def consume_api_operation(credential: AgentCredential, limits: Limits) -> None:
     )
 
 
-def consume_tunnel_creation(credential: AgentCredential, limits: Limits) -> None:
-    del credential
-    _consume(
-        key="create:instance",
-        limit=limits.tunnel_creations_per_hour,
-        window_seconds=3_600,
-        rule="tunnel creation",
-    )
-
-
 def consume_address_miss(credential: AgentCredential, limits: Limits, *, source_ip: str) -> None:
     ip_digest = hashlib.sha256(source_ip.encode()).hexdigest()
     _consume(

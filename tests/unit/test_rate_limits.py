@@ -13,7 +13,6 @@ from api.rate_limits import (
     consume_address_miss,
     consume_api_operation,
     consume_login_attempt,
-    consume_tunnel_creation,
 )
 from core.limits import Limits
 from core.models import RateLimitBucket
@@ -119,10 +118,9 @@ def test_named_limit_helpers_do_not_store_raw_subjects(credential_factory: Any) 
     credential, _ = credential_factory()
     limits = Limits(api_operations_per_minute=5, api_burst=5)
     consume_api_operation(credential, limits)
-    consume_tunnel_creation(credential, limits)
     consume_address_miss(credential, limits, source_ip="192.0.2.44")
     consume_login_attempt(source_ip="192.0.2.44", username="Person")
-    assert RateLimitBucket.objects.count() == 4
+    assert RateLimitBucket.objects.count() == 3
     serialized = " ".join(str(bucket.accepted_at_ms) for bucket in RateLimitBucket.objects.all())
     assert "192.0.2.44" not in serialized and "Person" not in serialized
 

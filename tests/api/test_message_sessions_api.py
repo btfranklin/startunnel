@@ -17,7 +17,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def isolate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr("api.router.consume_tunnel_creation", lambda credential, limits: None)
 
 
 def _post(

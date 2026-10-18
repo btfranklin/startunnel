@@ -151,15 +151,13 @@ def _create_tunnel_in_thread(
     try:
         credential = AgentCredential.objects.get(pk=credential_id)
 
-        def wait_for_start() -> None:
-            barrier.wait(timeout=15)
+        barrier.wait(timeout=15)
 
         try:
             create_tunnel(
                 credential=credential,
                 idempotency_key=f"instance-quota-{position}",
                 root_content={"type": "text", "text": "One instance quota."},
-                new_request_gate=wait_for_start,
             )
         except QuotaExceeded:
             return "limited"

@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import secrets
 import unicodedata
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -328,7 +327,6 @@ def create_tunnel(
     root_mentions: list[UUID] | None = None,
     root_correlation_id: str | None = None,
     root_session: str | None = None,
-    new_request_gate: Callable[[], None] | None = None,
 ) -> CreatedTunnel:
     if not credential_is_active(credential):
         raise InvalidCredential()
@@ -408,8 +406,6 @@ def create_tunnel(
             event_position=event_position,
             replay=True,
         )
-    if new_request_gate:
-        new_request_gate()
     _lock_instance_tunnel_quota()
     owned = Tunnel.objects.exclude(state=Tunnel.State.RETIRED)
     maximum = limits.non_retired_tunnels

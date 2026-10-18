@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any, cast
 
@@ -12,7 +13,6 @@ from django.test import Client
 from django.utils import timezone
 
 from tunnels.codec import encode_token
-from tunnels.errors import RateLimited
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress
 
 pytestmark = pytest.mark.django_db
@@ -21,7 +21,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def isolate_api_from_database_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
-    monkeypatch.setattr("api.router.consume_tunnel_creation", lambda credential, limits: None)
     monkeypatch.setattr(
         "api.router.consume_address_miss",
         lambda credential, limits, *, source_ip: None,
@@ -202,42 +201,30 @@ def test_create_is_atomic_rooted_and_idempotent(client: Client, credential_facto
     _assert_safe_error(conflict, status=409, code="idempotency_conflict")
 
 
-def test_create_replay_does_not_consume_creation_allowance(
-    client: Client,
-    credential_factory: Any,
-    monkeypatch: pytest.MonkeyPatch,
+def test_creation_uses_each_agents_normal_request_limit(
+    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _, key = credential_factory()
-    calls = 0
+    from api.rate_limits import consume_api_operation
+    from core.limits import provider
 
-    def allow_only_first(credential: object, limits: object) -> None:
-        nonlocal calls
-        del credential, limits
-        calls += 1
-        if calls > 1:
-            raise RateLimited()
+    _, first_key = credential_factory()
+    _, second_key = credential_factory()
+    limits = replace(provider.for_instance(), api_operations_per_minute=1, api_burst=1)
+    monkeypatch.setattr(provider, "for_instance", lambda: limits)
+    monkeypatch.setattr("api.auth.consume_api_operation", consume_api_operation)
 
-    monkeypatch.setattr("api.router.consume_tunnel_creation", allow_only_first)
-    _create_global(client, key, "api-create-rate-replay")
-    replay = _post(
-        client,
-        "/api/v1/tunnels",
-        _create_request(),
-        key=key,
-        idempotency_key="api-create-rate-replay",
-    )
-    assert replay.status_code == 201
-    assert replay.json()["idempotent_replay"] is True
-    assert calls == 1
-
+    _create_global(client, first_key, "normal-limit-first")
     limited = _post(
         client,
         "/api/v1/tunnels",
         _create_request(),
-        key=key,
-        idempotency_key="api-create-rate-new",
+        key=first_key,
+        idempotency_key="normal-limit-rejected",
     )
     _assert_safe_error(limited, status=429, code="rate_limited")
+    assert limited.headers["Retry-After"]
+    _create_global(client, second_key, "normal-limit-second")
+    assert Tunnel.objects.count() == 2
 
 
 def test_create_replay_keeps_the_original_wire_state_after_later_activity(

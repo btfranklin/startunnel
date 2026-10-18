@@ -27,7 +27,6 @@ class Limits:
     cursor_lifetime_seconds: int = 3_600
     api_operations_per_minute: int = 120
     api_burst: int = 30
-    tunnel_creations_per_hour: int = 300
     address_misses_per_minute: int = 30
 
 
