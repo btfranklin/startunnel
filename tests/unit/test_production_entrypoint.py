@@ -192,6 +192,10 @@ def test_secret_reader_rejects_multiline_and_binary_values(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="UTF-8 text"):
         read_validated_secret_file(secret)
 
+    _write_secret(secret, "nul\x00byte")
+    with pytest.raises(ValueError, match="one nonempty text value"):
+        read_validated_secret_file(secret)
+
 
 def test_production_start_stops_before_compose_when_preflight_fails(
     tmp_path: Path,
@@ -229,3 +233,41 @@ def test_postgres_entrypoint_rejects_equal_role_passwords() -> None:
     )
     assert result.returncode != 0
     assert "admin and runtime passwords must be different" in result.stderr
+
+
+def test_runtime_role_init_passes_arbitrary_password_through_psql_environment(
+    tmp_path: Path,
+) -> None:
+    fake_psql = tmp_path / "psql"
+    fake_psql.write_text(
+        "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\"\n"
+        "printf 'PGOPTIONS:%s\\n' \"${PGOPTIONS-unset}\"\ncat\n",
+        encoding="utf-8",
+    )
+    fake_psql.chmod(0o755)
+    password = "runtime ' \\ $ ü " + "x" * 130
+    environment = os.environ.copy()
+    environment.pop("PGOPTIONS", None)
+    environment.update(
+        {
+            "PATH": str(tmp_path) + os.pathsep + environment["PATH"],
+            "POSTGRES_DB": "startunnel",
+            "POSTGRES_USER": "startunnel_admin",
+            "STARTUNNEL_DB_RUNTIME_PASSWORD": password,
+        }
+    )
+
+    result = subprocess.run(
+        ["sh", "docker/postgres/init/10-runtime-role.sh"],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "PGOPTIONS:unset" in result.stdout
+    assert "\\getenv runtime_password STARTUNNEL_DB_RUNTIME_PASSWORD" in result.stdout
+    assert ":'runtime_password'" in result.stdout
+    assert password not in result.stdout + result.stderr

@@ -80,10 +80,10 @@ def test_real_postgres_rejects_old_credentials_and_accepts_rollback() -> None:
     suffix = uuid4().hex[:12]
     admin_role = f"st_rotate_admin_{suffix}"
     runtime_role = f"st_rotate_runtime_{suffix}"
-    old_admin = "A" * 40
-    old_runtime = "B" * 40
-    new_admin = "C" * 40
-    new_runtime = "D" * 40
+    old_admin = "old admin ' \\ ü " + "A" * 130
+    old_runtime = 'old runtime " $ é ' + "B" * 130
+    new_admin = "new admin % ' ☀ " + "C" * 130
+    new_runtime = "new runtime \\ $ ♥ " + "D" * 130
 
     with psycopg.connect(database_url, autocommit=True) as database:
         database.execute(

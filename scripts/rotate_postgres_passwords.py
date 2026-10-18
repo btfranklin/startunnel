@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import hmac
 import json
 import os
-import re
 import secrets
 import stat
 import subprocess
@@ -31,7 +29,6 @@ else:
         validate_production_secret_files,
     )
 
-POSTGRES_PASSWORD = re.compile(r"[A-Za-z0-9_-]{32,128}")
 ADMIN_SECRET_NAME = "postgres_admin_password"
 RUNTIME_SECRET_NAME = "postgres_runtime_password"
 
@@ -121,17 +118,21 @@ class RollbackBundle:
 
 
 def validate_password(value: str, *, label: str) -> str:
-    """Require the URL-safe high-entropy shape used by the secret generator."""
+    """Require one UTF-8 password value that PostgreSQL can receive."""
 
-    if not POSTGRES_PASSWORD.fullmatch(value):
-        raise ValueError(f"{label} must use 32 to 128 URL-safe ASCII characters.")
+    if not value or "\r" in value or "\n" in value or "\x00" in value:
+        raise ValueError(f"{label} must contain one nonempty text value.")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError(f"{label} must contain UTF-8 text.") from error
     return value
 
 
 def validate_password_pair(pair: PasswordPair, *, label: str) -> PasswordPair:
     validate_password(pair.admin, label=f"{label} admin password")
     validate_password(pair.runtime, label=f"{label} runtime password")
-    if hmac.compare_digest(pair.admin, pair.runtime):
+    if pair.admin == pair.runtime:
         raise ValueError(f"{label} admin and runtime passwords must be different.")
     return pair
 
@@ -165,7 +166,7 @@ def read_replacement_pair(admin_file: Path, runtime_file: Path) -> PasswordPair:
 def _require_fresh_replacement(current: PasswordPair, replacement: PasswordPair) -> None:
     current_values = (current.admin, current.runtime)
     for new_value in (replacement.admin, replacement.runtime):
-        if any(hmac.compare_digest(new_value, old_value) for old_value in current_values):
+        if new_value in current_values:
             raise ValueError(
                 "Each new PostgreSQL password must differ from both current passwords."
             )

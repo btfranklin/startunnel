@@ -182,6 +182,9 @@ Use the configured production shell from [Maintain the instance](setup/maintain.
 Make a verified backup and select a new private directory for each rotation.
 The helper writes new password files without showing their values. It saves a
 private rollback file before it changes either database role.
+Generated passwords are independent random values. Existing or replacement
+password files can contain other nonempty, single-line UTF-8 text, including
+spaces and punctuation. They cannot contain a NUL byte.
 
 ```shell
 umask 077

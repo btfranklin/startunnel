@@ -78,20 +78,23 @@ def _install_database_simulation(
     return state, events, checks
 
 
-def test_rotation_rejects_malformed_equal_and_reused_passwords() -> None:
-    with pytest.raises(ValueError, match="32 to 128"):
-        rotation.validate_password("too-short", label="Test password")
-    with pytest.raises(ValueError, match="URL-safe"):
-        rotation.validate_password("x" * 31 + "!", label="Test password")
+def test_rotation_accepts_text_passwords_but_rejects_invalid_and_reused_values() -> None:
+    assert rotation.validate_password("short ' ü $", label="Test password") == "short ' ü $"
+    assert rotation.validate_password("x" * 130, label="Test password") == "x" * 130
+    for invalid in ("", "first\nsecond", "first\rsecond", "nul\x00byte"):
+        with pytest.raises(ValueError, match="one nonempty text value"):
+            rotation.validate_password(invalid, label="Test password")
+    with pytest.raises(ValueError, match="UTF-8 text"):
+        rotation.validate_password("unpaired \ud800", label="Test password")
     with pytest.raises(ValueError, match="must be different"):
         rotation.validate_password_pair(
-            PasswordPair(admin="A" * 40, runtime="A" * 40),
+            PasswordPair(admin="same ü", runtime="same ü"),
             label="New",
         )
     with pytest.raises(ValueError, match="differ from both current"):
         rotation._require_fresh_replacement(
-            PasswordPair(admin="A" * 40, runtime="B" * 40),
-            PasswordPair(admin="B" * 40, runtime="C" * 40),
+            PasswordPair(admin="old ' ü", runtime="old $ é"),
+            PasswordPair(admin="old $ é", runtime="new \\ ♥"),
         )
 
 
@@ -353,8 +356,8 @@ def test_compose_restart_and_inspection_show_normal_diagnostics(
 
 
 def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_path: Path) -> None:
-    current = PasswordPair(admin="A" * 40, runtime="B" * 40)
-    replacement = PasswordPair(admin="C" * 40, runtime="D" * 40)
+    current = PasswordPair(admin="old ' ü " + "A" * 130, runtime="old $ é " + "B" * 130)
+    replacement = PasswordPair(admin="new \\ ♥ " + "C" * 130, runtime="new % ☀ " + "D" * 130)
     public_directory = tmp_path / "public"
     public_directory.mkdir(mode=0o755)
     public_directory.chmod(0o755)
@@ -365,6 +368,9 @@ def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_pa
     private_directory.mkdir(mode=0o700)
     rollback_file = private_directory / "rollback.json"
     rotation.write_rollback_bundle(rollback_file, current, replacement)
+    assert rotation.read_rollback_bundle(rollback_file) == rotation.RollbackBundle(
+        previous=current, replacement=replacement
+    )
     with pytest.raises(ValueError, match="must be a new regular file"):
         rotation.write_rollback_bundle(rollback_file, current, replacement)
 
@@ -418,14 +424,14 @@ def test_rollback_rejects_a_bundle_for_another_replacement(
 def test_replacement_secret_files_accept_readonly_and_symlinked_inputs(tmp_path: Path) -> None:
     admin = tmp_path / "admin"
     runtime = tmp_path / "runtime"
-    _write_secret(admin, "A" * 40)
-    _write_secret(runtime, "B" * 40)
+    _write_secret(admin, "admin ' ü $")
+    _write_secret(runtime, "runtime \\ ♥ " + "B" * 130)
     runtime.chmod(0o400)
     linked_runtime = tmp_path / "runtime-link"
     linked_runtime.symlink_to(runtime)
 
     assert rotation.read_replacement_pair(admin, linked_runtime) == rotation.PasswordPair(
-        admin="A" * 40, runtime="B" * 40
+        admin="admin ' ü $", runtime="runtime \\ ♥ " + "B" * 130
     )
 
 
