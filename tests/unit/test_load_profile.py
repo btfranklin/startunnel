@@ -22,7 +22,6 @@ def test_load_manifest_accepts_readonly_symlinked_input(tmp_path: Path) -> None:
         json.dumps(
             {
                 "run_id": "proof-run",
-                "user_count": 1,
                 "credential_count": 1,
                 "credentials": [{"credential_id": "agent-1", "key": "st_disposable"}],
             }
@@ -96,7 +95,7 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
         base_url="http://fixture",
         host_header=None,
         manifest=CredentialManifest(
-            "fixture", 10, tuple(Credential(str(index), f"test-key-{index}") for index in range(10))
+            "fixture", tuple(Credential(str(index), f"test-key-{index}") for index in range(10))
         ),
         config=LoadConfig(
             duration_seconds=1,

@@ -179,13 +179,13 @@ server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
 
 The load proof schedules 50 sends per second for five minutes with 100 activity
-readers and 500 disposable credentials. Only its isolated stack raises the active
-credential capacity to 500; per-credential rate limits remain unchanged. Readers
-rotate credentials to distribute their traffic. Long polls use a separate HTTP
-connection pool. The isolated web service uses four workers with 18 database
-connections per pool. Message submissions overlap, with at most 256 in flight,
-and have a bounded drain after the workload
-deadline. Missed submissions, capacity exhaustion, request errors, and unfinished
-sends fail the proof rather than extending its duration. Its report still requires
+readers and 500 disposable agent credentials held by one fixture admin. Only its
+isolated stack raises the active credential capacity to 500; per-credential rate
+limits remain unchanged. Readers rotate credentials to distribute their traffic.
+Long polls use a separate HTTP connection pool. The isolated web service uses
+four workers with 18 database connections per pool. Message submissions overlap,
+with at most 256 in flight, and have a bounded drain after the workload deadline.
+Missed submissions, capacity exhaustion, request errors, and unfinished sends
+fail the proof rather than extending its duration. Its report still requires
 at least 95% of the expected sends and successful fixture cleanup.
 CI retains failed load reports, including safe status counts and send latencies.

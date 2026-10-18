@@ -34,7 +34,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sends-per-second", type=float, default=50.0)
     parser.add_argument("--concurrent-activity-readers", type=int, default=100)
     parser.add_argument("--drain-seconds", type=float, default=30.0)
-    parser.add_argument("--users", type=int, default=500)
     parser.add_argument("--credentials", type=int, default=500)
     return parser
 
@@ -58,8 +57,6 @@ def _provision(path: Path, arguments: argparse.Namespace) -> None:
         [
             "--output",
             str(path),
-            "--users",
-            str(arguments.users),
             "--credentials",
             str(arguments.credentials),
         ]

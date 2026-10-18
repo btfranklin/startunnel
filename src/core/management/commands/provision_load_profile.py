@@ -9,7 +9,6 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 from django.conf import settings
-from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -113,7 +112,6 @@ def _load_run_id(path: Path) -> UUID:
             "credential_count",
             "credentials",
             "run_id",
-            "user_count",
         }:
             raise ValueError
         raw_run_id = document["run_id"]
@@ -134,7 +132,7 @@ def _fixture_prefix(run_id: UUID) -> str:
 @transaction.atomic
 def _remove_run(run_id: UUID) -> dict[str, int]:
     prefix = _fixture_prefix(run_id)
-    users = User.objects.filter(username__startswith=f"l-{run_id.hex}")
+    users = User.objects.filter(username=f"l-{run_id.hex}")
     credentials = AgentCredential.objects.filter(
         created_by__in=users,
         name__startswith=prefix,
@@ -153,37 +151,20 @@ def _remove_run(run_id: UUID) -> dict[str, int]:
     }
 
 
-def _validate_counts(*, users: int, credentials: int) -> None:
-    if not 1 <= users <= 5_000:
-        raise CommandError("--users must be from 1 through 5000.")
+def _validate_counts(*, credentials: int) -> None:
     if not 1 <= credentials <= 5_000:
         raise CommandError("--credentials must be from 1 through 5000.")
     if credentials > instance_limits.effective_limits().active_credentials:
         raise CommandError("--credentials exceeds the instance credential limit.")
 
 
-def _new_users(*, run_id: UUID, count: int) -> list[User]:
-    unusable_password = make_password(None)
-    users = [
-        User(
-            username=f"l-{run_id.hex}{index:04d}",
-            is_active=True,
-            password=unusable_password,
-        )
-        for index in range(count)
-    ]
-    User.objects.bulk_create(users)
-    return users
-
-
-def _provision(*, run_id: UUID, user_count: int, credential_count: int) -> dict[str, object]:
-    users = _new_users(run_id=run_id, count=user_count)
+def _provision(*, run_id: UUID, credential_count: int) -> dict[str, object]:
+    user = User.objects.create_user(username=f"l-{run_id.hex}", password=None)
     prefix = _fixture_prefix(run_id)
     entries: list[dict[str, str]] = []
     for index in range(credential_count):
-        actor = users[index % len(users)]
         issued = create_credential(
-            actor=actor,
+            actor=user,
             name=f"{prefix}-agent-{index:04d}",
         )
         entries.append(
@@ -197,7 +178,6 @@ def _provision(*, run_id: UUID, user_count: int, credential_count: int) -> dict[
         "credential_count": credential_count,
         "credentials": entries,
         "run_id": str(run_id),
-        "user_count": user_count,
     }
 
 
@@ -208,7 +188,6 @@ class Command(BaseCommand):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument("--output")
         group.add_argument("--cleanup-manifest")
-        parser.add_argument("--users", type=int, default=500)
         parser.add_argument("--credentials", type=int, default=50)
 
     def handle(self, *args: object, **options: object) -> None:
@@ -230,15 +209,13 @@ class Command(BaseCommand):
             )
             return
 
-        users = cast(int, options["users"])
         credentials = cast(int, options["credentials"])
-        _validate_counts(users=users, credentials=credentials)
+        _validate_counts(credentials=credentials)
         output_path = _validated_new_tmpfs_path(str(options["output"]))
         try:
             with transaction.atomic():
                 document = _provision(
                     run_id=uuid4(),
-                    user_count=users,
                     credential_count=credentials,
                 )
                 _write_manifest(output_path, document)
@@ -247,6 +224,6 @@ class Command(BaseCommand):
             raise
         self.stdout.write(
             self.style.SUCCESS(
-                f"Load fixtures are ready: {users} users and {credentials} credentials."
+                f"Load fixtures are ready: one disposable admin and {credentials} credentials."
             )
         )

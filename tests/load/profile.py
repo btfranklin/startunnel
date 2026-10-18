@@ -29,7 +29,6 @@ class Credential:
 @dataclass(frozen=True, slots=True)
 class CredentialManifest:
     run_id: str
-    user_count: int
     credentials: tuple[Credential, ...]
 
 
@@ -67,7 +66,6 @@ def load_credential_manifest(path: Path) -> CredentialManifest:
         )
         manifest = CredentialManifest(
             run_id=str(document["run_id"]),
-            user_count=int(document["user_count"]),
             credentials=credentials,
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:

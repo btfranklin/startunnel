@@ -17,6 +17,7 @@ from django.test import override_settings
 
 from accounts.models import User
 from agents.models import AgentCredential
+from agents.services import CredentialError, authenticate_key
 from core.management.commands import provision_live_agent_proof, provision_load_profile
 from tunnels.management.commands.maintenance_loop import (
     Command as MaintenanceCommand,
@@ -336,21 +337,19 @@ def test_live_proof_removes_partial_output_after_failure(
 
 
 @pytest.mark.parametrize(
-    ("users", "credentials", "message"),
-    [(0, 1, "--users"), (5001, 1, "--users"), (1, 0, "--credentials"), (1, 5001, "--credentials")],
+    ("credentials", "message"),
+    [(0, "--credentials"), (5001, "--credentials")],
 )
-def test_load_fixture_counts_are_bounded(
-    users: int, credentials: int, message: str, settings: Any
-) -> None:
+def test_load_fixture_counts_are_bounded(credentials: int, message: str, settings: Any) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 5000
     with pytest.raises(CommandError, match=message):
-        provision_load_profile._validate_counts(users=users, credentials=credentials)
+        provision_load_profile._validate_counts(credentials=credentials)
 
 
 def test_load_fixture_count_respects_instance_limit(settings: Any) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 1
     with pytest.raises(CommandError, match="instance credential limit"):
-        provision_load_profile._validate_counts(users=1, credentials=2)
+        provision_load_profile._validate_counts(credentials=2)
 
 
 def test_load_manifest_paths_and_parser_fail_closed(
@@ -373,7 +372,6 @@ def test_load_manifest_paths_and_parser_fail_closed(
                 "credential_count": 0,
                 "credentials": [],
                 "run_id": str(run_id),
-                "user_count": 0,
             }
         ),
         encoding="utf-8",
@@ -391,7 +389,9 @@ def test_load_manifest_paths_and_parser_fail_closed(
 
 @override_settings(DEBUG=True, STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT=10)
 def test_load_fixture_command_provisions_and_cleans_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    credential_factory: Any,
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_LOAD_TESTS", "1")
     monkeypatch.setattr(provision_load_profile, "_validated_new_tmpfs_path", lambda raw: Path(raw))
@@ -403,21 +403,59 @@ def test_load_fixture_command_provisions_and_cleans_up(
     call_command(
         "provision_load_profile",
         output=str(path),
-        users=2,
         credentials=3,
         stdout=output,
     )
     document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["user_count"] == 2 and document["credential_count"] == 3
+    assert document["credential_count"] == 3
     assert "st_" not in output.getvalue()
     run_id = UUID(document["run_id"])
+    fixture_username = f"l-{run_id.hex}"
+    fixture_user = User.objects.get(username=fixture_username)
+    assert fixture_user.is_active
+    assert not fixture_user.has_usable_password()
+    fixture_credentials = list(
+        AgentCredential.objects.filter(
+            name__startswith=provision_load_profile._fixture_prefix(run_id)
+        )
+    )
+    assert len(fixture_credentials) == 3
+    assert {credential.created_by_id for credential in fixture_credentials} == {fixture_user.id}
+    authenticated = [authenticate_key(entry["key"]) for entry in document["credentials"]]
+    assert {credential.id for credential in authenticated} == {
+        credential.id for credential in fixture_credentials
+    }
+
+    fixture_tunnel = create_tunnel(
+        credential=authenticated[0],
+        idempotency_key="load-fixture-owned-tunnel",
+        root_content={"type": "text", "text": "Fixture-owned tunnel."},
+    )
+    unrelated_credential, _ = credential_factory()
+    unrelated_tunnel = create_tunnel(
+        credential=unrelated_credential,
+        idempotency_key="load-unrelated-tunnel",
+        root_content={"type": "text", "text": "Unrelated tunnel."},
+    )
+
     call_command("provision_load_profile", cleanup_manifest=str(path), stdout=StringIO())
     assert not path.exists()
-    assert not User.objects.filter(username__startswith=f"l-{run_id.hex}", is_active=True).exists()
-    assert not AgentCredential.objects.filter(
-        name__startswith=provision_load_profile._fixture_prefix(run_id),
-        revoked_at__isnull=True,
-    ).exists()
+    fixture_user.refresh_from_db()
+    assert not fixture_user.is_active
+    fixture_credentials = list(
+        AgentCredential.objects.filter(
+            name__startswith=provision_load_profile._fixture_prefix(run_id)
+        )
+    )
+    assert len(fixture_credentials) == 3
+    assert all(credential.revoked_at is not None for credential in fixture_credentials)
+    assert all(not credential.is_available for credential in fixture_credentials)
+    with pytest.raises(CredentialError, match="invalid"):
+        authenticate_key(document["credentials"][0]["key"])
+    assert Tunnel.objects.get(pk=fixture_tunnel.tunnel.pk).state == Tunnel.State.RETIRED
+    assert Tunnel.objects.get(pk=unrelated_tunnel.tunnel.pk).state == Tunnel.State.ACTIVE
+    unrelated_credential.refresh_from_db()
+    assert unrelated_credential.is_available
 
 
 def test_load_fixture_command_requires_opt_in(
