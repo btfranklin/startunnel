@@ -38,6 +38,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
         project_name = "stproof-online-backup"
         environment: dict[str, str] = {}
         running = False
+        runtime_contents_checked = False
         backup_finished = False
         availability_checked = False
         database_loss_started = False
@@ -54,6 +55,10 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
                 self.builds.append(args)
             if args[0] == "up" and "--wait" in args:
                 self.running = True
+            if label == "Verify runtime image contents":
+                assert self.running
+                assert args[:5] == ("exec", "-T", "web", "/app/.venv/bin/python", "-c")
+                self.runtime_contents_checked = True
             if self.backup_finished and not self.database_loss_started:
                 if label.startswith(("Verify live health", "Verify ready health")):
                     self.availability_checked = True
@@ -83,6 +88,8 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
 
     report = system_proof.run_system_proof(stack, build_images=build_images)
     assert report["status"] == "passed"
+    assert stack.runtime_contents_checked
+    assert "runtime image contents" in {step["name"] for step in report["steps"]}
     assert stack.availability_checked
     if candidate_image:
         assert stack.builds == [("build", "example-tests", "agent-e2e", "browser-tests")]

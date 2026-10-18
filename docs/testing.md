@@ -176,11 +176,17 @@ Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
 proof helpers, and verify application service image IDs. Helper builds use the
 Docker cache; changed source files still cause their copy layers to rebuild. The system proof covers
-health, agent exchanges, browser flows, runtime database privileges, backup,
+health, runtime image contents, agent exchanges, browser flows, runtime database privileges, backup,
 restore, database loss, and restarts. It tests the exact runtime image in an
 isolated development configuration; it does not prove a particular public
 server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
+
+The image check reads static sources and collected manifest assets, loads CA
+certificates, and checks that pip and documentation build tools are excluded.
+It runs in the application container. It does not depend on Dockerfile stage
+names, copy commands, or Python package paths. The canonical lane separately
+checks that documentation tools work in the test image.
 
 The load proof schedules 50 sends per second for five minutes with 100 activity
 readers and 500 disposable agent credentials held by one fixture admin. Only its

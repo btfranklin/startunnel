@@ -69,6 +69,43 @@ def _web_health_script(expected_status: int, *, path: str = "/health/ready") -> 
     )
 
 
+def _runtime_contents_script() -> str:
+    return """
+import shutil
+import ssl
+import subprocess
+import sys
+from pathlib import Path
+
+import django
+django.setup()
+from django.contrib.staticfiles import finders
+from django.contrib.staticfiles.storage import ManifestStaticFilesStorage
+
+collected = ManifestStaticFilesStorage()
+for name in (
+    'css/site.css',
+    'js/site.js',
+    'vendor/htmx/htmx.min.js',
+    'vendor/fonts/inter-latin-400-normal.woff2',
+):
+    source = finders.find(name)
+    assert source and Path(source).is_file(), f'Missing static source: {name}'
+    with collected.open(collected.stored_name(name)) as asset:
+        assert asset.read(1), f'Empty collected asset: {name}'
+
+assert ssl.create_default_context().get_ca_certs(), 'Missing CA certificates'
+for command in ('pip', 'pip3', 'perfect-doc', 'cargo'):
+    assert shutil.which(command) is None, f'Unexpected runtime tool: {command}'
+for interpreter in {sys.executable, str(Path(sys.base_prefix) / 'bin' / 'python3')}:
+    subprocess.run([
+        interpreter, '-c',
+        "import importlib.util; assert importlib.util.find_spec('pip') is None, 'pip is installed'",
+    ], check=True)
+print('Runtime image contents passed.')
+""".strip()
+
+
 def _runtime_select_script() -> str:
     return (
         'PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD" exec psql '
@@ -630,6 +667,19 @@ def run_system_proof(
         ),
     )
     step("live and ready health", prove_healthy_stack)
+    step(
+        "runtime image contents",
+        lambda: stack.run(
+            "Verify runtime image contents",
+            "exec",
+            "-T",
+            "web",
+            "/app/.venv/bin/python",
+            "-c",
+            _runtime_contents_script(),
+            timeout_seconds=60,
+        ),
+    )
     step(
         "clean-stack examples",
         lambda: stack.run(
