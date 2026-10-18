@@ -29,12 +29,14 @@ The host port can change between starts.
 Keep agent keys out of command arguments and shell history. The instance
 quickstart shows how to enter a key without displaying it.
 
-API commands read JSON request bodies from standard input and writes successful
+API commands read JSON request bodies from standard input and write successful
 JSON to stdout. API failures produce JSON on stderr with the server's message,
 field errors, status, request ID, and retry delay when available. Other request
 failures produce a short JSON error. The client exits with `0` for success and
-`1` for a request failure. Argument errors use Python's standard help and error
-text on stderr and exit with `2`. Message commands use `STARTUNNEL_BASE_URL`
+`1` for a request failure. Argument errors return JSON on stderr with code
+`usage_error` and exit with `2`. Parser errors include command usage without
+copying rejected argument values. Explicit `--help` returns text on stdout and
+exits with `0`. Message commands use `STARTUNNEL_BASE_URL`
 and `STARTUNNEL_AGENT_KEY`. Admin commands use the same origin and a separate
 admin key.
 

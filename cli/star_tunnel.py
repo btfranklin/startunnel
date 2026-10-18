@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException, HTTPMessage
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.parse import SplitResult, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -86,6 +86,15 @@ class CliError(Exception):
     retry_after: float | None = None
     message: str | None = None
     field_errors: list[dict[str, str]] | None = None
+    usage: str | None = None
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    """Report argument errors without reflecting command line values."""
+
+    def error(self, message: str) -> NoReturn:
+        del message
+        raise CliError("usage_error", usage=self.format_usage().strip())
 
 
 class NoRedirectHandler(HTTPRedirectHandler):
@@ -634,7 +643,7 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
     spec = AGENT_COMMANDS[action]
     if action in {"me", "tutorial"}:
         command.description = "This command accepts no JSON input on standard input."
-        command.epilog = "Request fields: none. Example: python3 star_tunnel.py " + action
+        command.epilog = "Request fields: none. Example: startunnel " + action
         return
 
     command.description = "Read one JSON request object from standard input."
@@ -1209,11 +1218,12 @@ def run_tutorial() -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = JsonArgumentParser(
+        prog="startunnel",
         description="Use the StarTunnel public API with Python 3.10 or later.",
         epilog=(
-            "After a server upgrade, download star_tunnel.py again from that instance's "
-            "/downloads/star_tunnel.py route. Keep your existing key."
+            "After a server upgrade, run startunnel update with STARTUNNEL_BASE_URL set "
+            "to that instance. Keep your existing key."
         ),
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -1256,6 +1266,8 @@ def print_error(error: CliError) -> None:
         details["retry_after"] = error.retry_after
     if error.field_errors is not None:
         details["field_errors"] = error.field_errors
+    if error.usage is not None:
+        details["usage"] = error.usage
     print(json.dumps({"error": details}, separators=(",", ":")), file=sys.stderr)
 
 
@@ -1276,7 +1288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_tutorial() if arguments.action == "tutorial" else run_action(arguments)
     except CliError as error:
         print_error(error)
-        return 1
+        return 2 if error.code == "usage_error" else 1
     except BrokenPipeError:
         return 1
     except KeyboardInterrupt:

@@ -172,6 +172,21 @@ def test_key_account_creation_requires_secret_file_before_request(
         cli.run_admin(arguments("accounts", "create", "--idempotency-key", "account-key"))
 
 
+def test_missing_conditional_secret_output_returns_usage_exit_code(
+    configured: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stdin(monkeypatch, {"username": "key-admin"})
+    monkeypatch.setattr(
+        cli.StarTunnelTransport,
+        "request",
+        lambda *args, **kwargs: pytest.fail("Missing output path must fail before the request."),
+    )
+    assert cli.main(["admin", "accounts", "create", "--idempotency-key", "account-key"]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert json.loads(output.err)["error"]["code"] == "usage_error"
+
+
 def test_secret_output_accepts_symlinked_parent_and_keeps_new_file_private(
     configured: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -6,7 +6,9 @@ The runner discards ambient application and Compose settings. It supplies its
 own files, project, and test database URLs. It checks the actual Docker endpoint
 and refuses existing project resources.
 
-Compose runners provide a tmpfs at `/tmp` for fixture outputs. Direct local
+Compose runners provide a tmpfs at `/tmp` for fixture outputs. This mount does
+not permit direct execution. Installed-client tests use temporary directories
+under `artifacts` and remove them after the test. Direct local
 provisioning commands can use a chosen existing directory. They still create a
 new mode-0600 file and refuse an existing output path.
 

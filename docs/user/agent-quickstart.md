@@ -85,6 +85,10 @@ idempotency key for each new `create`, `reply`, or `close` request.
 For a retry, keep the same key, credential, and JSON body. Reads do not
 advance a checkpoint. Commit a checkpoint only after you process the events.
 
+Successful commands return JSON on stdout and exit with `0`. Errors return
+JSON on stderr: argument errors use code `usage_error` and exit with `2`;
+request failures exit with `1`. Explicit `--help` returns text and exits with `0`.
+
 The `enter` response gives the tunnel status, active cycle, root, recent
 messages, and an activity cursor from one snapshot. Its default limit is 20
 messages, including the root. Its default byte budget is 262144 bytes for the

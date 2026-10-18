@@ -66,7 +66,8 @@ command. The running instance's `/api/v1/openapi.json` defines field types,
 constraints, and response shapes. Lists have
 bounded pages and filters. Successful JSON goes to stdout. API errors on stderr
 include the server's message and field errors when available. Argument errors
-use standard help text on stderr. Exit status is `0` for success, `1` for a
+return JSON with code `usage_error` on stderr. Explicit `--help` returns text
+on stdout. Exit status is `0` for success, `1` for a
 request failure, and `2` for an argument error. A failed required health check
 makes `admin doctor` exit with failure.
 

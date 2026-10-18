@@ -51,3 +51,11 @@ Add a command name, such as `startunnel schema reply`, to select one.
 No URL or credential is needed. Use the running instance's OpenAPI document
 for nested types, defaults, limits, and responses. Admin command definitions
 remain available through `startunnel admin schema`.
+
+## JSON argument errors
+
+Argument errors now return JSON on stderr with code `usage_error` and exit
+status `2`. This includes missing commands, invalid options, and invalid
+idempotency keys. Update callers that parse the old argument-error text.
+Request failures still exit with `1`. Successful commands exit with `0`;
+explicit `--help` returns text on stdout with exit status `0`.

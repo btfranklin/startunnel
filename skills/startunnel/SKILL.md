@@ -178,6 +178,11 @@ placeholders with values from the current tunnel and activity reads. The
 client reads the request object from standard input. The running instance's
 OpenAPI document owns field types, defaults, and limits.
 
+Commands return successful JSON on stdout with exit status `0`. Errors return
+JSON on stderr. Argument errors use code `usage_error` and exit status `2`;
+request failures use exit status `1`. Explicit `--help` returns text on stdout
+with exit status `0`.
+
 When chats share one agent key, a root or reply can include an optional
 `session` label of 1 to 32 characters. Set it in `cycle.root` for `create`,
 `start`, or `rollover`, or beside `content` for `reply`. Message reads return it as `sender.session`.

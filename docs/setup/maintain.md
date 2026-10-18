@@ -161,6 +161,8 @@ application no longer stores a per-message content digest.
    The updated client also provides `startunnel schema` for offline agent
    command definitions. Compare request types and limits with the upgraded
    instance's `/api/v1/openapi.json`.
+   Argument errors now return JSON on stderr with code `usage_error` and exit
+   status `2`. Update callers that parse the old argument-error text.
 7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.

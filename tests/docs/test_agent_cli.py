@@ -391,12 +391,94 @@ def test_missing_field_diagnostic_survives_transport_and_client() -> None:
     }
 
 
-def test_missing_command_argument_has_standard_parser_diagnostic() -> None:
+def test_missing_command_argument_has_json_usage_error() -> None:
     result = run_cli("http://127.0.0.1:8000", "reply")
 
     assert result.returncode == 2
     assert result.stdout == ""
-    assert "--idempotency-key" in result.stderr
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "usage_error"
+    assert "--idempotency-key" in error["usage"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["admin"],
+        ["admin", "accounts"],
+        ["start", "--idempotency-key"],
+        ["admin", "agents", "create", "--idempotency-key", "test-key"],
+        ["schema", "st_private-argument"],
+        ["--unknown=st_private-argument"],
+        ["me", "st_private-argument"],
+        ["st_private-argument"],
+        ["admin", "st_private-argument"],
+        ["admin", "accounts", "st_private-argument"],
+        ["admin", "keys", "list", "--limit", "st_private-argument"],
+        ["install", "--bin-dir"],
+    ],
+)
+def test_argument_errors_are_json_and_do_not_repeat_input_values(arguments: list[str]) -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    result = subprocess.run(
+        [sys.executable, str(CLI), *arguments],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    error = json.loads(result.stderr)["error"]
+    assert set(error) == {"code", "message", "usage"}
+    assert error["code"] == "usage_error"
+    assert error["message"]
+    assert error["usage"].startswith("usage: startunnel")
+    assert "st_private-argument" not in result.stderr
+    assert str(CLI) not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "arguments", [["--help"], ["admin", "agents", "create", "--help"], ["schema", "--help"]]
+)
+def test_explicit_help_remains_offline_text(arguments: list[str]) -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    result = subprocess.run(
+        [sys.executable, str(CLI), *arguments],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.startswith("usage: startunnel")
+    assert "--help" in result.stdout
+
+
+def test_invalid_idempotency_key_is_a_usage_error_before_any_request() -> None:
+    with serve() as (base_url, scenario):
+        result = run_cli(
+            base_url,
+            "reply",
+            "--idempotency-key",
+            "short",
+            body={
+                "address": "glyphs",
+                "parent_id": "parent",
+                "content": {"type": "text", "text": "Hi"},
+            },
+        )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["code"] == "usage_error"
+    assert "short" not in result.stderr
+    assert scenario.requests == []
 
 
 def test_api_error_discards_reflected_credentials_in_safe_fields() -> None:
