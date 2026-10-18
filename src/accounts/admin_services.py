@@ -26,6 +26,7 @@ from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
+from tunnels.access import cycle_is_readable
 from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_operator
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
@@ -308,7 +309,7 @@ def list_admin_resources(
             "id": str(row.id),
             "number": row.number,
             "state": row.state,
-            "label": row.label,
+            "label": row.label if cycle_is_readable(row) else "",
             "created_at": row.created_at.isoformat(),
         },
     }
@@ -338,6 +339,14 @@ def _derived_secret(receipt: AdminOperation, kind: str) -> str:
 
 def _replay(receipt: AdminOperation) -> dict[str, Any]:
     response = dict(receipt.response)
+    if receipt.operation == "beacons.withdraw":
+        beacon = (
+            Beacon.objects.select_related("cycle")
+            .filter(pk=response.get("resource", {}).get("id"))
+            .first()
+        )
+        if beacon is None or not cycle_is_readable(beacon.cycle):
+            raise InvalidRequest("The operation resource is not available.")
     if receipt.operation == "tunnels.rotate":
         resource = response.get("resource", {})
         address_row = TunnelAddress.objects.filter(

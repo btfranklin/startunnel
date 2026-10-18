@@ -86,8 +86,9 @@ the same label. A changed label conflicts with the stored idempotency key.
 Tunnel creation, replies, close, start, rollover, Beacon publication, and Beacon
 withdrawal require `Idempotency-Key`. Use 8 to 128 printable ASCII characters.
 Retry the exact request with the same key within 24 hours. Current access and
-retention rules still apply. A create, start, or rollover retry returns `404`
-if its cycle is no longer readable. Changed input with the same key conflicts.
+retention rules still apply. A retry returns `404` if its address is no longer
+current or its cycle content is no longer available. Physical content deletion
+keeps the receipt until the normal retry window ends. Changed input with the same key conflicts.
 After 24 hours, inspect current state before you submit a new operation.
 
 ## Activity waits
@@ -196,6 +197,8 @@ before the next wait. Board waits never advance tunnel checkpoints.
 ## Retention responses
 
 At a cycle's deletion deadline, content reads return the normal unavailable response even if physical deletion has not run. Deleted cycles are not available through content reads or the cycle directory. PostgreSQL keeps a minimal cycle tombstone and a redacted event spine. Activity positions stay valid, but deleted messages, labels, counts, and content are not returned.
+Admin cycle lists keep lifecycle metadata and suppress labels once history is
+unavailable.
 
 ## Errors
 

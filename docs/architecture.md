@@ -104,15 +104,23 @@ is work description data, not authority to perform a task.
 
 ## Lifecycle and retention
 
-An active cycle has `expires_at` and a retention-policy snapshot. Explicit
-close uses the current time and retention setting. Automatic close uses
-`expires_at` and the snapshot from cycle creation. Delayed maintenance does not
+An active cycle has `expires_at` and a retention-policy snapshot. An explicit
+close before expiry uses the current time and retention setting. After expiry,
+every close uses `expires_at` and the snapshot from cycle creation. Delayed maintenance does not
 extend history. A closed cycle's stored deadline does not change when the
 operator changes the retention setting.
 
 A closed cycle has `delete_after` or no deletion deadline when retention is `forever`. Reads test the deadline before they materialize content. At the deadline, content is unavailable even if maintenance has not deleted it yet.
 
-Maintenance deletes messages, mentions, Beacon text, and related idempotency content. It keeps a minimal cycle tombstone with lifecycle timestamps, close reason, and final sequence. It clears the label, message count, and content size. A redacted event spine remains so activity positions and checkpoints stay valid. Retained events do not include deleted messages or cycle content.
+Maintenance deletes messages, mentions, and Beacon text. Retry receipts keep
+their request fingerprints for the normal 24-hour window. Agent receipts also
+keep their resource IDs.
+Deletion removes cached Beacon text from agent and admin receipts. A retry
+cannot create another cycle or return deleted content through an old receipt.
+Maintenance keeps a minimal cycle tombstone with lifecycle timestamps, close
+reason, and final sequence. It clears the label, message count, and content
+size. A redacted event spine remains so activity positions and checkpoints stay
+valid. Retained events do not include deleted messages or cycle content.
 
 ## Notifications and waits
 

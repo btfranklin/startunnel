@@ -209,7 +209,7 @@ def test_lifecycle_writes_require_the_creator_and_current_expected_state(
     assert stale.json()["error"]["code"] == "lifecycle_conflict"
 
 
-def test_start_replay_keeps_its_original_response_after_close_and_rotation(
+def test_start_replay_keeps_its_original_response_until_address_rotation(
     client: Client, credential_factory: Any
 ) -> None:
     coordinator, key = credential_factory()
@@ -242,12 +242,6 @@ def test_start_replay_keeps_its_original_response_after_close_and_rotation(
         idempotency_key="api-exact-start-close-second",
     )
     assert close.status_code == 204
-    rotate_address_as_operator(
-        actor=coordinator.created_by,
-        tunnel_id=UUID(created["tunnel"]["id"]),
-        expected_address_generation=1,
-    )
-
     replay = _post(
         client,
         "/api/v1/cycles/start",
@@ -260,6 +254,21 @@ def test_start_replay_keeps_its_original_response_after_close_and_rotation(
     replay_body = replay.json()
     original["idempotent_replay"] = True
     assert replay_body == original
+
+    rotate_address_as_operator(
+        actor=coordinator.created_by,
+        tunnel_id=UUID(created["tunnel"]["id"]),
+        expected_address_generation=1,
+    )
+    retired_address_replay = _post(
+        client,
+        "/api/v1/cycles/start",
+        body,
+        key=key,
+        idempotency_key="api-exact-start-request",
+    )
+    assert retired_address_replay.status_code == 404
+    assert retired_address_replay.json()["error"]["code"] == "tunnel_unavailable"
 
 
 def test_every_lifecycle_read_and_write_with_a_retired_address_is_unavailable(

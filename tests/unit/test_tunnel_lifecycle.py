@@ -382,6 +382,25 @@ def test_lifecycle_rechecks_replay_after_initial_miss(
     )
 
 
+def test_close_replay_checks_current_creator_authority(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tunnels import services
+
+    creator, _ = credential_factory()
+    created = _create(creator, "close-replay-authority")
+    arguments = {
+        "credential": creator,
+        "address": created.address,
+        "expected_cycle_id": created.cycle.id,
+        "idempotency_key": "close-replay-authority-operation",
+    }
+    services.close_cycle(**arguments)
+    monkeypatch.setattr(services, "_can_control_with_credential", lambda **kwargs: False)
+    with pytest.raises(TunnelUnavailable):
+        services.close_cycle(**arguments)
+
+
 def test_all_mentions_are_resolved_in_one_query(
     credential_factory: Any, django_assert_num_queries: Any
 ) -> None:

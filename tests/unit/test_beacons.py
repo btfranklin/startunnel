@@ -11,6 +11,8 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from accounts.admin_services import execute_admin_operation
+from accounts.models import AdminOperation
 from core.cursors import decode_cursor, encode_cursor
 from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
 from tunnels.errors import (
@@ -368,7 +370,7 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
     assert read_board(credential=creator).items == ()
 
 
-def test_retention_deletes_beacon_and_its_idempotency_records(credential_factory: Any) -> None:
+def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_factory: Any) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-retention")
     result, _ = publish_beacon(
@@ -376,6 +378,12 @@ def test_retention_deletes_beacon_and_its_idempotency_records(credential_factory
         idempotency_key="publish-retention-0001",
         address=created.address,
         text="Need review.",
+    )
+    withdraw_beacon(
+        credential=creator,
+        idempotency_key="withdraw-retention-0001",
+        address=created.address,
+        beacon_id=UUID(result["id"]),
     )
     close_cycle(
         credential=creator,
@@ -389,7 +397,71 @@ def test_retention_deletes_beacon_and_its_idempotency_records(credential_factory
 
     assert delete_due_cycle_content(cycle_id=created.cycle.id, now=timezone.now())
     assert not Beacon.objects.filter(pk=result["id"]).exists()
-    assert not IdempotencyRecord.objects.filter(resource_id=result["id"]).exists()
+    receipts = list(IdempotencyRecord.objects.filter(resource_id=result["id"]))
+    assert len(receipts) == 2
+    assert all(receipt.response == {} for receipt in receipts)
+    with pytest.raises(TunnelUnavailable):
+        publish_beacon(
+            credential=creator,
+            idempotency_key="publish-retention-0001",
+            address=created.address,
+            text="Need review.",
+        )
+    with pytest.raises(TunnelUnavailable):
+        withdraw_beacon(
+            credential=creator,
+            idempotency_key="withdraw-retention-0001",
+            address=created.address,
+            beacon_id=UUID(result["id"]),
+        )
+    with pytest.raises(IdempotencyConflict):
+        publish_beacon(
+            credential=creator,
+            idempotency_key="publish-retention-0001",
+            address=created.address,
+            text="Changed request.",
+        )
+
+
+def test_retention_clears_admin_beacon_summary_and_rejects_replay(
+    credential_factory: Any,
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator, "admin-beacon-retention")
+    result, _ = publish_beacon(
+        credential=creator,
+        idempotency_key="publish-admin-retention",
+        address=created.address,
+        text="Temporary Beacon text.",
+    )
+
+    def withdraw() -> dict[str, Any]:
+        return execute_admin_operation(
+            actor=creator.created_by,
+            operation="beacons.withdraw",
+            key="withdraw-admin-retention",
+            data={"beacon_id": result["id"]},
+        )
+
+    response = withdraw()
+    receipt = AdminOperation.objects.get(pk=response["operation"]["id"])
+    fingerprint = bytes(receipt.request_digest)
+    close_cycle(
+        credential=creator,
+        idempotency_key="close-admin-retention",
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+    )
+    Cycle.objects.filter(pk=created.cycle.id).update(
+        delete_after=timezone.now() - timedelta(seconds=1)
+    )
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=timezone.now())
+    receipt.refresh_from_db()
+    assert receipt.response == {}
+    assert bytes(receipt.request_digest) == fingerprint
+    with pytest.raises(InvalidRequest):
+        withdraw()
+    assert AdminOperation.objects.count() == 1
 
 
 @pytest.mark.parametrize("lifetime", [0, 86_401, True, 1.5])

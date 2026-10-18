@@ -110,3 +110,11 @@ the failure in the audit log. Browser revocation rejects malformed credential
 IDs. Invalid metrics tokens with non-ASCII text return `404`. Account creation
 uses the same case-insensitive username check in the API, browser, user manager,
 and bootstrap command.
+
+## History deadlines and retries
+
+Closing or retiring an expired cycle now keeps its original expiry time and
+retention policy. Admin cycle lists hide labels at the history deadline.
+Content deletion keeps retry receipts for their normal 24-hour window and
+removes cached Beacon text. Retries check current addresses and retained
+content, so a deleted result cannot create another cycle or restore content.

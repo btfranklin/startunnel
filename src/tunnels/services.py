@@ -354,11 +354,11 @@ def create_tunnel(
             raise TunnelUnavailable()
         tunnel = Tunnel.objects.get(pk=idempotency.record.resource_id)
         cycle = tunnel.cycles.get(number=1)
+        if not cycle_is_readable(cycle):
+            raise CycleUnavailable()
         root = cycle.root_message
         if root is None:
             raise TunnelUnavailable()
-        if not cycle_is_readable(cycle):
-            raise CycleUnavailable()
         address_row = TunnelAddress.objects.filter(
             tunnel=tunnel,
             generation=1,
@@ -537,9 +537,16 @@ def post_reply(
     if idempotency.replay:
         if not idempotency.record.resource_id:
             raise TunnelUnavailable()
-        message = Message.objects.filter(pk=idempotency.record.resource_id).first()
+        tunnel = resolve_tunnel(credential=credential, address=address)
+        message = (
+            Message.objects.select_related("cycle")
+            .filter(pk=idempotency.record.resource_id, tunnel=tunnel)
+            .first()
+        )
         if message is None:
             raise TunnelUnavailable()
+        if not cycle_is_readable(message.cycle):
+            raise CycleUnavailable()
         event = TunnelEvent.objects.get(message=message, event_type=TunnelEvent.Type.MESSAGE_POSTED)
         return PostedReply(message, event.position, replay=True)
 
@@ -1212,9 +1219,21 @@ def _start_cycle_locked(
     )
 
 
-def _replayed_cycle(record: IdempotencyRecord) -> StartedCycle:
+def _replayed_cycle(
+    record: IdempotencyRecord, *, credential: AgentCredential, address: str
+) -> StartedCycle:
+    tunnel = resolve_tunnel(credential=credential, address=address)
+    if not _can_control_with_credential(credential=credential, tunnel=tunnel):
+        raise TunnelUnavailable()
     if record.resource_id is None:
         raise TunnelUnavailable()
+    cycle = (
+        Cycle.objects.select_related("root_message")
+        .filter(pk=record.resource_id, tunnel=tunnel)
+        .first()
+    )
+    if cycle is None or not cycle_is_readable(cycle):
+        raise CycleUnavailable()
     event_position = record.response.get("event_position")
     cycle_state = record.response.get("cycle_state")
     message_count = record.response.get("message_count")
@@ -1232,13 +1251,10 @@ def _replayed_cycle(record: IdempotencyRecord) -> StartedCycle:
         or content_bytes < 0
     ):
         raise TunnelUnavailable()
-    cycle = Cycle.objects.select_related("root_message", "tunnel").get(pk=record.resource_id)
     if cycle.root_message is None:
         raise TunnelUnavailable()
-    if not cycle_is_readable(cycle):
-        raise CycleUnavailable()
     return StartedCycle(
-        tunnel=cycle.tunnel,
+        tunnel=tunnel,
         cycle=cycle,
         root=cycle.root_message,
         cycle_state=cycle_state,
@@ -1312,7 +1328,7 @@ def start_cycle(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
     )
     if replay:
-        return _replayed_cycle(replay.record)
+        return _replayed_cycle(replay.record, credential=credential, address=address)
     tunnel = resolve_tunnel(credential=credential, address=address, for_update=True)
     if not _can_control_with_credential(credential=credential, tunnel=tunnel):
         raise TunnelUnavailable()
@@ -1327,7 +1343,7 @@ def start_cycle(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
     )
     if idempotency.replay:
-        return _replayed_cycle(idempotency.record)
+        return _replayed_cycle(idempotency.record, credential=credential, address=address)
     started = _start_cycle_locked(
         tunnel=tunnel,
         credential=credential,
@@ -1412,7 +1428,7 @@ def rollover_cycle(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
     )
     if replay:
-        return _replayed_cycle(replay.record)
+        return _replayed_cycle(replay.record, credential=credential, address=address)
     tunnel = resolve_tunnel(credential=credential, address=address, for_update=True)
     if not _can_control_with_credential(credential=credential, tunnel=tunnel):
         raise TunnelUnavailable()
@@ -1420,7 +1436,7 @@ def rollover_cycle(
         credential=credential, operation=operation, key=idempotency_key, request_data=request_data
     )
     if idempotency.replay:
-        return _replayed_cycle(idempotency.record)
+        return _replayed_cycle(idempotency.record, credential=credential, address=address)
     mentions = _resolve_mentions(
         mention_ids=mention_ids,
         maximum=limits.mentions_per_message,
@@ -1473,6 +1489,8 @@ def _close_locked_cycle(
     if cycle.state != Cycle.State.ACTIVE or tunnel.state != Tunnel.State.ACTIVE:
         return
     now = timezone.now()
+    if cycle.expires_at <= now:
+        reason = "expired"
     closed_at = cycle.expires_at if reason == "expired" else now
     retention_seconds = (
         cycle.retention_seconds
@@ -1561,6 +1579,10 @@ def close_cycle(
         request_data=request_data,
     )
     if replay:
+        tunnel = resolve_tunnel(credential=credential, address=address)
+        if not _can_control_with_credential(credential=credential, tunnel=tunnel):
+            raise TunnelUnavailable()
+        select_cycle(tunnel=tunnel, cycle_id=expected_cycle_id)
         return
     tunnel = resolve_tunnel(
         credential=credential,
@@ -1576,6 +1598,7 @@ def close_cycle(
         request_data=request_data,
     )
     if idempotency.replay:
+        select_cycle(tunnel=tunnel, cycle_id=expected_cycle_id)
         return
     cycle = active_cycle(tunnel=tunnel, for_update=True)
     if cycle.id != expected_cycle_id:

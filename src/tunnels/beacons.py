@@ -27,7 +27,7 @@ from core.cursors import cursor_int, decode_cursor, encode_cursor
 from core.logging import current_request_id
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
 
-from .access import credential_is_active, resolve_tunnel
+from .access import credential_is_active, cycle_is_readable, resolve_tunnel
 from .codec import canonical_address
 from .errors import (
     CycleClosed,
@@ -39,7 +39,16 @@ from .errors import (
 )
 from .idempotency import begin as begin_idempotency
 from .idempotency import find_replay, finish
-from .models import Beacon, BoardState, Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
+from .models import (
+    Beacon,
+    BoardState,
+    Cycle,
+    IdempotencyRecord,
+    Message,
+    Tunnel,
+    TunnelAddress,
+    TunnelEvent,
+)
 
 DEFAULT_BEACON_SECONDS = 3_600
 MAX_BEACON_SECONDS = 86_400
@@ -256,6 +265,15 @@ def end_beacon_for_cycle_locked(
         _end_locked(tunnel=tunnel, cycle=cycle, beacon=beacon, reason=reason)
 
 
+def _replayed_beacon(record: IdempotencyRecord) -> dict[str, Any]:
+    if record.resource_id is None:
+        raise TunnelUnavailable()
+    beacon = Beacon.objects.select_related("cycle").filter(pk=record.resource_id).first()
+    if beacon is None or not cycle_is_readable(beacon.cycle):
+        raise TunnelUnavailable()
+    return dict(record.response)
+
+
 @transaction.atomic
 def publish_beacon(
     *,
@@ -286,7 +304,7 @@ def publish_beacon(
         request_data=request_data,
     )
     if replay:
-        return replay.record.response, True
+        return _replayed_beacon(replay.record), True
     if cycle.state != Cycle.State.ACTIVE or tunnel.state != Tunnel.State.ACTIVE:
         raise CycleClosed()
     if cycle.creator_id != credential.id:
@@ -300,7 +318,7 @@ def publish_beacon(
         request_data=request_data,
     )
     if idempotency.replay:
-        return idempotency.record.response, True
+        return _replayed_beacon(idempotency.record), True
     position = _advance_board_position()
     now = _database_now()
     if cycle.expires_at <= now:
@@ -361,7 +379,7 @@ def withdraw_beacon(
         request_data=request_data,
     )
     if replay:
-        return replay.record.response, True
+        return _replayed_beacon(replay.record), True
     if beacon is None or beacon.publisher_id != credential.id or cycle.creator_id != credential.id:
         raise TunnelUnavailable()
     idempotency = begin_idempotency(
@@ -371,7 +389,7 @@ def withdraw_beacon(
         request_data=request_data,
     )
     if idempotency.replay:
-        return idempotency.record.response, True
+        return _replayed_beacon(idempotency.record), True
     now = _database_now()
     if (
         cycle.state != Cycle.State.ACTIVE

@@ -110,7 +110,8 @@ Closed content becomes unreadable at `delete_after`, regardless of worker
 timing. Maintenance deletes content in bounded batches and keeps a minimal
 tombstone. The default retention is 30 days. `forever` disables content deletion
 for cycles that capture that policy. Automatic expiry uses the policy from
-cycle creation; explicit close uses the current setting. Closed deadlines do
+cycle creation, including an explicit close after expiry. An explicit close
+before expiry uses the current setting. Closed deadlines do
 not change.
 
 Forward migrations add admin credentials, operation receipts, and audit
