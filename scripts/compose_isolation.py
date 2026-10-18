@@ -29,13 +29,6 @@ DISPOSABLE_BUILD_LABEL = "net.startunnel.disposable-build=true"
 SAFE_PROJECT_PREFIXES = ("stci-", "sttest-", "stproof-", "strelease-", "stload-")
 PROJECT_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{7,62}")
 PRODUCTION_PROJECT_TOKENS = frozenset({"prod", "production", "stage", "staging", "startunnel"})
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "postgres", "web"})
-URL_SETTING_NAMES = (
-    "DATABASE_URL",
-    "DATABASE_ADMIN_URL",
-    "TEST_DATABASE_URL",
-    "STARTUNNEL_BASE_URL",
-)
 SAFE_ENVIRONMENT_NAMES = frozenset(
     {
         "BUILDKIT_PROGRESS",
@@ -107,13 +100,6 @@ def validate_project_name(project_name: str) -> str:
     return project_name
 
 
-def _local_url(value: str) -> bool:
-    parsed = urlsplit(value)
-    if parsed.scheme == "sqlite":
-        return True
-    return parsed.hostname in LOCAL_HOSTS
-
-
 def _local_docker_endpoint(endpoint: str) -> bool:
     if endpoint.startswith(("unix://", "npipe://")):
         return True
@@ -124,35 +110,12 @@ def _local_docker_endpoint(endpoint: str) -> bool:
 
 
 def assert_safe_target(source: Mapping[str, str], project_name: str) -> None:
-    """Fail before Docker mutation when the host environment names a live target."""
+    """Check the disposable project and the Docker endpoint."""
 
     validate_project_name(project_name)
-    environment_name = source.get("STARTUNNEL_ENV", "").casefold()
-    if environment_name in {"prod", "production", "stage", "staging"}:
-        raise IsolationError("STARTUNNEL_ENV names a production-like environment.")
-    settings_module = source.get("DJANGO_SETTINGS_MODULE", "").casefold()
-    if "production" in settings_module or "staging" in settings_module:
-        raise IsolationError("DJANGO_SETTINGS_MODULE names production-like settings.")
-    compose_file = source.get("COMPOSE_FILE", "").casefold()
-    if "compose.prod" in compose_file:
-        raise IsolationError("COMPOSE_FILE includes the production overlay.")
-    profiles = {
-        value.strip().casefold()
-        for value in source.get("COMPOSE_PROFILES", "").split(",")
-        if value.strip()
-    }
-    if "edge" in profiles:
-        raise IsolationError("COMPOSE_PROFILES includes the production edge profile.")
     docker_host = source.get("DOCKER_HOST", "")
     if docker_host and not _local_docker_endpoint(docker_host):
         raise IsolationError("DOCKER_HOST names a remote Docker endpoint.")
-    configured_project = source.get("COMPOSE_PROJECT_NAME", "")
-    if configured_project and configured_project != project_name:
-        raise IsolationError("COMPOSE_PROJECT_NAME does not match the disposable project name.")
-    for name in URL_SETTING_NAMES:
-        value = source.get(name, "")
-        if value and not _local_url(value):
-            raise IsolationError(f"{name} points outside the disposable local stack.")
 
 
 def safe_environment(

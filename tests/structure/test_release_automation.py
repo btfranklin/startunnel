@@ -215,24 +215,45 @@ def test_project_name_rejects_shared_or_production_names(project_name: str) -> N
         isolation.validate_project_name(project_name)
 
 
-@pytest.mark.parametrize(
-    "environment",
-    [
-        {"STARTUNNEL_ENV": "production"},
-        {"DJANGO_SETTINGS_MODULE": "startunnel.settings.production"},
-        {"COMPOSE_FILE": "compose.yaml:compose.prod.yaml"},
-        {"COMPOSE_PROFILES": "edge"},
-        {"COMPOSE_PROJECT_NAME": "startunnel"},
-        {"DOCKER_HOST": "ssh://production-host"},
-        {"DATABASE_URL": "postgresql://service@example.com/startunnel"},
-        {"STARTUNNEL_BASE_URL": "https://startunnel.example"},
-    ],
-)
-def test_target_guard_rejects_production_like_environment(
-    environment: Mapping[str, str],
+@pytest.mark.parametrize("endpoint", ["ssh://production-host", "tcp://192.0.2.1:2376"])
+def test_target_guard_rejects_remote_docker(endpoint: str) -> None:
+    with pytest.raises(isolation.IsolationError, match="remote Docker endpoint"):
+        isolation.assert_safe_target({"DOCKER_HOST": endpoint}, "sttest-focused-12345678")
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
+def test_isolated_compose_discards_ambient_deployment_settings(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with pytest.raises(isolation.IsolationError):
-        isolation.assert_safe_target(environment, "sttest-focused-12345678")
+    monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
+    monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
+    monkeypatch.setattr(isolation, "prune_disposable_images", lambda environment: None)
+    monkeypatch.setattr(isolation.IsolatedComposeProject, "cleanup", lambda self: None)
+    source = dict(os.environ)
+    source.update(
+        STARTUNNEL_ENV="production",
+        DJANGO_SETTINGS_MODULE="startunnel.settings.production",
+        COMPOSE_FILE="/missing/compose.prod.yaml",
+        COMPOSE_PROFILES="edge",
+        COMPOSE_PROJECT_NAME="startunnel",
+        DATABASE_URL="postgresql://unused@remote.example/live",
+        DATABASE_ADMIN_URL="postgresql://unused@remote.example/live",
+        TEST_DATABASE_URL="postgresql://unused@remote.example/live",
+        STARTUNNEL_BASE_URL="https://remote.example",
+    )
+    with isolation.IsolatedComposeProject(
+        "sttest-ambient-settings", source_environment=source
+    ) as stack:
+        model = json.loads(stack.capture("Render isolated model", "config", "--format", "json"))
+        assert model["name"] == stack.project_name
+        assert len(stack.compose_files()) == 2
+        assert stack.profiles == ()
+        web = model["services"]["web"]["environment"]
+        assert web["DJANGO_SETTINGS_MODULE"] == "tests.browser_settings"
+        assert web["STARTUNNEL_ENV"] == "development"
+        assert web["DATABASE_URL"].endswith("@postgres:5432/startunnel")
+        assert web["STARTUNNEL_BASE_URL"] == "http://web:8000"
+        assert "caddy" not in model["services"]
 
 
 def test_environment_allowlist_removes_service_and_provider_secrets() -> None:

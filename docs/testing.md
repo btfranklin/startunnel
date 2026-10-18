@@ -2,6 +2,10 @@
 
 Use the smallest lane that proves the change. Every Compose proof must use the isolated runner and a disposable project name.
 
+The runner discards ambient application and Compose settings. It supplies its
+own files, project, and test database URLs. It checks the actual Docker endpoint
+and refuses existing project resources.
+
 Run the local aggregate check as well as the canonical container lane. Compose
 configuration tests require the host Docker CLI and skip inside test containers
 that do not have it. Test containers do not receive the host Docker socket.
