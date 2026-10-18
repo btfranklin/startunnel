@@ -2,6 +2,6 @@
   "version": "v0.1.0",
   "supported_from": [],
   "configuration_changes": [],
-  "database": "Initial supported baseline with forward migrations for admin credentials, operation receipts, audit attribution, and direct glyph address storage. BREAKING: migration 0004 deletes all existing tunnels and their message data once, including addresses, cycles, messages, mentions, events, checkpoints, agent retry records, and admin tunnel-control receipts. Accounts, passwords, credentials, other admin receipts, and audits remain. No conversion file is needed. Later normal upgrades skip the reset. Unversioned installations qualify only with an ancestor source commit and an unchanged matching applied migration prefix, proven on a restored database. No published predecessor is claimed; other graphs need a separately reviewed conversion.",
+  "database": "Initial supported baseline with additive forward migrations for admin credentials, operation receipts, and audit attribution. Unversioned installations qualify only with an ancestor source commit and an unchanged matching applied migration prefix, proven on a restored database. No published predecessor is claimed; other graphs need a separately reviewed conversion.",
   "rollback": "Restore the previous source checkout and image. If migrations have changed the database, recover the matching pre-upgrade database backup and secrets together."
 }
