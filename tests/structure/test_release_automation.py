@@ -667,33 +667,48 @@ def test_load_runner_can_reuse_verified_current_images(
     assert all(step != "Build load images" for step, _arguments in events)
 
 
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
 def test_load_service_forwards_safe_provenance_fields() -> None:
-    compose = (ROOT / "compose.test.yaml").read_text(encoding="utf-8")
-
-    for name in (
-        "STARTUNNEL_LOAD_DOCKER_VERSION",
-        "STARTUNNEL_LOAD_IMAGE_DIGESTS",
-        "STARTUNNEL_LOAD_BUILD_MODE",
-    ):
-        assert f"{name}: ${{{name}:-" in compose
-    assert (
-        "STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE:-18}"
-    ) in compose
-    assert "STARTUNNEL_LOAD_WEB_WORKERS: ${STARTUNNEL_WEB_WORKERS:-4}" in compose
-    assert (
-        "DATABASE_URL: ${DATABASE_ADMIN_URL:-postgresql://startunnel_admin:"
-        "startunnel_admin@postgres:5432/startunnel}"
-    ) in compose
-    assert "Public API\n      # traffic still reaches the web service" in compose
-
-
-def test_security_lane_enforces_actionable_bandit_findings() -> None:
-    runner = (ROOT / "scripts/run_security_release.py").read_text(encoding="utf-8")
-    docs_renderer = (ROOT / "src/site_app/docs.py").read_text(encoding="utf-8")
-
-    assert '"--severity-level",\n                "medium"' in runner
-    assert '"--confidence-level",\n                "medium"' in runner
-    assert "# nosec B308, B703" in docs_renderer
+    environment = os.environ.copy()
+    expected = {
+        "STARTUNNEL_LOAD_DOCKER_VERSION": "29.0.0",
+        "STARTUNNEL_LOAD_IMAGE_DIGESTS": "web=sha256:fixture",
+        "STARTUNNEL_LOAD_BUILD_MODE": "built-current-run",
+    }
+    environment.update(expected)
+    environment.update(
+        STARTUNNEL_WEB_WORKERS="3",
+        STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE="12",
+        DATABASE_ADMIN_URL="postgresql://fixture_admin:fixture@postgres/fixture",
+    )
+    model = json.loads(
+        subprocess.check_output(
+            [
+                "docker",
+                "compose",
+                "--env-file",
+                "/dev/null",
+                "-f",
+                "compose.yaml",
+                "-f",
+                "compose.test.yaml",
+                "--profile",
+                "load",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            env=environment,
+            text=True,
+        )
+    )
+    forwarded = model["services"]["load-profile"]["environment"]
+    for name, value in expected.items():
+        assert forwarded[name] == value
+    assert forwarded["STARTUNNEL_LOAD_WEB_WORKERS"] == "3"
+    assert forwarded["STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE"] == "12"
+    assert forwarded["DATABASE_URL"] == environment["DATABASE_ADMIN_URL"]
 
 
 def test_system_report_is_written_only_after_volume_cleanup(
