@@ -407,7 +407,6 @@ def _execute_admin_operation(
     validate_idempotency_key(key)
     if operation in {"tunnels.start", "tunnels.rollover"} and data.get("root_session") is None:
         data = {field: value for field, value in data.items() if field != "root_session"}
-    lock_admin_access()
     actor = validate_actor(actor, credential)
     digest = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), key.encode(), "sha256")
     try:
@@ -421,23 +420,29 @@ def _execute_admin_operation(
     except (ValueError, TypeError) as error:
         raise InvalidRequest("The request is not valid JSON.") from error
     request_digest = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), canonical, "sha256")
-    receipt = (
-        AdminOperation.objects.select_for_update().filter(owner=actor, key_digest=digest).first()
+    defaults = {
+        "operation": operation,
+        "request_digest": request_digest,
+        "derivation_nonce": secrets.token_bytes(32),
+        "expires_at": timezone.now() + timedelta(hours=24),
+    }
+    receipt, created = AdminOperation.objects.select_for_update().get_or_create(
+        owner=actor, key_digest=digest, defaults=defaults
     )
-    if receipt and receipt.expires_at > timezone.now():
+    if not created and receipt.expires_at > timezone.now():
         if not hmac.compare_digest(bytes(receipt.request_digest), request_digest):
             raise IdempotencyConflict()
         return _replay(receipt)
-    if receipt:
+    if not created:
         receipt.delete()
-    receipt = AdminOperation.objects.create(
-        owner=actor,
-        operation=operation,
-        key_digest=digest,
-        request_digest=request_digest,
-        derivation_nonce=secrets.token_bytes(32),
-        expires_at=timezone.now() + timedelta(hours=24),
-    )
+        receipt = AdminOperation.objects.create(owner=actor, key_digest=digest, **defaults)
+    if (
+        operation == "keys.revoke"
+        or (operation == "accounts.state" and data.get("active") is False)
+        or (operation == "accounts.password" and not data.get("password"))
+    ):
+        lock_admin_access()
+        actor = validate_actor(actor, credential)
     with admin_audit_context(credential, "admin_api" if credential else "browser"):
         try:
             resource, target_type, target_id = _perform(actor, receipt, operation, data)

@@ -42,11 +42,14 @@ PostgreSQL-backed limits. Operation limits are shared across an account's keys.
 Mutations require an idempotency key. A transaction stores the keyed request
 digest, safe result, target references, and audit-event ID with the domain change.
 Receipts belong to the admin account and have a 24-hour retry window. Changed
-input conflicts. Nonce-derived secret results can be recovered by an exact retry
-without plaintext storage, while current resource state prevents restoration of
-revoked credentials or retired addresses.
+input conflicts. A receipt row serializes retries with the same account and key.
+Independent admin writes use their own domain locks. Nonce-derived secret
+results can be recovered by an exact retry without plaintext storage, while
+current resource state prevents restoration of revoked credentials or retired
+addresses.
 
-Explicit account state changes check the expected state under a lock. Tunnel
+Explicit account state changes check the expected state under a row lock.
+Changes that remove admin access also use the instance access lock. Tunnel
 operations retain expected-cycle and address-generation checks. Last-access
 protection requires an active password account or non-expiring admin key.
 Server-only bootstrap and recovery issue access without a browser session.

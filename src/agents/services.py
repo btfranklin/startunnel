@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from accounts.models import User
@@ -38,8 +38,6 @@ def _new_key() -> str:
 
 
 def _lock_credential_quota() -> None:
-    from django.db import connection
-
     if connection.vendor == "postgresql":
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", [7_195_415_308_901])
@@ -49,7 +47,7 @@ def _lock_credential_quota() -> None:
 def create_credential(
     *, actor: User, name: str, expires_at: datetime | None = None, key: str | None = None
 ) -> IssuedCredential:
-    actor = User.objects.select_for_update().get(pk=actor.pk)
+    actor = User.objects.select_for_update(no_key=True).get(pk=actor.pk)
     if not actor.is_active:
         raise CredentialError("This account cannot create an agent credential.")
     _lock_credential_quota()

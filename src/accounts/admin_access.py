@@ -31,7 +31,7 @@ def lock_admin_access() -> None:
     if connection.vendor == "postgresql":
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", [7195415308903])
-    list(User.objects.select_for_update().order_by("id"))
+    list(User.objects.select_for_update(no_key=True).order_by("id"))
 
 
 def require_recovery_path() -> None:
@@ -88,12 +88,14 @@ def authenticate_admin_key(key: str) -> AdminCredential:
     return credential
 
 
+@transaction.atomic
 def issue_admin_key(
     *, owner: User, name: str, key: str | None = None, expires_at: datetime | None = None
 ) -> tuple[AdminCredential, str]:
     name = name.strip()
     if not name or len(name) > 100:
         raise InvalidRequest("Give the admin credential a name of 1 to 100 characters.")
+    owner = User.objects.select_for_update(no_key=True).get(pk=owner.pk)
     if not owner.is_active:
         raise InvalidRequest("Activate this administrator before issuing a key.")
     if expires_at is not None and expires_at <= timezone.now():
@@ -113,9 +115,10 @@ def issue_admin_key(
 def change_admin_state(
     *, actor: User, admin_id: UUID, active: bool, expected_active: bool | None = None
 ) -> User:
-    lock_admin_access()
+    if not active:
+        lock_admin_access()
     validate_actor(actor)
-    target = User.objects.filter(pk=admin_id).first()
+    target = User.objects.select_for_update(no_key=True).filter(pk=admin_id).first()
     if target is None:
         raise InvalidRequest("This admin account is not available.")
     if expected_active is not None and target.is_active != expected_active:
