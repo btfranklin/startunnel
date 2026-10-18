@@ -12,7 +12,7 @@ from django.db import DatabaseError, close_old_connections, connection, transact
 
 from agents.models import AgentCredential
 from tunnels.access import resolve_tunnel
-from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
+from tunnels.models import ActivityCheckpoint, Cycle, Message, Tunnel, TunnelEvent
 from tunnels.services import CreatedTunnel, close_cycle, create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -104,6 +104,78 @@ def test_checkpoint_tunnel_cannot_be_reassigned(credential_factory: Any) -> None
 
     checkpoint.refresh_from_db()
     assert checkpoint.tunnel_id == first.tunnel.id
+
+
+def test_cycle_root_guard_rejects_missing_mismatched_and_deleted_roots(
+    credential_factory: Any,
+) -> None:
+    credential, _ = credential_factory(name="Root guard creator")
+    created = _create_board(credential, key="root-guard-create")
+    child = post_reply(
+        credential=credential,
+        idempotency_key="root-guard-child",
+        address=created.address,
+        parent_id=created.root.id,
+        content={"type": "text", "text": "A child in this cycle."},
+    )
+
+    for root_message in (None, child.message):
+        with (
+            pytest.raises(DatabaseError, match="exactly one root"),
+            transaction.atomic(),
+        ):
+            Cycle.objects.filter(pk=created.cycle.pk).update(root_message=root_message)
+            with connection.cursor() as cursor:
+                cursor.execute("SET CONSTRAINTS startunnel_cycle_root_from_cycle IMMEDIATE")
+
+    root_only_board = _create_board(credential, key="root-guard-delete-create")
+    TunnelEvent.objects.filter(tunnel=root_only_board.tunnel).delete()
+
+    with (
+        pytest.raises(DatabaseError, match="exactly one root"),
+        transaction.atomic(),
+    ):
+        Message.objects.filter(pk=root_only_board.root.pk).delete()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SET CONSTRAINTS startunnel_cycle_root_from_cycle, "
+                "startunnel_cycle_root_from_message IMMEDIATE"
+            )
+
+
+def test_child_message_insert_skips_full_cycle_root_validation(
+    credential_factory: Any,
+) -> None:
+    credential, _ = credential_factory(name="Root validation performance")
+    created = _create_board(credential, key="root-validation-performance-create")
+    with connection.cursor() as cursor:
+        cursor.execute("SET track_functions = 'all'")
+        cursor.execute(
+            "SELECT pg_stat_reset_single_function_counters("
+            "'public.startunnel_validate_cycle_root_id(uuid)'::regprocedure)"
+        )
+
+    try:
+        post_reply(
+            credential=credential,
+            idempotency_key="root-validation-performance-reply",
+            address=created.address,
+            parent_id=created.root.id,
+            content={"type": "text", "text": "A child does not change the cycle root."},
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_stat_force_next_flush()")
+            cursor.execute("SELECT pg_stat_clear_snapshot()")
+            cursor.execute(
+                "SELECT COALESCE(MAX(calls), 0) FROM pg_stat_user_functions "
+                "WHERE funcname = 'startunnel_validate_cycle_root_id'"
+            )
+            calls = cursor.fetchone()[0]
+        assert calls == 0
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("RESET track_functions")
 
 
 def test_positive_checkpoint_must_name_an_existing_event(credential_factory: Any) -> None:

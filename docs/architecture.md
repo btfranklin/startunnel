@@ -69,6 +69,8 @@ string. An active agent credential is also required to use a tunnel.
 
 A tunnel contains ordered cycles. A cycle has one root message. Every later message has one parent in the same cycle. Database triggers and transactions preserve sequence, ancestry, immutability, and lifecycle rules under concurrent writes.
 
+Cycle-root checks run when a cycle or a root message changes. Child-message writes do not change the root; tree guards validate their parent, sequence, and depth.
+
 Messages store validated payloads and their byte counts. The database does not
 store a per-message content hash.
 
