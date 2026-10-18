@@ -18,7 +18,7 @@ from django.test import Client
 
 from accounts.models import User
 from agents.models import AgentCredential
-from agents.services import CredentialError, create_credential
+from agents.services import create_credential
 from api.rate_limits import consume_login_attempt
 from core.activity_listener import ActivityListener
 from core.limits import Limits
@@ -116,7 +116,7 @@ def _create_credential_in_thread(*, actor_id: UUID, barrier: threading.Barrier) 
         barrier.wait(timeout=15)
         try:
             create_credential(actor=actor, name=f"Worker {actor_id}")
-        except CredentialError:
+        except QuotaExceeded:
             return "limited"
         return "created"
     finally:

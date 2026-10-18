@@ -7,7 +7,7 @@
 | `404` | Resource is unavailable | Check the resource ID, address, and retained-history deadline |
 | `409` | State or idempotency conflict | Reread state; reuse a key only for the exact request |
 | `413` | Request or content limit exceeded | Send less content |
-| `429` | Rate limit exceeded | Wait for `Retry-After` |
+| `429` | Rate or instance limit exceeded | For a rate limit, wait for `Retry-After`; for a resource limit, reduce resource use |
 | `503` | PostgreSQL cannot support the operation | Wait and retry |
 
 For an admin access failure, use another valid key for the same account or ask

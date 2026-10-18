@@ -16,9 +16,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from agents.models import AgentCredential
-from agents.services import CredentialError
 from site_app.views import _authenticated_user
-from tunnels.errors import InvalidRequest, TunnelUnavailable
+from tunnels.errors import InvalidRequest, QuotaExceeded, TunnelUnavailable
 from tunnels.models import Tunnel
 from tunnels.services import create_tunnel, rollover_cycle_as_operator
 
@@ -187,13 +186,29 @@ def test_agent_page_renders_form_and_domain_errors(
     assert client.post("/app/agents/create/", {"name": ""}).status_code == 400
     monkeypatch.setattr(
         "accounts.admin_services.create_credential",
-        lambda **kwargs: (_ for _ in ()).throw(CredentialError("No capacity.")),
+        lambda **kwargs: (_ for _ in ()).throw(QuotaExceeded("No capacity.")),
     )
     response = client.post(
         "/app/agents/create/", {"name": "Agent", "idempotency_key": str(uuid4())}
     )
     assert response.status_code == 400
     assert b"No capacity" in response.content
+
+
+@pytest.mark.parametrize("credential_id", ["", "not-a-uuid", "é"])
+def test_agent_revoke_rejects_malformed_ids(
+    client: Client, user_factory: Any, credential_factory: Any, credential_id: str
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    client.force_login(actor)
+    response = client.post(
+        "/app/agents/revoke/",
+        {"credential_id": credential_id, "idempotency_key": str(uuid4())},
+    )
+    assert response.status_code == 404
+    credential.refresh_from_db()
+    assert credential.revoked_at is None
 
 
 def test_expired_and_revoked_credentials_are_not_active(

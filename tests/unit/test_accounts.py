@@ -6,10 +6,11 @@ from io import StringIO
 from typing import Any
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
 from django.test import Client
 
-from accounts.forms import ThrottledAuthenticationForm
+from accounts.forms import InstanceAdminCreationForm, ThrottledAuthenticationForm
 from accounts.models import User
 
 pytestmark = pytest.mark.django_db
@@ -31,6 +32,23 @@ def test_user_manager_rejects_invalid_creation() -> None:
         User.objects.create_superuser(username="root", is_staff=False)
     with pytest.raises(ValueError, match="superuser"):
         User.objects.create_superuser(username="root", is_superuser=False)
+
+
+def test_case_only_usernames_are_rejected_by_manager_model_and_form(user_factory: Any) -> None:
+    existing = user_factory(username="Operator")
+    with pytest.raises(ValidationError):
+        User.objects.create_user(username="operator")
+    with pytest.raises(ValidationError):
+        User(username="OPERATOR").full_clean(exclude={"password"})
+    form = InstanceAdminCreationForm(data={"username": "operator"})
+    assert not form.is_valid()
+    assert "username" in form.errors
+    existing.username = "OPERATOR"
+    existing.full_clean()
+    existing.save(update_fields=["username"])
+    existing.refresh_from_db()
+    assert existing.username == "OPERATOR"
+    assert User.objects.count() == 1
 
 
 def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any) -> None:

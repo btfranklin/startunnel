@@ -37,6 +37,7 @@ def test_metrics_require_token_and_publish_maintenance_status(
 ) -> None:
     settings.METRICS_TOKEN = "metrics-test-token"
     assert client.get("/metrics").status_code == 404
+    assert client.get("/metrics", headers={"X-Metrics-Token": "métrics"}).status_code == 404
     status = SimpleNamespace(
         cleanup_lag_seconds=1.5,
         reconciliation_count=2,

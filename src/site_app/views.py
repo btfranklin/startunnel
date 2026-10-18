@@ -20,7 +20,6 @@ from accounts.admin_services import admin_status, execute_admin_operation, list_
 from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
 from agents.models import AgentCredential
-from agents.services import CredentialError
 from tunnels.errors import InvalidRequest, TunnelDomainError, TunnelUnavailable
 from tunnels.models import Cycle, Tunnel, TunnelAddress
 from tunnels.services import retirement_confirmation
@@ -207,7 +206,7 @@ def create_agent(request: HttpRequest) -> HttpResponse:
                 key=request.POST.get("idempotency_key", ""),
                 data={"name": form.cleaned_data["name"]},
             )
-        except (CredentialError, TunnelDomainError) as error:
+        except TunnelDomainError as error:
             form.add_error(None, str(error))
         else:
             return private_download(
@@ -229,9 +228,13 @@ def create_agent(request: HttpRequest) -> HttpResponse:
 @require_POST
 def revoke_agent(request: HttpRequest) -> HttpResponseRedirect:
     user = _authenticated_user(request)
+    try:
+        credential_id = UUID(request.POST.get("credential_id", ""))
+    except ValueError as error:
+        raise Http404 from error
     credential = get_object_or_404(
         AgentCredential,
-        pk=request.POST.get("credential_id"),
+        pk=credential_id,
     )
     try:
         execute_admin_operation(
@@ -240,7 +243,7 @@ def revoke_agent(request: HttpRequest) -> HttpResponseRedirect:
             key=request.POST.get("idempotency_key", ""),
             data={"credential_id": str(credential.id)},
         )
-    except (CredentialError, TunnelDomainError) as error:
+    except TunnelDomainError as error:
         messages.error(request, str(error))
     else:
         messages.success(request, f"Revoked {credential.name}.")

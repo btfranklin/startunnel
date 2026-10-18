@@ -25,6 +25,7 @@ class UserManager(DjangoUserManager["User"]):
         if not normalized_username:
             raise ValueError("A username is required.")
         user = self.model(username=normalized_username, **extra_fields)
+        user.full_clean(exclude={"password"})
         user.set_password(password)
         user.save(using=self._db)
         return user

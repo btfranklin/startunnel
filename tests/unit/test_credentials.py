@@ -17,7 +17,7 @@ from agents.services import (
     revoke_credential,
 )
 from api.auth import activity_bearer, agent_bearer
-from tunnels.errors import InvalidCredential
+from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 
 pytestmark = pytest.mark.django_db
 
@@ -73,7 +73,7 @@ def test_admin_deactivation_does_not_disable_agent_key(credential_factory: Any) 
 
 @pytest.mark.parametrize("name", ["", "   ", "x" * 101])
 def test_credential_names_are_bounded(user_factory: Any, name: str) -> None:
-    with pytest.raises(CredentialError, match="1 to 100"):
+    with pytest.raises(InvalidRequest, match="1 to 100"):
         create_credential(actor=user_factory(), name=name)
 
 
@@ -81,10 +81,10 @@ def test_inactive_admin_cannot_create_or_revoke(user_factory: Any, credential_fa
     actor = user_factory()
     actor.is_active = False
     actor.save(update_fields=["is_active"])
-    with pytest.raises(CredentialError, match="cannot create"):
+    with pytest.raises(InvalidRequest, match="cannot create"):
         create_credential(actor=actor, name="Agent")
     credential, _ = credential_factory()
-    with pytest.raises(CredentialError, match="not available"):
+    with pytest.raises(InvalidRequest, match="not available"):
         revoke_credential(actor=actor, credential=credential)
 
 
@@ -92,7 +92,7 @@ def test_instance_credential_limit_blocks_new_keys(user_factory: Any, settings: 
     actor = user_factory()
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 1
     create_credential(actor=actor, name="First")
-    with pytest.raises(CredentialError, match="limit"):
+    with pytest.raises(QuotaExceeded, match="limit"):
         create_credential(actor=actor, name="Second")
 
 

@@ -41,7 +41,9 @@ def health_ready(request: HttpRequest) -> JsonResponse:
 
 def metrics(request: HttpRequest) -> HttpResponse:
     supplied = request.headers.get("X-Metrics-Token", "")
-    if not supplied or not secrets.compare_digest(supplied, settings.METRICS_TOKEN):
+    if not supplied or not secrets.compare_digest(
+        supplied.encode(), settings.METRICS_TOKEN.encode()
+    ):
         return HttpResponse(status=404)
     try:
         maintenance = read_maintenance_status()

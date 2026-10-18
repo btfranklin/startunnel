@@ -102,3 +102,11 @@ directly. Tutorial response checks keep their type checks without unused labels.
 Contract and failure tests now cover admin query fields and tutorial cleanup.
 The aggregate gate checks CLI types and runs a dependency-free client smoke
 suite. CI also runs that suite on Linux and Windows with Python 3.10 and 3.14.
+
+## Admin input validation
+
+Agent key creation now returns the documented request or quota error and records
+the failure in the audit log. Browser revocation rejects malformed credential
+IDs. Invalid metrics tokens with non-ASCII text return `404`. Account creation
+uses the same case-insensitive username check in the API, browser, user manager,
+and bootstrap command.

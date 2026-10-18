@@ -15,12 +15,13 @@ from django.utils import timezone
 from accounts.models import User
 from core import limits as instance_limits
 from core.audit import record_event
+from tunnels.errors import InvalidRequest, QuotaExceeded
 
 from .models import AgentCredential
 
 
 class CredentialError(ValueError):
-    """A safe credential-domain error."""
+    """An agent key cannot authenticate."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,14 +51,14 @@ def create_credential(
 ) -> IssuedCredential:
     actor = User.objects.select_for_update(no_key=True).get(pk=actor.pk)
     if not actor.is_active:
-        raise CredentialError("This account cannot create an agent credential.")
+        raise InvalidRequest("This account cannot create an agent credential.")
     _lock_credential_quota()
     active_count = AgentCredential.objects.available().count()
     if active_count >= instance_limits.effective_limits().active_credentials:
-        raise CredentialError("This instance has reached its active agent credential limit.")
+        raise QuotaExceeded("This instance has reached its active agent credential limit.")
     normalized_name = name.strip()
     if not normalized_name or len(normalized_name) > 100:
-        raise CredentialError("Give the agent credential a name of 1 to 100 characters.")
+        raise InvalidRequest("Give the agent credential a name of 1 to 100 characters.")
     key = key or _new_key()
     credential = AgentCredential.objects.create(
         created_by=actor,
@@ -103,7 +104,7 @@ def authenticate_key(key: str) -> AgentCredential:
 
 def revoke_credential(*, actor: User, credential: AgentCredential) -> None:
     if not User.objects.filter(pk=actor.pk, is_active=True).exists():
-        raise CredentialError("This credential is not available.")
+        raise InvalidRequest("This credential is not available.")
     changed = AgentCredential.objects.filter(pk=credential.pk, revoked_at__isnull=True).update(
         revoked_at=timezone.now()
     )

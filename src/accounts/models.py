@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from typing import ClassVar
 
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from .managers import UserManager
@@ -22,6 +24,15 @@ class User(AbstractUser):
 
     def __str__(self) -> str:
         return self.username
+
+    def validate_unique(self, exclude: Collection[str] | None = None) -> None:
+        super().validate_unique(exclude=exclude)
+        if exclude is None or "username" not in exclude:
+            duplicates = type(self).objects.filter(username__iexact=self.username)
+            if not self._state.adding:
+                duplicates = duplicates.exclude(pk=self.pk)
+            if duplicates.exists():
+                raise ValidationError({"username": "That username already exists."})
 
 
 class AdminCredential(models.Model):

@@ -16,11 +16,73 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
-from accounts.models import AdminOperation
+from accounts.models import AdminOperation, User
+from agents.models import AgentCredential
 from tunnels.maintenance import cleanup_once
 from tunnels.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.parametrize(
+    ("name", "limit", "status", "code"),
+    [
+        ("", 50, 400, "invalid_request"),
+        (" " * 3, 50, 400, "invalid_request"),
+        ("x" * 101, 50, 400, "invalid_request"),
+        ("Second", 1, 429, "quota_exceeded"),
+    ],
+)
+def test_agent_creation_errors_are_safe_audited_and_atomic(
+    client: Any,
+    user_factory: Any,
+    credential_factory: Any,
+    settings: Any,
+    name: str,
+    limit: int,
+    status: int,
+    code: str,
+) -> None:
+    actor = user_factory()
+    credential_factory(user=actor)
+    admin_key, secret = issue_admin_key(owner=actor, name="admin")
+    settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = limit
+    response = client.post(
+        "/api/v1/admin/agents/create",
+        data=json.dumps({"name": name}),
+        content_type="application/json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+        HTTP_AUTHORIZATION="Bearer " + secret,
+    )
+    assert response.status_code == status
+    assert response.json()["error"]["code"] == code
+    assert AgentCredential.objects.count() == 1
+    assert not AdminOperation.objects.exists()
+    event = AuditEvent.objects.get(action="admin.operation_failed")
+    assert event.actor_admin_credential == admin_key
+    assert event.channel == "admin_api"
+    assert event.metadata == {"outcome": "failure", "code": code, "operation": "agents.create"}
+
+
+def test_account_creation_rejects_case_only_username_collision(
+    client: Any, user_factory: Any
+) -> None:
+    actor = user_factory(username="Operator")
+    admin_key, secret = issue_admin_key(owner=actor, name="admin")
+    response = client.post(
+        "/api/v1/admin/accounts/create",
+        data=json.dumps({"username": "operator"}),
+        content_type="application/json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+        HTTP_AUTHORIZATION="Bearer " + secret,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert User.objects.count() == 1
+    assert not AdminOperation.objects.exists()
+    event = AuditEvent.objects.get(action="admin.operation_failed")
+    assert event.actor_admin_credential == admin_key
+    assert event.metadata["operation"] == "accounts.create"
 
 
 def test_admin_tunnel_reads_return_the_stored_current_address(

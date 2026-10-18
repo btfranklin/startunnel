@@ -30,15 +30,16 @@ class Command(BaseCommand):
         username = User.normalize_username(options["username"]).strip()
         if not username:
             raise CommandError("Supply a username.")
-        if User.objects.filter(username__iexact=username).exists():
-            raise CommandError("That username already exists.")
+        user = User(username=username, is_active=True, is_staff=False, is_superuser=False)
+        try:
+            user.full_clean(exclude={"password"})
+        except ValidationError as error:
+            raise CommandError(" ".join(error.messages)) from error
 
         if options["key_file"]:
             path, descriptor = reserve_key_file(options["key_file"])
             try:
                 with os.fdopen(descriptor, "w") as output, transaction.atomic():
-                    user = User(username=username, is_active=True)
-                    user.full_clean(exclude={"password"})
                     user.set_unusable_password()
                     user.save()
                     credential, secret = issue_admin_key(owner=user, name=options["key_name"])
@@ -63,9 +64,7 @@ class Command(BaseCommand):
         if password != confirmation:
             raise CommandError("The passwords do not match.")
 
-        user = User(username=username, is_active=True, is_staff=False, is_superuser=False)
         try:
-            user.full_clean(exclude={"password"})
             validate_password(password, user=user)
         except ValidationError as error:
             raise CommandError(" ".join(error.messages)) from error

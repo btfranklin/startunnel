@@ -233,6 +233,10 @@ current rotated address. Replays check current authority and resource
 state; revoked keys and retired addresses cannot be restored.
 
 Successful mutations return safe state, target references, and an audit receipt.
+Account creation rejects usernames that differ only in letter case. Agent key
+creation returns `400 invalid_request` for an invalid name and
+`429 quota_exceeded` when the active credential limit is reached. These domain
+failures create a failure audit event and do not create an operation receipt.
 Creation with the first admin key is atomic. Account state changes check expected
 state. Tunnel actions check expected cycles and address generations. Retirement
 requires the confirmation value from inspection and still checks current state.
