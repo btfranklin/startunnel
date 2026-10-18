@@ -14,7 +14,6 @@ IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+(?:/[^\s@]+)*@sha256:[0-9a-f]{64}$")
 PRODUCTION_SECRET_NAMES = (
     "startunnel_secret_key",
     "startunnel_api_key_pepper",
-    "startunnel_address_secret",
     "startunnel_address_derivation_secret",
     "startunnel_idempotency_secret",
     "startunnel_metrics_token",

@@ -46,7 +46,6 @@ make_service_url() {
 
 read_secret STARTUNNEL_SECRET_KEY /run/secrets/startunnel_secret_key
 read_secret STARTUNNEL_API_KEY_PEPPER /run/secrets/startunnel_api_key_pepper
-read_secret STARTUNNEL_ADDRESS_SECRET /run/secrets/startunnel_address_secret
 read_secret STARTUNNEL_ADDRESS_DERIVATION_SECRET /run/secrets/startunnel_address_derivation_secret
 read_secret STARTUNNEL_IDEMPOTENCY_SECRET /run/secrets/startunnel_idempotency_secret
 read_secret STARTUNNEL_METRICS_TOKEN /run/secrets/startunnel_metrics_token

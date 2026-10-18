@@ -30,7 +30,6 @@ def main() -> int:
     names_and_values = {
         "startunnel_secret_key": secrets.token_urlsafe(64),
         "startunnel_api_key_pepper": random_urlsafe(),
-        "startunnel_address_secret": random_urlsafe(),
         "startunnel_address_derivation_secret": random_urlsafe(),
         "startunnel_idempotency_secret": random_urlsafe(),
         "startunnel_metrics_token": random_urlsafe(),

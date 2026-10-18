@@ -71,10 +71,6 @@ def address_transcription(address: str) -> str:
     return " ".join(f"U+{ord(glyph):05X}" for glyph in canonical)
 
 
-def address_digest(token: bytes) -> bytes:
-    return hmac.digest(settings.ADDRESS_SECRET.encode(), token, "sha256")
-
-
 def derive_token(
     *,
     credential_id: str,

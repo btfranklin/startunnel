@@ -11,7 +11,7 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from core.limits import Limits, provider
 
-from .codec import InvalidAddress, address_digest, parse_address
+from .codec import InvalidAddress, canonical_address
 from .errors import CycleClosed, CycleUnavailable, InvalidCredential, TunnelUnavailable
 from .models import Cycle, Tunnel, TunnelAddress
 
@@ -33,10 +33,10 @@ def limits_for(credential: AgentCredential) -> Limits:
     return provider.for_instance()
 
 
-def address_query(*, digest: bytes) -> QuerySet[TunnelAddress]:
+def address_query(*, address: str) -> QuerySet[TunnelAddress]:
     return TunnelAddress.objects.filter(
         state=TunnelAddress.State.CURRENT,
-        address_digest=digest,
+        address=address,
     )
 
 
@@ -50,11 +50,11 @@ def _resolve_current_tunnel_if_authorized(
     """Resolve the normal read path in one query or request the exact fallback."""
 
     try:
-        digest = address_digest(parse_address(address))
+        canonical = canonical_address(address)
     except InvalidAddress:
         return None
     address_row = (
-        address_query(digest=digest)
+        address_query(address=canonical)
         .annotate(credential_is_active=Exists(active_credential_query(credential=credential)))
         .select_related("tunnel", "tunnel__creator")
         .first()
@@ -78,7 +78,7 @@ def resolve_tunnel(
     if tunnel is not None:
         if not for_update:
             return tunnel
-        digest = address_digest(parse_address(address))
+        canonical = canonical_address(address)
         locked = (
             Tunnel.objects.select_related("creator")
             .select_for_update(of=("self",))
@@ -88,23 +88,22 @@ def resolve_tunnel(
         if (
             locked is None
             or locked.state == Tunnel.State.RETIRED
-            or not address_query(digest=digest).filter(tunnel=locked).exists()
+            or not address_query(address=canonical).filter(tunnel=locked).exists()
         ):
             raise TunnelUnavailable()
         return locked
     if not credential_is_active(credential):
         raise InvalidCredential()
-    token = parse_address(address)
-    digest = address_digest(token)
+    canonical = canonical_address(address)
     if not for_update:
         address_row = (
-            address_query(digest=digest).select_related("tunnel", "tunnel__creator").first()
+            address_query(address=canonical).select_related("tunnel", "tunnel__creator").first()
         )
         if address_row is None or address_row.tunnel.state == Tunnel.State.RETIRED:
             raise TunnelUnavailable()
         return address_row.tunnel
 
-    address_row = address_query(digest=digest).only("id", "tunnel_id").first()
+    address_row = address_query(address=canonical).only("id", "tunnel_id").first()
     if address_row is None:
         raise TunnelUnavailable()
     query = Tunnel.objects.select_related("creator").select_for_update(of=("self",))
@@ -113,7 +112,7 @@ def resolve_tunnel(
         raise TunnelUnavailable()
     if (
         for_update
-        and not address_query(digest=digest)
+        and not address_query(address=canonical)
         .filter(
             pk=address_row.pk,
             tunnel=tunnel,

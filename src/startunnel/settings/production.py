@@ -27,7 +27,6 @@ def required_32_byte_secret(name: str) -> str:
 
 
 API_KEY_PEPPER = required_32_byte_secret("STARTUNNEL_API_KEY_PEPPER")
-ADDRESS_SECRET = required_32_byte_secret("STARTUNNEL_ADDRESS_SECRET")
 ADDRESS_DERIVATION_SECRET = required_32_byte_secret("STARTUNNEL_ADDRESS_DERIVATION_SECRET")
 IDEMPOTENCY_SECRET = required_32_byte_secret("STARTUNNEL_IDEMPOTENCY_SECRET")
 METRICS_TOKEN = required_32_byte_secret("STARTUNNEL_METRICS_TOKEN")
@@ -35,13 +34,12 @@ if (
     len(
         {
             API_KEY_PEPPER,
-            ADDRESS_SECRET,
             ADDRESS_DERIVATION_SECRET,
             IDEMPOTENCY_SECRET,
             METRICS_TOKEN,
         }
     )
-    != 5
+    != 4
 ):
     raise RuntimeError("Each StarTunnel cryptographic secret must be different.")
 DATABASES = {

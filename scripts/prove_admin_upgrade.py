@@ -1,4 +1,4 @@
-"""Prove additive admin migrations on a restored initial PostgreSQL baseline."""
+"""Prove forward migrations on a restored initial PostgreSQL baseline."""
 
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ def baseline(snapshot_path: Path) -> None:
     from django.db.migrations.executor import MigrationExecutor
     from django.utils import timezone
 
+    from tunnels.codec import encode_token
+
     executor = MigrationExecutor(connection)
     executor.migrate(BASELINE)
     apps = executor.loader.project_state(BASELINE).apps
@@ -51,7 +53,23 @@ def baseline(snapshot_path: Path) -> None:
             key_digest=hmac.digest(settings.API_KEY_PEPPER.encode(), agent_key.encode(), "sha256"),
         )
         tunnel = tunnel_model.objects.create(creator=credential, label="Migration proof")
-        address_model.objects.create(tunnel=tunnel, address_digest=secrets.token_bytes(32))
+        address_token = secrets.token_bytes(16)
+        address_secret = secrets.token_urlsafe(32)
+        address = encode_token(address_token)
+        address_row = address_model.objects.create(
+            tunnel=tunnel,
+            generation=2,
+            address_digest=hmac.digest(address_secret.encode(), address_token, "sha256"),
+        )
+        retired_token = secrets.token_bytes(16)
+        retired_address = encode_token(retired_token)
+        retired_row = address_model.objects.create(
+            tunnel=tunnel,
+            address_digest=hmac.digest(address_secret.encode(), retired_token, "sha256"),
+            state="retired",
+            retired_at=timezone.now(),
+            retirement_reason="operator_rotation",
+        )
         cycle = cycle_model.objects.create(
             tunnel=tunnel,
             creator=credential,
@@ -96,6 +114,13 @@ def baseline(snapshot_path: Path) -> None:
                 "agent_key": agent_key,
                 "key_digest": bytes(credential.key_digest).hex(),
                 "tunnel_id": str(tunnel.pk),
+                "address_id": str(address_row.pk),
+                "retired_address_id": str(retired_row.pk),
+                "address_secret": address_secret,
+                "addresses": {
+                    str(address_row.pk): address,
+                    str(retired_row.pk): retired_address,
+                },
                 "cycle_id": str(cycle.pk),
                 "root_id": str(messages[0].pk),
                 "reply_id": str(messages[1].pk),
@@ -115,12 +140,15 @@ def upgraded(snapshot_path: Path) -> None:
     from django.core.management import call_command
     from django.db import connection, transaction
     from django.db.migrations.executor import MigrationExecutor
+    from django.utils import timezone
 
     from accounts.admin_access import authenticate_admin_key
     from accounts.models import User
     from agents.models import AgentCredential
     from agents.services import authenticate_key
-    from tunnels.models import AuditEvent, Cycle, Message
+    from tunnels.access import resolve_tunnel
+    from tunnels.errors import TunnelUnavailable
+    from tunnels.models import AuditEvent, Cycle, IdempotencyRecord, Message, TunnelAddress
 
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)
@@ -128,12 +156,68 @@ def upgraded(snapshot_path: Path) -> None:
         app in {"accounts", "tunnels"} and name.startswith("0002")
         for app, name in executor.loader.applied_migrations
     )
-    executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def rejected_conversion(message: str) -> None:
+        try:
+            candidate = MigrationExecutor(connection)
+            candidate.migrate(candidate.loader.graph.leaf_nodes())
+        except RuntimeError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError("An incomplete address conversion was accepted.")
+        with connection.cursor() as cursor:
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(
+                    cursor, "tunnels_tunneladdress"
+                )
+            }
+        assert "address_digest" in columns and "address" not in columns
+
+    os.environ.pop("STARTUNNEL_ADDRESS_MIGRATION_FILE", None)
+    rejected_conversion("Supply a mode-0600")
+    os.environ["STARTUNNEL_ADDRESS_MIGRATION_FILE"] = str(snapshot_path)
+    snapshot_path.chmod(0o644)
+    rejected_conversion("Supply a mode-0600")
+    snapshot_path.chmod(0o600)
+    original = snapshot_path.read_text(encoding="utf-8")
+    wrong = dict(expected, address_secret="incorrect-proof-secret")
+    snapshot_path.write_text(json.dumps(wrong), encoding="utf-8")
+    rejected_conversion("Supply a mode-0600")
+    snapshot_path.write_text(original, encoding="utf-8")
+    pending = IdempotencyRecord.objects.create(
+        credential_id=expected["credential_id"],
+        operation="post_reply",
+        key_digest=secrets.token_bytes(32),
+        request_digest=secrets.token_bytes(32),
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    rejected_conversion("Stop writers")
+    pending.expires_at = timezone.now() - timedelta(seconds=1)
+    pending.save(update_fields=["expires_at"])
+    try:
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+    finally:
+        os.environ.pop("STARTUNNEL_ADDRESS_MIGRATION_FILE", None)
     user = User.objects.get(pk=expected["user_id"])
     assert user.password == expected["password_hash"] and user.check_password(expected["password"])
     credential = AgentCredential.objects.get(pk=expected["credential_id"])
     assert bytes(credential.key_digest).hex() == expected["key_digest"]
     assert str(authenticate_key(expected["agent_key"]).pk) == expected["credential_id"]
+    address = expected["addresses"][expected["address_id"]]
+    assert TunnelAddress.objects.get(pk=expected["address_id"]).address == address
+    assert str(resolve_tunnel(credential=credential, address=address).pk) == expected["tunnel_id"]
+    retired_address = expected["addresses"][expected["retired_address_id"]]
+    retired = TunnelAddress.objects.get(pk=expected["retired_address_id"])
+    assert retired.address == retired_address and retired.state == "retired"
+    assert retired.generation == 1 and retired.retirement_reason == "operator_rotation"
+    try:
+        resolve_tunnel(credential=credential, address=retired_address)
+    except TunnelUnavailable:
+        pass
+    else:
+        raise AssertionError("A retired address became available after conversion.")
     root = Message.objects.get(pk=expected["root_id"])
     reply = Message.objects.get(pk=expected["reply_id"])
     cycle = Cycle.objects.get(pk=expected["cycle_id"])
@@ -291,6 +375,8 @@ def main() -> int:
                     "checks": [
                         "password and account ID",
                         "agent digest and authentication",
+                        "original glyph address storage and access",
+                        "address conversion refusal and transaction rollback",
                         "message tree and IDs",
                         "historical audit",
                         "private recovery key and admin authentication",

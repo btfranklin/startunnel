@@ -107,10 +107,10 @@ def test_resolve_exact_fallback_and_locked_address_race(
     original = access.address_query
     calls = 0
 
-    def disappearing(*, digest: bytes) -> Any:
+    def disappearing(*, address: str) -> Any:
         nonlocal calls
         calls += 1
-        query = original(digest=digest)
+        query = original(address=address)
         return query if calls == 1 else query.none()
 
     monkeypatch.setattr(access, "address_query", disappearing)
@@ -134,7 +134,7 @@ def test_fast_locked_resolve_rejects_address_removed_after_lookup(
     monkeypatch.setattr(
         access,
         "address_query",
-        lambda *, digest: original(digest=digest).none(),
+        lambda *, address: original(address=address).none(),
     )
     with pytest.raises(TunnelUnavailable):
         resolve_tunnel(credential=credential, address=created.address, for_update=True)

@@ -25,7 +25,7 @@ from core.audit import admin_audit_context, record_event
 from core.limits import provider
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
-from tunnels.codec import address_digest, encode_token
+from tunnels.codec import canonical_address, encode_token
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
 from tunnels.idempotency import validate_idempotency_key
 from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress
@@ -319,13 +319,11 @@ def _replay(receipt: AdminOperation) -> dict[str, Any]:
             agent_row = AgentCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = agent_row is not None and agent_row.is_available
         elif receipt.secret_kind == "address":
-            from tunnels.codec import parse_address
-
             available = TunnelAddress.objects.filter(
                 pk=receipt.secret_resource_id,
                 state=TunnelAddress.State.CURRENT,
                 tunnel__state__in=["active", "dormant"],
-                address_digest=address_digest(parse_address(secret)),
+                address=canonical_address(secret),
             ).exists()
         if not available:
             raise LifecycleConflict(

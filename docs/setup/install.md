@@ -181,7 +181,7 @@ chmod 600 "$STARTUNNEL_SECRETS_DIR"/*
 
 The revision label must match the recorded source commit. If a supplied image
 has no label, obtain its build record before you proceed. The generator creates
-eight independent secret files. It refuses to replace existing files. Do not
+seven independent secret files. It refuses to replace existing files. Do not
 regenerate secrets for a running instance.
 
 The default application image runs with UID `10001`. On Linux, Compose mounts

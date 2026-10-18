@@ -12,7 +12,6 @@ from tunnels.codec import (
     ADDRESS_GLYPHS,
     GLYPH_ALPHABET,
     InvalidAddress,
-    address_digest,
     address_transcription,
     canonical_address,
     derive_token,
@@ -140,9 +139,7 @@ def test_token_must_have_exactly_128_bits() -> None:
         encode_token(b"too short")
 
 
-def test_derivation_and_digest_use_separate_secrets() -> None:
-    fixed_token = bytes(range(16))
-
+def test_derivation_uses_its_configured_secret() -> None:
     def derive() -> bytes:
         return derive_token(
             credential_id="00000000-0000-0000-0000-000000000001",
@@ -152,24 +149,12 @@ def test_derivation_and_digest_use_separate_secrets() -> None:
             derivation_nonce=bytes(range(32, 64)),
         )
 
-    with override_settings(
-        ADDRESS_DERIVATION_SECRET="derivation-secret-a",
-        ADDRESS_SECRET="digest-secret-a",
-    ):
+    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-a"):
         derived_a = derive()
-        digest_a = address_digest(fixed_token)
-    with override_settings(
-        ADDRESS_DERIVATION_SECRET="derivation-secret-b",
-        ADDRESS_SECRET="digest-secret-a",
-    ):
+    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-b"):
         assert derive() != derived_a
-        assert address_digest(fixed_token) == digest_a
-    with override_settings(
-        ADDRESS_DERIVATION_SECRET="derivation-secret-a",
-        ADDRESS_SECRET="digest-secret-b",
-    ):
+    with override_settings(ADDRESS_DERIVATION_SECRET="derivation-secret-a"):
         assert derive() == derived_a
-        assert address_digest(fixed_token) != digest_a
 
 
 @pytest.mark.parametrize("nonce", [b"", b"short", bytes(31), bytes(33)])

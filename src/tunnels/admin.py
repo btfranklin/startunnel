@@ -23,7 +23,7 @@ class TunnelAdmin(InspectionAdmin):
 @admin.register(TunnelAddress)
 class TunnelAddressAdmin(InspectionAdmin):
     list_display = ("id", "tunnel_id", "state", "issued_at")
-    exclude = ("address_digest",)
+    exclude = ("address",)
 
 
 @admin.register(Cycle)

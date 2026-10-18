@@ -259,6 +259,7 @@ def test_address_rotation_retries_one_database_collision(
     assert rotated.generation == 2
     addresses = list(TunnelAddress.objects.filter(tunnel=created.tunnel).order_by("generation"))
     assert [address.state for address in addresses] == ["retired", "current"]
+    assert [row.address for row in addresses] == [created.address, rotated.address]
 
 
 def test_concurrent_exact_idempotency_retry_creates_one_reply(
@@ -453,6 +454,10 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
     with pytest.raises(DatabaseError, match="immutable"), transaction.atomic():
         Message.objects.filter(pk=first.root.id).update(session="new-label")
 
+    with pytest.raises(DatabaseError, match="identity is immutable"), transaction.atomic():
+        TunnelAddress.objects.filter(tunnel=first.tunnel).update(address=second.address)
+
+    assert TunnelAddress.objects.get(tunnel=first.tunnel).address == first.address
     first.root.refresh_from_db()
     assert first.root.sender_name == first_creator.name
     assert first.root.session is None

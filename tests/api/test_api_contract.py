@@ -174,7 +174,7 @@ def test_create_is_atomic_rooted_and_idempotent(client: Client, credential_facto
     assert cycle.root_message == root
     assert root.cycle == cycle
     assert root.parent is None
-    assert len(bytes(TunnelAddress.objects.get(tunnel=tunnel).address_digest)) == 32
+    assert TunnelAddress.objects.get(tunnel=tunnel).address == created["tunnel"]["address"]
 
     replay = _post(
         client,

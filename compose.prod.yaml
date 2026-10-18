@@ -16,7 +16,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_SECRET: ""
       STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
@@ -29,7 +28,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_secret
       - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
@@ -43,7 +41,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_SECRET: ""
       STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
@@ -57,7 +54,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_secret
       - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
@@ -72,7 +68,6 @@ services:
       STARTUNNEL_ENV: production
       STARTUNNEL_SECRET_KEY: ""
       STARTUNNEL_API_KEY_PEPPER: ""
-      STARTUNNEL_ADDRESS_SECRET: ""
       STARTUNNEL_ADDRESS_DERIVATION_SECRET: ""
       STARTUNNEL_IDEMPOTENCY_SECRET: ""
       STARTUNNEL_METRICS_TOKEN: ""
@@ -85,7 +80,6 @@ services:
     secrets:
       - startunnel_secret_key
       - startunnel_api_key_pepper
-      - startunnel_address_secret
       - startunnel_address_derivation_secret
       - startunnel_idempotency_secret
       - startunnel_metrics_token
@@ -130,8 +124,6 @@ secrets:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_secret_key
   startunnel_api_key_pepper:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_api_key_pepper
-  startunnel_address_secret:
-    file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_address_secret
   startunnel_address_derivation_secret:
     file: ${STARTUNNEL_SECRETS_DIR:-./secrets}/startunnel_address_derivation_secret
   startunnel_idempotency_secret:

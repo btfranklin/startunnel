@@ -54,7 +54,7 @@ class TunnelAddress(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tunnel = models.ForeignKey(Tunnel, on_delete=models.CASCADE, related_name="addresses")
-    address_digest = models.BinaryField(max_length=32)
+    address = models.CharField(max_length=24)
     generation = models.PositiveIntegerField(default=1)
     state = models.CharField(max_length=12, choices=State.choices, default=State.CURRENT)
     issued_at = models.DateTimeField(auto_now_add=True)
@@ -71,7 +71,7 @@ class TunnelAddress(models.Model):
                 name="tunnel_address_retirement_matches",
             ),
             models.UniqueConstraint(
-                fields=["address_digest"],
+                fields=["address"],
                 name="unique_tunnel_address",
             ),
             models.UniqueConstraint(

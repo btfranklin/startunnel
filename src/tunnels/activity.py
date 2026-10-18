@@ -25,7 +25,7 @@ from .access import (
     limits_for,
     resolve_tunnel,
 )
-from .codec import address_digest, parse_address
+from .codec import canonical_address
 from .errors import CheckpointRegression, InvalidRequest
 from .models import ActivityCheckpoint, MessageMention, Tunnel, TunnelEvent
 
@@ -305,12 +305,12 @@ def _read_activity_for_known_tunnel(
     authorization_checked = False
     if credential is not None and address is not None:
         authorization_checked = True
-        digest = address_digest(parse_address(address))
+        canonical = canonical_address(address)
         query = (
             query.annotate(
                 credential_is_active=Exists(active_credential_query(credential=credential)),
                 address_is_current=Exists(
-                    address_query(digest=digest).filter(tunnel_id=OuterRef("tunnel_id"))
+                    address_query(address=canonical).filter(tunnel_id=OuterRef("tunnel_id"))
                 ),
             )
             .filter(

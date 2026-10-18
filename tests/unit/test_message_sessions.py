@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from tunnels.activity import read_activity_once
-from tunnels.codec import address_digest, parse_address
+from tunnels.codec import canonical_address
 from tunnels.context import context_item_payload, get_context
 from tunnels.entry import enter_tunnel, entry_payload
 from tunnels.errors import IdempotencyConflict, InvalidRequest
@@ -27,7 +27,7 @@ from tunnels.services import (
 pytestmark = pytest.mark.django_db
 
 
-def _legacy_digest(data: dict[str, Any]) -> bytes:
+def _request_digest(data: dict[str, Any]) -> bytes:
     canonical = json.dumps(
         data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
@@ -84,7 +84,7 @@ def test_labels_are_stored_and_shared_reads_keep_sender_identity(
     assert participants.participants[0].message_count == 2
 
 
-def test_exact_retries_include_labels_and_old_unlabeled_fingerprints(
+def test_exact_retries_include_labels_and_match_absent_session_request_data(
     credential_factory: Any,
 ) -> None:
     credential, _ = credential_factory()
@@ -94,7 +94,7 @@ def test_exact_retries_include_labels_and_old_unlabeled_fingerprints(
         "root_content": {"type": "text", "text": "Root"},
     }
     created = create_tunnel(**common)
-    legacy_create = {
+    unlabeled_create = {
         "label": "",
         "cycle_label": "",
         "expires_in_seconds": 3600,
@@ -103,7 +103,7 @@ def test_exact_retries_include_labels_and_old_unlabeled_fingerprints(
         "root_correlation_id": "",
     }
     stored_create = credential.idempotency_records.get(operation="create_tunnel")
-    assert bytes(stored_create.request_digest) == _legacy_digest(legacy_create)
+    assert bytes(stored_create.request_digest) == _request_digest(unlabeled_create)
     assert create_tunnel(**common, root_session=None).replay
     assert created.root.session is None
     with pytest.raises(IdempotencyConflict):
@@ -118,24 +118,26 @@ def test_exact_retries_include_labels_and_old_unlabeled_fingerprints(
         "session": "chat-a",
     }
     first = post_reply(**reply)
-    legacy_reply = {
-        "address_digest": address_digest(parse_address(created.address)).hex(),
+    unlabeled_reply = {
+        "address": canonical_address(created.address),
         "parent_id": str(created.root.id),
         "content": reply["content"],
         "mentions": [],
         "correlation_id": "",
     }
     stored_reply = credential.idempotency_records.get(operation="post_reply")
-    assert bytes(stored_reply.request_digest) != _legacy_digest(legacy_reply)
+    assert bytes(stored_reply.request_digest) != _request_digest(unlabeled_reply)
     assert post_reply(**reply).replay
     assert first.message.session == "chat-a"
     with pytest.raises(IdempotencyConflict):
         post_reply(**{**reply, "session": "chat-b"})
-    old_reply = post_reply(
+    unlabeled_result = post_reply(
         **{**reply, "idempotency_key": "session-reply-unlabeled", "session": None}
     )
-    stored_old_reply = credential.idempotency_records.get(resource_id=str(old_reply.message.id))
-    assert bytes(stored_old_reply.request_digest) == _legacy_digest(legacy_reply)
+    stored_unlabeled_reply = credential.idempotency_records.get(
+        resource_id=str(unlabeled_result.message.id)
+    )
+    assert bytes(stored_unlabeled_reply.request_digest) == _request_digest(unlabeled_reply)
     assert post_reply(
         **{key: value for key, value in reply.items() if key not in {"session", "idempotency_key"}},
         idempotency_key="session-reply-unlabeled",
@@ -185,7 +187,9 @@ def test_start_and_rollover_store_root_session_and_check_retries(
         rollover_cycle(**{**rollover, "root_session": "chat-a"})
 
 
-def test_unlabeled_cycle_retries_keep_pre_session_digests(credential_factory: Any) -> None:
+def test_unlabeled_cycle_retries_match_absent_session_request_data(
+    credential_factory: Any,
+) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(
         credential=credential,
@@ -206,8 +210,8 @@ def test_unlabeled_cycle_retries_keep_pre_session_digests(credential_factory: An
         "root_content": {"type": "text", "text": "Start"},
     }
     started = start_cycle(**common)
-    old_data = {
-        "address_digest": address_digest(parse_address(created.address)).hex(),
+    unlabeled_data = {
+        "address": canonical_address(created.address),
         "expected_address_generation": 1,
         "expected_cycle_id": None,
         "cycle_label": "",
@@ -217,7 +221,7 @@ def test_unlabeled_cycle_retries_keep_pre_session_digests(credential_factory: An
         "root_correlation_id": "",
     }
     record = credential.idempotency_records.get(operation="start_cycle")
-    assert bytes(record.request_digest) == _legacy_digest(old_data)
+    assert bytes(record.request_digest) == _request_digest(unlabeled_data)
     assert start_cycle(**common, root_session=None).replay
     with pytest.raises(IdempotencyConflict):
         start_cycle(**common, root_session="chat-a")
@@ -229,10 +233,10 @@ def test_unlabeled_cycle_retries_keep_pre_session_digests(credential_factory: An
         "root_content": {"type": "text", "text": "Rollover"},
     }
     rolled = rollover_cycle(**rollover)
-    old_data["expected_cycle_id"] = str(started.cycle.id)
-    old_data["root_content"] = rollover["root_content"]
+    unlabeled_data["expected_cycle_id"] = str(started.cycle.id)
+    unlabeled_data["root_content"] = rollover["root_content"]
     record = credential.idempotency_records.get(operation="rollover_cycle")
-    assert bytes(record.request_digest) == _legacy_digest(old_data)
+    assert bytes(record.request_digest) == _request_digest(unlabeled_data)
     assert rolled.root.session is None
     assert rollover_cycle(**rollover, root_session=None).replay
     with pytest.raises(IdempotencyConflict):

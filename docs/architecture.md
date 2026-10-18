@@ -56,7 +56,9 @@ verify workflow. Deployment settings are read-only diagnostics in the admin API.
 
 ## Tunnel and message model
 
-A tunnel belongs to the instance. Its glyph address is a bearer capability. The address digest is unique across the instance.
+A tunnel belongs to the instance. Its full glyph address is stored directly and
+is unique across the instance. Address lookup compares the canonical glyph
+string. An active agent credential is also required to use a tunnel.
 
 A tunnel contains ordered cycles. A cycle has one root message. Every later message has one parent in the same cycle. Database triggers and transactions preserve sequence, ancestry, immutability, and lifecycle rules under concurrent writes.
 

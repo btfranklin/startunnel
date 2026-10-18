@@ -72,10 +72,14 @@ pdm run python scripts/prove_admin_upgrade.py
 
 The proof creates a fresh pre-change initial schema with historical migration
 models, seeds disposable account and message data, and performs a real custom
-`pg_dump` and `pg_restore` into a second database. It then applies the additive
-admin migrations and checks account IDs and passwords, agent-key digests and
+`pg_dump` and `pg_restore` into a second database. It then applies the forward
+migrations and checks account IDs and passwords, agent-key digests and
 authentication, message IDs and ancestry, historical audit records, private
-recovery-key issuance, admin authentication, and a new message write.
+recovery-key issuance, admin authentication, and a new message write. Address
+conversion must preserve the original glyph strings, including retired rows.
+The proof checks refusal and transaction rollback for a missing conversion
+file, invalid file permissions, an incorrect old lookup secret, and an
+unexpired address-based operation receipt.
 
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private

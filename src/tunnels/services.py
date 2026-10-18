@@ -35,11 +35,10 @@ from .access import (
     select_cycle,
 )
 from .codec import (
-    address_digest,
+    canonical_address,
     derive_token,
     display_address,
     encode_token,
-    parse_address,
 )
 from .errors import (
     CycleUnavailable,
@@ -274,7 +273,7 @@ def _allocate_address(
             with transaction.atomic():
                 TunnelAddress.objects.create(
                     tunnel=tunnel,
-                    address_digest=address_digest(token),
+                    address=address,
                 )
         except IntegrityError:
             continue
@@ -288,12 +287,11 @@ def _allocate_random_address(*, tunnel: Tunnel, generation: int) -> tuple[Tunnel
 
     for _attempt in range(ADDRESS_ALLOCATION_ATTEMPTS):
         address = encode_token(secrets.token_bytes(16))
-        token = parse_address(address)
         try:
             with transaction.atomic():
                 row = TunnelAddress.objects.create(
                     tunnel=tunnel,
-                    address_digest=address_digest(token),
+                    address=address,
                     generation=generation,
                 )
         except IntegrityError:
@@ -570,10 +568,10 @@ def post_reply(
     payload = validate_content(content, maximum_bytes=limits.bytes_per_message)
     correlation = _normalize_correlation_id(correlation_id)
     session = _validate_session(session)
-    token = parse_address(address)
+    canonical = canonical_address(address)
     mention_ids = mentions or []
     request_data = {
-        "address_digest": address_digest(token).hex(),
+        "address": canonical,
         "parent_id": str(parent_id),
         "content": content,
         "mentions": [str(item) for item in mention_ids],
@@ -1311,7 +1309,7 @@ def _cycle_request_data(
     root_correlation_id: str,
 ) -> dict[str, Any]:
     return {
-        "address_digest": address_digest(parse_address(address)).hex(),
+        "address": canonical_address(address),
         "expected_address_generation": expected_address_generation,
         "expected_cycle_id": str(expected_cycle_id) if expected_cycle_id else None,
         "cycle_label": cycle_label,
@@ -1594,9 +1592,9 @@ def close_cycle(
     address: str,
     expected_cycle_id: UUID,
 ) -> None:
-    token = parse_address(address)
+    canonical = canonical_address(address)
     request_data = {
-        "address_digest": address_digest(token).hex(),
+        "address": canonical,
         "expected_cycle_id": str(expected_cycle_id),
     }
     replay = find_idempotency_replay(
@@ -1800,7 +1798,7 @@ def _rotate_locked_address(
         TunnelAddress.objects.create(
             tunnel=tunnel,
             generation=generation,
-            address_digest=address_digest(parse_address(address)),
+            address=canonical_address(address),
         )
     event_position = tunnel.next_event_position
     tunnel.next_event_position = event_position + 1

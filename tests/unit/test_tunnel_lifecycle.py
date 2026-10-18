@@ -52,7 +52,9 @@ def test_create_is_atomic_and_builds_one_rooted_cycle(credential_factory: Any) -
     ]
 
 
-def test_create_replay_returns_same_tree_and_never_stores_address(credential_factory: Any) -> None:
+def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
+    credential_factory: Any,
+) -> None:
     creator, _ = credential_factory()
 
     first = _create(creator, key="create-replay-0001")
@@ -63,6 +65,7 @@ def test_create_replay_returns_same_tree_and_never_stores_address(credential_fac
     assert replay.cycle.id == first.cycle.id
     assert replay.root.id == first.root.id
     assert replay.address == first.address
+    assert first.tunnel.addresses.get().address == first.address
     record = creator.idempotency_records.get()
     assert first.address not in str(record.response)
     assert len(bytes(record.derivation_nonce)) == 32
