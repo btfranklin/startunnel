@@ -171,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--wait-timeout",
                 "300",
                 "web",
+                "maintenance",
                 timeout_seconds=600,
             )
             stack.run(

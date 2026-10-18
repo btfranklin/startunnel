@@ -474,6 +474,7 @@ def _measure_stack(
             "--wait-timeout",
             "300",
             "web",
+            "maintenance",
             timeout_seconds=600,
         )
         ready_seconds = time.monotonic() - startup_started

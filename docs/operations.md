@@ -89,6 +89,10 @@ Settings are readable diagnostics; changes still use deployment configuration.
 - `/health/ready` proves that PostgreSQL is available.
 - The maintenance container health check reads a worker-local heartbeat file and allows 180 seconds without a fresh update.
 
+Web startup requires PostgreSQL and completed migrations. It does not wait for
+maintenance health. Keep maintenance running for cycle deadlines and retention
+deletion. Expired content remains unreadable while maintenance is unavailable.
+
 Maintenance records the last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL. An idle worker wakes at most once per minute to refresh its local heartbeat and reconcile persisted deadlines. It does not scan every few seconds.
 
 Database query timing applies to each Django connection in its process. It

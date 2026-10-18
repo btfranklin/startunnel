@@ -620,6 +620,7 @@ def run_system_proof(
             "--wait-timeout",
             "300",
             "web",
+            "maintenance",
             timeout_seconds=600,
         ),
     )
