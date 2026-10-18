@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .release_record import VERSION, specification
+    from .release_record import PLATFORM, VERSION, specification
     from .start_production import (
         ROOT,
         compose_command,
@@ -22,7 +22,11 @@ if __package__:
         validate_rendered_images,
     )
 else:
-    from release_record import VERSION, specification  # type: ignore[import-not-found,no-redef]
+    from release_record import (  # type: ignore[import-not-found,no-redef]
+        PLATFORM,
+        VERSION,
+        specification,
+    )
     from start_production import (  # type: ignore[import-not-found,no-redef]
         ROOT,
         compose_command,
@@ -40,7 +44,12 @@ def run(command: list[str], *, capture: bool = False) -> str:
 
 
 def validate_record(record: dict[str, Any]) -> None:
-    if record.get("schema") != 1 or record.get("platform") != "linux/amd64":
+    platform = record.get("platform")
+    if (
+        record.get("schema") != 1
+        or not isinstance(platform, str)
+        or not PLATFORM.fullmatch(platform)
+    ):
         raise ValueError("Unsupported release record schema or platform.")
     if not VERSION.fullmatch(record.get("version", "")):
         raise ValueError("Invalid release version.")
@@ -50,8 +59,6 @@ def validate_record(record: dict[str, Any]) -> None:
     if any(record.get(key) != value for key, value in expected.items()):
         raise ValueError("Release record differs from the checked-out compatibility specification.")
     validate_image_reference(record.get("image", ""))
-    if not record["image"].startswith("ghcr.io/btfranklin/startunnel@sha256:"):
-        raise ValueError("Expected the official StarTunnel image repository.")
 
 
 def check_compatibility(record: dict[str, Any], old_commit: str, old_version: str) -> None:
@@ -84,14 +91,30 @@ def replace_image(text: str, image: str) -> str:
         r"(?m)^STARTUNNEL_APP_IMAGE=.*$", f"STARTUNNEL_APP_IMAGE={image}", text
     )
     if count != 1:
-        raise ValueError("production.env must contain exactly one STARTUNNEL_APP_IMAGE line.")
+        raise ValueError(
+            "The selected env file must contain exactly one STARTUNNEL_APP_IMAGE line."
+        )
     return updated
+
+
+def rendered_web_image(command: list[str]) -> str:
+    model = json.loads(run([*command, "config", "--format", "json"], capture=True))
+    try:
+        image = model["services"]["web"]["image"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("The selected Compose model must define a web image.") from error
+    if not isinstance(image, str):
+        raise ValueError("The selected Compose model must define a web image.")
+    return image
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "record", type=Path, help="release.json downloaded from the selected release"
+    )
+    parser.add_argument(
+        "--env-file", type=Path, default=Path("production.env"), help="Loaded production config"
     )
     parser.add_argument("--apply", action="store_true", help="Apply after a successful preview")
     parser.add_argument(
@@ -110,17 +133,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         if run(["git", "status", "--porcelain", "--untracked-files=no"], capture=True):
             raise ValueError("Resolve tracked source changes before upgrading.")
-        env_file = (ROOT / "production.env").resolve(strict=True)
+        env_file = (ROOT / args.env_file).resolve(strict=True)
         if not env_file.is_file():
-            raise ValueError("production.env must be a readable regular file.")
+            raise ValueError("The selected env file must be a readable regular file.")
         text = env_file.read_text()
         old_image = validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
         if replace_image(text, old_image) != text:
-            raise ValueError("Load production.env in this shell before running the helper.")
-        if os.environ.get("COMPOSE_PROJECT_NAME") != "startunnel-team":
-            raise ValueError("Load the documented startunnel-team production configuration.")
+            raise ValueError("Load the selected env file in this shell before running the helper.")
         validate_production_secret_files(production_secret_directory())
-        command = compose_command(edge=True)
+        command = compose_command(edge=False, env_file=env_file)
+        if rendered_web_image(command) != old_image:
+            raise ValueError("The selected Compose web image differs from the installed image.")
         container = run([*command, "ps", "--quiet", "web"], capture=True)
         if not container or "\n" in container:
             raise ValueError("Expected exactly one running web container before upgrade.")
@@ -162,9 +185,11 @@ def main(argv: list[str] | None = None) -> int:
         check_compatibility(record, old_commit, old_version)
         new_text = replace_image(text, record["image"])
         os.environ["STARTUNNEL_APP_IMAGE"] = record["image"]
-        command = compose_command(edge=True)
+        command = compose_command(edge=False, env_file=env_file)
         run([*command, "config", "--quiet"])
         validate_rendered_images(rendered_images(command))
+        if rendered_web_image(command) != record["image"]:
+            raise ValueError("The selected Compose web image differs from the candidate image.")
         print(f"Upgrade {old_version or old_commit} -> {record['version']}")
         print(f"Source: {record['source_commit']}\nImage: {record['image']}")
         print(f"Database: {record['database']}\nRollback: {record['rollback']}")
@@ -187,11 +212,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if revision != record["source_commit"]:
             raise ValueError("New image revision label does not match the release record.")
-        saved = env_file.with_name(f"production.env.before-{record['version']}")
+        saved = env_file.with_name(f"{env_file.name}.before-{record['version']}")
         with saved.open("x") as stream:
             os.chmod(saved, 0o600)
             stream.write(text)
-        temporary = env_file.with_name("production.env.upgrade")
+        temporary = env_file.with_name(f"{env_file.name}.upgrade")
         with temporary.open("x") as stream:
             os.chmod(temporary, 0o600)
             stream.write(new_text)
@@ -202,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         run([*command, "rm", "--force", "migrate"])
         run([*command, "up", "-d", "--no-build", "--wait", "--wait-timeout", "180"])
         print("Services started. Repeat external HTTPS, login, and two-agent verification.")
-        print("Reload production.env in this shell before further Compose commands.")
+        print("Reload the selected env file in this shell before further Compose commands.")
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f"Upgrade failed: {error}")
         if writers_stopped:

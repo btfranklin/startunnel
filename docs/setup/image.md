@@ -110,6 +110,11 @@ This example is not a usable image. Use the real digest returned by the
 registry. [Docker documents the inspection output](https://docs.docker.com/reference/cli/docker/buildx/imagetools/inspect/).
 Record the image reference and source commit together. Keep this image in the
 registry for deployment and recovery.
+The release record writer accepts any digest-pinned registry image. For an
+ARM64 build, use `--platform linux/arm64`; the default is `linux/amd64`.
+The upgrade helper checks the selected image, source revision, and
+release compatibility. It uses the loaded Compose project, files, and profiles.
+See [maintenance](maintain.md#update-the-application) for the upgrade command.
 
 Log out if this workstation does not need continued registry access:
 

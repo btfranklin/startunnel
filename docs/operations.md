@@ -162,6 +162,11 @@ The `--edge` option enables the included Caddy TLS service. The four setup
 guides use it. A deployment without that profile needs its own TLS reverse
 proxy and private route to the web container; that is a custom integration.
 Both forms need DNS, encrypted storage, and a backup destination.
+The launcher uses loaded `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, and
+`COMPOSE_PROFILES` values. If `COMPOSE_FILE` is unset, it uses `compose.yaml`
+and `compose.prod.yaml`. The upgrade helper uses the same selected Compose
+project and profiles. Use `--env-file` for a config file other than
+`production.env`; load that file in the shell before preview or apply.
 No OAuth registration or external cache is required. Use the setup guide's
 production shell for administrator and maintenance commands.
 

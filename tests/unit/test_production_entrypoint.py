@@ -12,6 +12,7 @@ from scripts.start_production import (
     PRODUCTION_SECRET_NAMES,
     compose_command,
     main,
+    production_secret_directory,
     read_validated_secret_file,
     rendered_images,
     validate_image_reference,
@@ -42,9 +43,49 @@ def test_production_image_rejects_mutable_or_malformed_references(value: str) ->
         validate_image_reference(value)
 
 
-def test_production_compose_edge_is_explicit() -> None:
+def test_production_compose_uses_default_files_and_explicit_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COMPOSE_FILE", raising=False)
     assert "--profile" not in compose_command(edge=False)
+    assert compose_command(edge=False)[-4:] == ["-f", "compose.yaml", "-f", "compose.prod.yaml"]
     assert compose_command(edge=True)[-2:] == ["--profile", "edge"]
+
+
+def test_production_compose_uses_loaded_custom_files_and_profiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("COMPOSE_FILE", "/srv/team/base.yaml:/srv/team/prod.yaml")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "customer-team")
+    monkeypatch.setenv("COMPOSE_PROFILES", "metrics")
+    config = tmp_path / "team.env"
+    assert compose_command(edge=False, env_file=config) == [
+        "docker",
+        "compose",
+        "--env-file",
+        str(config),
+    ]
+    assert compose_command(edge=True, env_file=config)[-2:] == ["--profile", "edge"]
+
+
+def test_custom_compose_file_resolves_relative_secret_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    compose_directory = tmp_path / "team"
+    compose_directory.mkdir()
+    monkeypatch.setenv(
+        "COMPOSE_FILE",
+        os.pathsep.join((str(compose_directory / "base.yaml"), str(tmp_path / "other.yaml"))),
+    )
+    monkeypatch.setenv("STARTUNNEL_SECRETS_DIR", "runtime/secrets")
+    expected = compose_directory / "runtime" / "secrets"
+    expected.mkdir(parents=True)
+    for name in PRODUCTION_SECRET_NAMES:
+        _write_secret(expected / name)
+
+    assert production_secret_directory() == expected
+    validate_production_secret_files(production_secret_directory())
+    assert production_secret_directory(str(tmp_path / "absolute")) == tmp_path / "absolute"
 
 
 def test_production_validates_the_images_rendered_by_compose(

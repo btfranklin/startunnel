@@ -56,7 +56,13 @@ def production_secret_directory(value: str | None = None) -> Path:
 
     configured = value if value is not None else os.environ.get("STARTUNNEL_SECRETS_DIR")
     path = Path(configured or "secrets")
-    return path if path.is_absolute() else ROOT / path
+    if path.is_absolute():
+        return path
+    compose_files = os.environ.get("COMPOSE_FILE")
+    first_file = (
+        Path(compose_files.split(os.pathsep, 1)[0]) if compose_files else ROOT / "compose.yaml"
+    )
+    return (ROOT / first_file).parent / path
 
 
 def read_validated_secret_file(path: Path, *, name: str | None = None) -> str:
@@ -97,15 +103,12 @@ def validate_production_secret_files(directory: Path) -> None:
         read_validated_secret_file(directory / name, name=name)
 
 
-def compose_command(*, edge: bool) -> list[str]:
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        "compose.yaml",
-        "-f",
-        "compose.prod.yaml",
-    ]
+def compose_command(*, edge: bool, env_file: Path | None = None) -> list[str]:
+    command = ["docker", "compose"]
+    if env_file is not None:
+        command.extend(["--env-file", str(env_file)])
+    if not os.environ.get("COMPOSE_FILE"):
+        command.extend(["-f", "compose.yaml", "-f", "compose.prod.yaml"])
     if edge:
         command.extend(["--profile", "edge"])
     return command

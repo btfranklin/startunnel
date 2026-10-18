@@ -95,6 +95,13 @@ modified. If the retained CI artifact has expired, promotion fails; prepare
 new successful evidence for that commit before retrying. Keep candidate images
 in the registry until promotion completes.
 
+The official workflow writes a Linux amd64 record for its tested GHCR image.
+A custom deployment can write a record for another digest-pinned registry image
+and Linux platform from the matching source checkout. The upgrade helper uses
+the selected Compose project, files, profiles, and config file. It still checks
+the record, source, backup, installed image, candidate image, and database
+compatibility before it changes services.
+
 ## Publish and verify
 
 Review the draft notes, candidate evidence, image labels, and deployment record.

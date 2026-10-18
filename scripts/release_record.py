@@ -9,9 +9,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+if __package__:
+    from .start_production import validate_image_reference
+else:
+    from start_production import validate_image_reference  # type: ignore[import-not-found,no-redef]
+
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
-IMAGE = re.compile(r"ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+@sha256:[0-9a-f]{64}")
+PLATFORM = re.compile(r"linux/[a-z0-9_]+(?:/[a-z0-9_]+)?")
 
 
 def specification(version: str) -> dict[str, Any]:
@@ -52,6 +57,7 @@ def main() -> int:
     parser.add_argument(
         "--validation-run", type=int, help="Successful CI run that validated this image"
     )
+    parser.add_argument("--platform", default="linux/amd64", help="Image platform")
     args = parser.parse_args()
     try:
         version = args.check or args.write[0]
@@ -60,12 +66,13 @@ def main() -> int:
             raise ValueError("Release tag must match VERSION.")
         if args.write:
             image = args.write[1]
-            if not IMAGE.fullmatch(image):
-                raise ValueError("Official image must be a GHCR reference pinned by digest.")
+            validate_image_reference(image)
+            if not PLATFORM.fullmatch(args.platform):
+                raise ValueError("Platform must be a Linux image platform.")
             commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
             ).strip()
-            data.update(schema=1, source_commit=commit, image=image, platform="linux/amd64")
+            data.update(schema=1, source_commit=commit, image=image, platform=args.platform)
             if args.validation_run is not None:
                 if args.validation_run <= 0:
                     raise ValueError("Validation run ID must be positive.")

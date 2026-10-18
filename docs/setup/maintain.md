@@ -14,9 +14,13 @@ set -a
 set +a
 ```
 
-Omit `sudo -i` if already root. Always load this file. It selects production
-Compose files, the correct project, and the Caddy profile. Plain commands from
-an unconfigured shell can select development settings or another stack.
+Omit `sudo -i` if already root. This example uses `production.env`. If your
+deployment uses another config file, load that file instead and pass its path
+to the upgrade helper with `--env-file`. The loaded `COMPOSE_FILE`,
+`COMPOSE_PROJECT_NAME`, and `COMPOSE_PROFILES` values select the stack. The
+included Caddy service needs the `edge` profile. An external TLS proxy does
+not need that profile. Plain commands from an unconfigured shell can select
+development settings or another stack.
 
 ## Check and restart
 
@@ -78,15 +82,17 @@ original addresses and a brief writer stop during the schema migration.
    `git fetch --tags origin`, and `git checkout --detach COMMIT`, replacing
    `COMMIT` with the full source commit from the release record. Run `umask 077`
    afterward. The checkout must match the new image; mounted files must remain
-   readable by containers. Reload `production.env` as shown above.
+   readable by containers. Reload the selected config file as shown above.
 4. Preview the upgrade from that matching checkout:
 
    ```shell
    python3 scripts/upgrade_production.py /absolute/path/release.json
    ```
 
-   The helper validates the record, clean checkout, production configuration,
-   secret files, and installed image's source/version labels. Versioned
+   For another config name, add `--env-file /absolute/path/team.env` to the
+   preview and apply commands. The helper validates the record, clean checkout,
+   selected Compose model, secret files, and installed image's source/version
+   labels. It accepts a digest-pinned image from a custom registry. Versioned
    installations must appear in the release's `supported_from` list.
    Unversioned installations must have an ancestor source commit and matching
    applied migration files in an unchanged prefix. Forward migration and recovery
@@ -104,7 +110,7 @@ original addresses and a brief writer stop during the schema migration.
    ```
 
    `--backup-verified` is the operator's attestation, not an automated restore
-   check. The helper pulls the official image and checks its revision before
+   check. The helper pulls the selected image and checks its revision before
    stopping writers. It preserves a private copy of the old configuration,
    changes only the application image reference, removes the completed old
    migration container, and waits for the production stack. It never deletes
@@ -125,10 +131,12 @@ stop and arrange an explicit data conversion tested against a restored copy.
 The ManageAI installation's actual commit and database must be inspected before
 claiming its upgrade is compatible.
 
-For private/custom images, retain the [manual image build path](image.md#build-a-custom-image)
+For private/custom images, use the [manual image build path](image.md#build-a-custom-image)
 and follow the same backup, compatibility, matching-checkout, migration, and
-verification requirements. The official helper deliberately accepts only the
-official image repository.
+verification requirements. Write a release record from the matching source
+checkout with `python3 scripts/release_record.py --write VERSION IMAGE --platform
+linux/arm64` if you use an ARM64 image. The writer defaults to `linux/amd64`.
+Check the record and image labels before an upgrade.
 
 If a migration fails, leave the application writers stopped and inspect the
 failure. An old image is not necessarily compatible with a new database.

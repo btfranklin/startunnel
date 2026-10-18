@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -36,11 +38,26 @@ def test_manifest_must_match_reviewed_compatibility() -> None:
         upgrade.validate_record(candidate)
 
 
-def test_nonofficial_image_is_rejected() -> None:
+def test_custom_registry_and_linux_arm64_release_is_accepted() -> None:
     candidate = record()
-    candidate["image"] = "ghcr.io/other/startunnel@sha256:" + "b" * 64
-    with pytest.raises(ValueError, match="official"):
-        upgrade.validate_record(candidate)
+    candidate["image"] = "registry.example:5000/team/startunnel@sha256:" + "b" * 64
+    candidate["platform"] = "linux/arm64"
+    upgrade.validate_record(candidate)
+
+
+def test_release_writer_records_custom_registry_and_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image = "registry.example:5000/team/startunnel@sha256:" + "b" * 64
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["release_record.py", "--write", "v0.1.0", image, "--platform", "linux/arm64"]
+    )
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "a" * 40)
+    assert release_record.main() == 0
+    written = json.loads((tmp_path / "release.json").read_text())
+    assert written["image"] == image
+    assert written["platform"] == "linux/arm64"
 
 
 def test_unversioned_upgrade_rejects_changed_migration_graph(
@@ -128,7 +145,18 @@ def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "mode", ["preview", "no-backup", "apply", "apply-link", "bad-image", "migration-failure"]
+    "mode",
+    [
+        "preview",
+        "no-backup",
+        "apply",
+        "apply-link",
+        "bad-image",
+        "migration-failure",
+        "wrong-compose-image",
+        "custom-preview",
+        "custom-apply",
+    ],
 )
 def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     tmp_path: Path,
@@ -136,24 +164,32 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     mode: str,
 ) -> None:
     candidate = record()
+    candidate["image"] = "registry.example:5000/team/startunnel@sha256:" + "b" * 64
     release_file = tmp_path / "release.json"
     release_file.write_text(json.dumps(candidate))
     old_image = "ghcr.io/btfranklin/startunnel@sha256:" + "c" * 64
     original = f"STARTUNNEL_APP_IMAGE={old_image}\nSTARTUNNEL_DOMAIN=tunnel.example\n"
-    configuration = tmp_path / "production.env"
-    if mode == "apply-link":
+    custom = mode.startswith("custom-")
+    configuration = tmp_path / ("team.env" if custom else "production.env")
+    if mode == "apply-link" or custom:
         managed = tmp_path / "managed"
         managed.mkdir()
-        target = managed / "production.env"
+        target = managed / configuration.name
         target.write_text(original)
-        target.chmod(0o644)
+        target.chmod(0o400)
         configuration.symlink_to(target)
     else:
         configuration.write_text(original)
         configuration.chmod(0o600)
     monkeypatch.setattr(upgrade, "ROOT", tmp_path)
     monkeypatch.setenv("STARTUNNEL_APP_IMAGE", old_image)
-    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "startunnel-team")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "customer-team" if custom else "startunnel-team")
+    if custom:
+        monkeypatch.setenv("COMPOSE_FILE", "/srv/team/base.yaml:/srv/team/production.yaml")
+        monkeypatch.setenv("COMPOSE_PROFILES", "metrics")
+    else:
+        monkeypatch.delenv("COMPOSE_FILE", raising=False)
+        monkeypatch.delenv("COMPOSE_PROFILES", raising=False)
     monkeypatch.setattr(upgrade, "validate_production_secret_files", lambda directory: None)
     monkeypatch.setattr(upgrade, "rendered_images", lambda command: [candidate["image"]])
     commands: list[list[str]] = []
@@ -162,6 +198,11 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         commands.append(command)
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return str(candidate["source_commit"])
+        if command[-3:] == ["config", "--format", "json"]:
+            rendered = os.environ["STARTUNNEL_APP_IMAGE"]
+            if mode == "wrong-compose-image" and rendered == candidate["image"]:
+                rendered = old_image
+            return json.dumps({"services": {"web": {"image": rendered}}})
         if "ps" in command:
             return "container-id"
         if command[:2] == ["docker", "inspect"]:
@@ -169,27 +210,29 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         if command[:3] == ["docker", "image", "inspect"]:
             if command[3] == old_image:
                 return json.dumps({"org.opencontainers.image.revision": "d" * 40})
-            return "e" * 40 if mode == "bad-image" else candidate["source_commit"]
+            return "e" * 40 if mode == "bad-image" else str(candidate["source_commit"])
         if "up" in command and mode == "migration-failure":
             raise subprocess.CalledProcessError(1, command)
         return ""
 
     monkeypatch.setattr(upgrade, "run", run)
-    args = [str(release_file)]
-    if mode != "preview":
+    args = [str(release_file)] + (["--env-file", str(configuration)] if custom else [])
+    if mode not in ("preview", "custom-preview"):
         args.append("--apply")
-    if mode not in ("preview", "no-backup"):
+    if mode not in ("preview", "custom-preview", "no-backup"):
         args.append("--backup-verified")
-    assert upgrade.main(args) == (0 if mode in ("preview", "apply", "apply-link") else 2)
-    mutated = mode in ("apply", "apply-link", "migration-failure")
+    assert upgrade.main(args) == (
+        0 if mode in ("preview", "apply", "apply-link", "custom-preview", "custom-apply") else 2
+    )
+    mutated = mode in ("apply", "apply-link", "migration-failure", "custom-apply")
     assert configuration.read_text() == (
         original.replace(old_image, candidate["image"]) if mutated else original
     )
     if mutated:
-        saved = configuration.resolve().with_name("production.env.before-v0.1.0")
+        saved = configuration.resolve().with_name(f"{configuration.name}.before-v0.1.0")
         assert saved.read_text() == original
         assert saved.stat().st_mode & 0o777 == 0o600
-        if mode == "apply-link":
+        if mode == "apply-link" or custom:
             assert configuration.is_symlink()
         stop_index = next(index for index, command in enumerate(commands) if "stop" in command)
         migration_index = next(index for index, command in enumerate(commands) if "rm" in command)
@@ -201,3 +244,11 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     else:
         assert not any("stop" in command or "up" in command for command in commands)
     assert not any("down" in command or "--volumes" in command for command in commands)
+    if custom:
+        compose_calls = [command for command in commands if command[:2] == ["docker", "compose"]]
+        assert compose_calls
+        assert all(
+            command[2:4] == ["--env-file", str(configuration.resolve())]
+            for command in compose_calls
+        )
+        assert all("-f" not in command and "--profile" not in command for command in compose_calls)
