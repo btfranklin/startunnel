@@ -13,10 +13,6 @@
 
 {$STARTUNNEL_DOMAIN} {
 	encode zstd gzip
-	request_body {
-		max_size 128KB
-	}
-
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
@@ -46,16 +42,5 @@
 			resp_headers delete
 			wrap json
 		}
-	}
-
-	handle_errors 413 {
-		@api path /api/v1/*
-		header @api {
-			Cache-Control "no-store"
-			Content-Type "application/json"
-			X-Request-ID {err.id}
-		}
-		respond @api `{"error":{"code":"payload_too_large","message":"The request body is too large.","request_id":"{err.id}","field_errors":[]}}` 413
-		respond 413
 	}
 }

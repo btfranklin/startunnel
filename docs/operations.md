@@ -170,6 +170,11 @@ default. For HTTP on a trusted container, VPN, or private network, set
 The HTTP or HTTPS scheme sets the default redirect, secure-cookie, and HSTS
 settings. The same origin must appear in `STARTUNNEL_CSRF_TRUSTED_ORIGINS`.
 
+`STARTUNNEL_MAX_REQUEST_BODY_BYTES` controls the application request-body limit.
+The default is 131,072 bytes; the operator can select up to 1,048,576 bytes.
+Caddy forwards requests to this guard. The message-content limit remains
+65,536 bytes, independent of the size of its JSON request.
+
 The `--edge` option enables the included Caddy TLS service. The four setup
 guides use it. Without that profile, configure an external TLS proxy for an
 HTTPS origin or a private route for an HTTP origin. Set the origin port to
