@@ -45,8 +45,7 @@ The operator or setup agent must complete these changes:
    Keep the private key accessible only to the processes that need it.
 4. In a locally maintained copy of [the Caddyfile](../../docker/caddy/Caddyfile),
    add `tls /path/to/fullchain.pem /path/to/privkey.pem` inside the site block.
-   Use paths inside the container. Preserve the existing proxy, limits, metrics
-   restriction, and log filters. See [Caddy's TLS reference](https://caddyserver.com/docs/caddyfile/directives/tls).
+   Use paths inside the container. Preserve the existing proxy, limits, and log filters. See [Caddy's TLS reference](https://caddyserver.com/docs/caddyfile/directives/tls).
    Use a local Compose override for the mounts and custom Caddyfile, and include
    that file in `COMPOSE_FILE` so later maintenance uses it too.
 5. Enable automatic renewal and a deploy hook that makes Caddy load the renewed

@@ -72,7 +72,7 @@ Important settings:
 | `STARTUNNEL_WEB_WORKERS` | `1` | Uvicorn worker processes |
 | `STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE` | `18` | Per-process pool limit |
 | `STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE` | `4` | Maintenance pool limit |
-| `STARTUNNEL_METRICS_TOKEN` | required in production | Internal metrics bearer token |
+| `STARTUNNEL_METRICS_TOKEN` | required in production | Metrics bearer token |
 
 Use a PostgreSQL URL for `DATABASE_URL` and `DATABASE_ADMIN_URL`. Production settings reject other engines.
 
@@ -98,7 +98,9 @@ Maintenance records the last reconciliation time, observed deletion lag, the las
 Database query timing applies to each Django connection in its process. It
 includes queries from synchronous views, asynchronous adapters, commands, and
 maintenance work. The `/metrics` endpoint publishes web-process query metrics;
-it does not combine query metrics from other containers. Query labels contain
+Caddy forwards this endpoint. Supply the `X-Metrics-Token` header with the
+configured metrics token. Missing or incorrect tokens return HTTP 404. The
+endpoint does not combine query metrics from other containers. Query labels contain
 only the SQL operation type.
 
 ## Maintenance recovery

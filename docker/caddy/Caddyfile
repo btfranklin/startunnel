@@ -24,9 +24,6 @@
 		-Server
 	}
 
-	@metrics path /metrics
-	respond @metrics 404
-
 	reverse_proxy web:8000 {
 		header_up Host {$STARTUNNEL_DOMAIN}
 		header_up X-Forwarded-For {remote_host}
