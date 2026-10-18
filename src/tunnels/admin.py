@@ -23,25 +23,21 @@ class TunnelAdmin(InspectionAdmin):
 @admin.register(TunnelAddress)
 class TunnelAddressAdmin(InspectionAdmin):
     list_display = ("id", "tunnel_id", "state", "issued_at")
-    exclude = ("address",)
 
 
 @admin.register(Cycle)
 class CycleAdmin(InspectionAdmin):
     list_display = ("id", "tunnel_id", "number", "state", "created_at", "closed_at")
-    exclude = ("manifest_digest",)
 
 
 @admin.register(Message)
 class MessageAdmin(InspectionAdmin):
     list_display = ("id", "cycle_id", "sequence", "sender_id", "depth", "created_at")
-    exclude = ("text_payload", "json_payload")
 
 
 @admin.register(TunnelEvent)
 class TunnelEventAdmin(InspectionAdmin):
     list_display = ("id", "tunnel_id", "position", "event_type", "occurred_at")
-    exclude = ("metadata",)
 
 
 admin.site.register(IdempotencyRecord, InspectionAdmin)

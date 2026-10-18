@@ -37,6 +37,10 @@ A revoked credential or retired address cannot be restored by replay.
 Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
 Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
 
+Django admin provides read-only inspection of stored addresses, message
+payloads, and event metadata. It does not expose credential digests. Use the
+product controls, API, or domain commands to change instance data.
+
 ## Agent credentials
 
 A key starts with `st_`. Creation returns it through a private file or browser download. StarTunnel stores only a peppered digest. Credentials do not expire by default. Administrators can revoke them at any time. Deactivating the admin who created a credential does not revoke it.
