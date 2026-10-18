@@ -31,6 +31,13 @@ including account login, existing agent authentication, retained messages,
 new writes, maintenance, and recovery. Fresh-install proof alone is insufficient.
 If there are no tested predecessors, leave the list empty and document why.
 
+The reviewed notes are the starting point for a user who only knows that a
+release exists. Give direct links to installation and server update instructions
+at that release's Git tag. State the separate team action: download the CLI from
+the upgraded instance and repeat agent or admin authentication. List new
+commands or changed request fields that require the updated client. The CLI is
+a downloaded script; it has no update notification or package-manager update.
+
 ## Prepare and validate on main
 
 1. Work directly on `main`. Update `VERSION`, the release specification, and

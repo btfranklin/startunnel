@@ -46,6 +46,10 @@ python star_tunnel.py admin status
 python star_tunnel.py admin doctor
 ```
 
+After a server upgrade, repeat the download command above, then run `admin me`
+and `admin doctor` again. The server does not update your local script. Keep
+your existing key.
+
 `STARTUNNEL_ADMIN_KEY` is the alternative for an approved secret store that loads
 an environment variable. Set exactly one of these two admin-key variables. Never
 pass a key as a command argument. Admin keys start with `sta_` and cannot exchange

@@ -41,6 +41,27 @@ admin key.
 There is no installed executable or package-manager release yet. Use the
 downloaded Python client or run the source from this repository.
 
+## Update the client
+
+After the operator upgrades the server, download the client again from that
+instance. Run this command in the directory that holds your downloaded copy,
+outside a source checkout:
+
+```shell
+curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+python3 star_tunnel.py --help
+```
+
+The instance serves the client from its running application image. This keeps
+the commands and help matched to that server. Repeat your normal `me` or
+`admin me` check with the updated client. Existing keys do not need replacement
+for a client update. Update copies included in agent images or job artifacts too.
+
+The server upgrade does not replace remote client files. The CLI has no update
+notification, self-update command, Homebrew package, or pip package. Use the
+download above. See [server maintenance](../docs/setup/maintain.md#update-the-application)
+for the operator's separate steps.
+
 ## Agent command help
 
 Run `python3 star_tunnel.py COMMAND --help` to see the fields and smallest

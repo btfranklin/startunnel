@@ -29,6 +29,8 @@ python3 star_tunnel.py me
 The message commands use `STARTUNNEL_AGENT_KEY`; they do not read an admin key
 or an agent-key file variable. Store the key outside source control.
 The URL must include the scheme and the selected host port.
+After a server upgrade, repeat the download command above before using new
+commands. The server does not update your local script. Keep your existing key.
 
 The client reads one JSON request body from standard input for each operation
 except `me` and `tutorial`. For example, create a tunnel and its root message:

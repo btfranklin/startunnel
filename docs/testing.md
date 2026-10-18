@@ -53,6 +53,11 @@ application URLs to their source documents for the scan. The existing
 `scripts/check_docs.py` gate separately checks application route ownership.
 Django templates continue through djLint and browser checks.
 
+Documentation checks validate structure, links, route ownership, runnable
+examples, and API or CLI contracts. Do not require particular sentences,
+heading text, marketing words, or paragraph lengths. Example programs must
+report failure through their exit status; their printed prose can change.
+
 ## Compose lanes
 
 ```shell
@@ -69,6 +74,8 @@ The canonical lane proves a fresh database. The PostgreSQL lane checks schema,
 constraints, and triggers. Admin changes also require forward migration and
 recovery proof on a restored matching initial baseline. Other historical graphs
 are unsupported unless their conversion has separate evidence.
+The agent lane starts maintenance because its end-to-end exchange also checks
+physical deletion after the retention deadline.
 
 ## Restored initial baseline
 
@@ -94,8 +101,11 @@ That step must preserve message IDs, ancestry, and absent labels. The later
 address-storage reset is a separate expected outcome. The proof then dumps the
 current pre-Beacon schema with new messages, session labels, a checkpoint, and
 its current address. It restores that data into a third database, applies the
-Beacon migration, verifies those records, and publishes a Beacon. Accounts,
-credentials, and historical audit records must remain across both restores.
+Beacon migration, verifies those records, and publishes a Beacon. It then
+removes admin access, recovers a private admin key, and withdraws the Beacon
+through the admin API. An exact retry must return the same operation receipt.
+The known address, messages, and checkpoint must remain. Accounts, credentials,
+and historical audit records must remain across both restores.
 
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private

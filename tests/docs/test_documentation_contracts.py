@@ -25,11 +25,13 @@ def _markdown_files() -> list[Path]:
     return sorted(set(paths))
 
 
-def _cli_arguments(markdown: str) -> list[tuple[int, list[str]]]:
-    commands: list[tuple[int, list[str]]] = []
+def _cli_doc_errors(markdown: str, known_environment: set[str]) -> list[str]:
+    errors = []
+    parser = build_parser()
     for fence in MARKDOWN.parse(markdown):
         if fence.type != "fence" or fence.map is None:
             continue
+        commands: list[tuple[int, list[str]]] = []
         for offset, line in enumerate(fence.content.splitlines(), start=1):
             if "star_tunnel.py" not in line:
                 continue
@@ -45,25 +47,17 @@ def _cli_arguments(markdown: str) -> list[tuple[int, list[str]]]:
                         break
                     arguments.append(value)
                 commands.append((fence.map[0] + offset, arguments))
-    return commands
-
-
-def _cli_doc_errors(markdown: str, known_environment: set[str]) -> list[str]:
-    commands = _cli_arguments(markdown)
-    if not commands:
-        return []
-    errors = []
-    parser = build_parser()
-    for line, arguments in commands:
-        try:
-            parser.parse_args(arguments)
-        except CliError:
-            errors.append(f"line {line}: invalid CLI arguments: {arguments!r}")
-        except SystemExit as error:
-            if error.code != 0:
-                errors.append(f"line {line}: invalid CLI arguments: {arguments!r}")
-    for name in sorted(set(ENV_NAME.findall(markdown)) - known_environment):
-        errors.append(f"unknown CLI environment name: {name}")
+        for line_number, arguments in commands:
+            try:
+                parser.parse_args(arguments)
+            except CliError:
+                errors.append(f"line {line_number}: invalid CLI arguments: {arguments!r}")
+            except SystemExit as error:
+                if error.code != 0:
+                    errors.append(f"line {line_number}: invalid CLI arguments: {arguments!r}")
+        if commands:
+            for name in sorted(set(ENV_NAME.findall(fence.content)) - known_environment):
+                errors.append(f"unknown CLI environment name: {name}")
     return errors
 
 
@@ -88,6 +82,23 @@ python3 star_tunnel.py create --text hello
     assert len(errors) == 2
     assert "invalid CLI arguments" in errors[0]
     assert "STARTUNNEL_URL" in errors[1]
+
+
+def test_cli_documentation_check_accepts_separate_server_configuration() -> None:
+    markdown = """Set the server's STARTUNNEL_DOMAIN before its update.
+
+```shell
+export STARTUNNEL_DOMAIN=tunnel.example
+```
+
+Then check the client:
+
+```shell
+export STARTUNNEL_BASE_URL=https://tunnel.example
+python3 star_tunnel.py me
+```"""
+
+    assert _cli_doc_errors(markdown, {"STARTUNNEL_BASE_URL"}) == []
 
 
 def test_markdown_link_checker_rejects_missing_cross_file_heading(tmp_path: Path) -> None:

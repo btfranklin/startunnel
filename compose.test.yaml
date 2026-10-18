@@ -161,6 +161,11 @@ services:
       <<: *test-environment
       STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
       STARTUNNEL_EXTERNAL_E2E: "1"
+    depends_on:
+      web:
+        condition: service_healthy
+      maintenance:
+        condition: service_healthy
     command:
       - pdm
       - run

@@ -118,11 +118,14 @@ def test_tutorial_script_has_no_secret_prints() -> None:
     }.intersection(printed_names)
 
 
-def test_tutorial_environment_file_contains_placeholders_only() -> None:
-    text = (ROOT / "examples/.env.tutorial.example").read_text(encoding="utf-8")
-    assert "replace-with" in text
-    assert "OPENAI_API_KEY" not in text
-    assert "st_" not in text
+def test_tutorial_environment_file_declares_its_client_settings() -> None:
+    values = run_tutorial.read_env(ROOT / "examples/.env.tutorial.example")
+    assert {
+        "STARTUNNEL_BASE_URL",
+        "STARTUNNEL_SENDER_KEY",
+        "STARTUNNEL_RECEIVER_KEY",
+    } <= values.keys()
+    assert "OPENAI_API_KEY" not in values
 
 
 def test_tutorial_runner_rejects_a_missing_environment_file(

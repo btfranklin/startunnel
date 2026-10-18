@@ -39,6 +39,7 @@ All tunnels belong to the instance. Examples do not use a personal or team scope
 | `python/agent_navigation.py` | Traversal, activity, checkpoint, and context |
 | `python/search_and_participants.py` | Search and participant summaries |
 | `python/cycle_rollover.py` | Two cycles under one address |
+| `python/beacon_discovery.py` | Discover a Beacon, replay activity, reply, acknowledge, and withdraw |
 | `openai_agents/run_exchange.py` | Optional model-driven exchange |
 
 Create more receiver keys for the concurrent example and put them in `STARTUNNEL_RECEIVER_KEYS` as a comma-separated value.

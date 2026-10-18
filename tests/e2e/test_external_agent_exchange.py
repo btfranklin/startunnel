@@ -46,6 +46,88 @@ def _headers(key: str, idempotency_key: str | None = None) -> dict[str, str]:
     return headers
 
 
+def _run_beacon_example(values: dict[str, str]) -> None:
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": os.environ["STARTUNNEL_BASE_URL"],
+            "STARTUNNEL_SENDER_KEY": values["STARTUNNEL_SENDER_KEY"],
+            "STARTUNNEL_RECEIVER_KEY": values["STARTUNNEL_RECEIVER_KEY"],
+        }
+    )
+    completed = subprocess.run(
+        [sys.executable, "examples/python/beacon_discovery.py"],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    assert completed.returncode == 0, "Beacon discovery example failed."
+    assert completed.stderr == "", "Beacon discovery example wrote an error log."
+    assert all(
+        values[name] not in completed.stdout
+        for name in ("STARTUNNEL_SENDER_KEY", "STARTUNNEL_RECEIVER_KEY")
+    )
+    assert not any(0x1F700 <= ord(character) <= 0x1F73F for character in completed.stdout)
+
+
+def _assert_beacon_example_state(values: dict[str, str]) -> None:
+    with (
+        psycopg.connect(os.environ["DATABASE_URL"]) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            "SELECT id::text, state FROM tunnels_tunnel "
+            "WHERE creator_id = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (values["STARTUNNEL_SENDER_ID"],),
+        )
+        tunnel = cursor.fetchone()
+        assert tunnel is not None
+        tunnel_id, tunnel_state = tunnel
+        assert tunnel_state == "dormant"
+        cursor.execute(
+            "SELECT id::text, state FROM tunnels_cycle WHERE tunnel_id = %s "
+            "ORDER BY number DESC LIMIT 1",
+            (tunnel_id,),
+        )
+        cycle = cursor.fetchone()
+        assert cycle is not None and cycle[1] == "closed"
+        cycle_id = cycle[0]
+        cursor.execute(
+            "SELECT id::text, sequence, parent_id::text, session FROM tunnels_message "
+            "WHERE cycle_id = %s ORDER BY sequence",
+            (cycle_id,),
+        )
+        messages = cursor.fetchall()
+        assert len(messages) == 2
+        assert messages[0][1:] == (1, None, None)
+        assert messages[1][1:] == (2, messages[0][0], "release-review")
+        cursor.execute(
+            "SELECT b.end_reason, b.ended_at FROM tunnels_beacon b WHERE b.cycle_id = %s",
+            (cycle_id,),
+        )
+        beacon = cursor.fetchone()
+        assert beacon is not None and beacon[0] == "withdrawn" and beacon[1] is not None
+        cursor.execute(
+            "SELECT position FROM tunnels_tunnelevent "
+            "WHERE tunnel_id = %s AND message_id = %s AND event_type = 'message_posted'",
+            (tunnel_id, messages[1][0]),
+        )
+        position_row = cursor.fetchone()
+        assert position_row is not None
+        reply_position = position_row[0]
+        cursor.execute(
+            "SELECT last_event_position FROM tunnels_activitycheckpoint "
+            "WHERE tunnel_id = %s AND credential_id = %s",
+            (tunnel_id, values["STARTUNNEL_RECEIVER_ID"]),
+        )
+        checkpoint = cursor.fetchone()
+        assert checkpoint == (reply_position,)
+
+
 def test_external_agent_exchange() -> None:
     required = {"DATABASE_URL", "STARTUNNEL_API_KEY_PEPPER", "STARTUNNEL_BASE_URL"}
     assert not (required - os.environ.keys())
@@ -68,6 +150,8 @@ def test_external_agent_exchange() -> None:
         values = _read_environment(fixture)
         sender_key = values["STARTUNNEL_SENDER_KEY"]
         receiver_key = values["STARTUNNEL_RECEIVER_KEY"]
+        _run_beacon_example(values)
+        _assert_beacon_example_state(values)
 
         with httpx.Client(base_url=os.environ["STARTUNNEL_BASE_URL"], timeout=30) as client:
             created = client.post(

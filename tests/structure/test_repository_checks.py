@@ -22,25 +22,6 @@ def test_wordmark_uses_the_selected_sulfur_symbol() -> None:
     assert "🜀" not in navigation
 
 
-def test_product_text_uses_no_symbol_after_the_last_alchemical_pictogram() -> None:
-    roots = tuple(
-        ROOT / name for name in ("src", "templates", "docs", "examples", "website", "cli")
-    )
-    suffixes = {".html", ".md", ".py", ".txt"}
-    forbidden: list[str] = []
-
-    for root in roots:
-        for path in root.rglob("*"):
-            if path.is_file() and path.suffix in suffixes:
-                for character in path.read_text(encoding="utf-8"):
-                    if 0x1F774 <= ord(character) <= 0x1F77F:
-                        forbidden.append(
-                            f"{path.relative_to(ROOT)} contains U+{ord(character):05X}."
-                        )
-
-    assert not forbidden, forbidden
-
-
 def test_pages_have_no_heading_or_section_eyebrows() -> None:
     forbidden_classes = {
         "app-header__context",

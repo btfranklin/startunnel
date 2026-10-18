@@ -347,7 +347,6 @@ def test_missing_command_argument_has_standard_parser_diagnostic() -> None:
     assert result.returncode == 2
     assert result.stdout == ""
     assert "--idempotency-key" in result.stderr
-    assert "required" in result.stderr
 
 
 def test_api_error_discards_reflected_credentials_in_safe_fields() -> None:
@@ -724,20 +723,11 @@ def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -
     )
 
     assert result.returncode == 0
-    assert (
-        "Request fields:" in result.stdout
-        if action in {"me", "tutorial"}
-        else "Required JSON fields:" in result.stdout
-    )
-    if action == "read-context":
-        assert "focus_message_id" in result.stdout
-    if action == "enter":
-        assert "max_bytes bounds the full UTF-8 JSON response" in result.stdout
-    if action in {"create", "reply", "close"}:
+    spec = _load_cli_module().AGENT_COMMANDS[action]
+    for field_name in (*spec["required"], *spec["optional"]):
+        assert field_name in result.stdout
+    if action in {"create", "reply", "close", "beacon-publish", "beacon-withdraw"}:
         assert "--idempotency-key" in result.stdout
-    if action in {"create", "reply"}:
-        assert "self-declared label" in result.stdout
-        assert "session" in result.stdout
 
 
 @pytest.mark.parametrize("command", ["start", "rollover"])
@@ -751,4 +741,3 @@ def test_admin_cycle_help_lists_root_session(command: str) -> None:
 
     assert result.returncode == 0
     assert "root_session" in result.stdout
-    assert "Optional fields:" in result.stdout

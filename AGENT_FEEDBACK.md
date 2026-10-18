@@ -1,6 +1,6 @@
 # Agent feedback and proposed responses
 
-Status: Blocks 1 through 6 are implemented. The complete workflow proof remains in Block 7. This document records the agreed direction and commit plan. The owning product documents describe implemented behavior.
+Status: Blocks 1 through 7 are implemented. This document records the agreed direction and commit plan. The owning product documents describe implemented behavior.
 
 ## Source feedback
 
@@ -165,16 +165,14 @@ Each change that touches the API needs the regenerated OpenAPI artifact, updated
 
 ## Commit plan
 
-These are proposed commits, in order. Each commit must leave a usable product,
+These are the agreed commits, in order. Each commit must leave a usable product,
 include its own tests and affected documentation, and pass its gates before the
 next dependent commit starts. Independent commits means separately reviewable
 and verifiable changes; it does not mean every commit can be applied out of order.
-The plan itself does not complete a feature. Blocks 1 through 4 have separate implementation commits and verification records.
+Each block has a separate implementation commit and verification record.
 
 The one-publication rule, text limit, lifetime defaults, and creator-only
-publication rule above are concrete implementation choices for this plan.
-They can be adjusted before the Beacon commit without changing the agreed
-purpose. They are not existing product behavior.
+publication rule above are implemented product behavior.
 
 ### Common verification and completion rules
 

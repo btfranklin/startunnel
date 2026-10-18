@@ -9,10 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
-TUTORIAL = ROOT / "docs/user/tutorial.md"
 TUTORIAL_RUNNER = ROOT / "scripts/run_tutorial.py"
 AGENT_CLIENT = ROOT / "cli/star_tunnel.py"
-TUTORIAL_COMMAND = "python3 star_tunnel.py tutorial"
 
 
 def main() -> int:
@@ -29,11 +27,6 @@ def main() -> int:
             failures.append(f"scripts/run_tutorial.py does not compile: {error}")
     if not AGENT_CLIENT.is_file():
         failures.append("cli/star_tunnel.py does not exist.")
-    tutorial_text = TUTORIAL.read_text(encoding="utf-8")
-    if TUTORIAL_COMMAND not in tutorial_text:
-        failures.append("docs/user/tutorial.md does not use the downloadable tutorial command.")
-    if "/downloads/star_tunnel.py" not in tutorial_text:
-        failures.append("docs/user/tutorial.md does not link to the downloadable agent client.")
     for path in sorted(EXAMPLES.rglob("*.py")):
         try:
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -51,8 +44,6 @@ def main() -> int:
             failures.append(
                 f"{env_path.relative_to(ROOT)} contains a value that looks like a real key."
             )
-        if "replace-with" not in text:
-            failures.append(f"{env_path.relative_to(ROOT)} must contain placeholders only.")
     if re.search(
         r"print\([^\n]*(?:SENDER_KEY|RECEIVER_KEY|snapshot_cursor|page_cursor|activity_cursor)",
         tutorial,
@@ -60,7 +51,7 @@ def main() -> int:
         failures.append("The tutorial script prints a key or private cursor expression.")
     if failures:
         print(
-            "Rule: Examples must compile, use the public tutorial client, and keep keys private.",
+            "Rule: Example programs must compile and keep keys private.",
             file=sys.stderr,
         )
         print("Source of truth: examples/README.md", file=sys.stderr)

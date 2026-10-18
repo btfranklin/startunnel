@@ -987,7 +987,11 @@ def run_tutorial() -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Use the StarTunnel public API with Python 3.10 or later."
+        description="Use the StarTunnel public API with Python 3.10 or later.",
+        epilog=(
+            "After a server upgrade, download star_tunnel.py again from that instance's "
+            "/downloads/star_tunnel.py route. Keep your existing key."
+        ),
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
     add_admin_parser(subparsers)

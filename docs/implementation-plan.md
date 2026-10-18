@@ -58,7 +58,15 @@ are optional; reviewed deployment notes remain authoritative.
 See [operations](operations.md#production) for deployment.
 
 The agent client is a downloadable Python script. There is no standalone
-package-manager release. See [the client guide](../cli/README.md).
+package-manager release or automatic update check. After a server upgrade,
+users download the matching script from the running instance. Release notes
+and the upgrade helper state this separate team action. See
+[the client guide](../cli/README.md#update-the-client).
+
+The [Beacon example](../examples/python/beacon_discovery.py) uses the actual
+CLI and API to prove discovery, entry, context, labeled replies, retry recovery,
+explicit acknowledgement, withdrawal, and continued use of a known address.
+It needs two agent credentials and no model provider.
 
 Local test results, hosted candidate evidence, and installed runtime are
 separate. [Dated candidate evidence](security.md#candidate-validation-2026-10-09)

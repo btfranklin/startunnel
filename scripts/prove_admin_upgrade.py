@@ -392,14 +392,17 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     import django
 
     django.setup()
+    from django.core.management import call_command
     from django.db import connection
     from django.db.migrations.executor import MigrationExecutor
+    from django.test import Client
+    from django.utils import timezone
 
     from accounts.admin_access import authenticate_admin_key
     from accounts.models import AdminCredential, AdminOperation, User
     from agents.models import AgentCredential
     from tunnels.access import resolve_tunnel
-    from tunnels.beacons import publish_beacon
+    from tunnels.beacons import publish_beacon, read_board
     from tunnels.models import (
         ActivityCheckpoint,
         AuditEvent,
@@ -457,6 +460,56 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     assert TunnelEvent.objects.filter(
         tunnel=tunnel, event_type=TunnelEvent.Type.BEACON_LIT
     ).exists()
+
+    client = Client(HTTP_HOST="localhost")
+    original_headers = {"Authorization": "Bearer " + expected["admin_key"]}
+    assert client.get("/api/v1/admin/me", headers=original_headers).status_code == 200
+    AdminCredential.objects.filter(owner=user).update(revoked_at=timezone.now())
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    assert client.get("/api/v1/admin/me", headers=original_headers).status_code == 401
+
+    recovery_path = snapshot_path.parent / "beacon-recovery.key"
+    call_command(
+        "recover_instance_admin",
+        user.username,
+        key_file=str(recovery_path),
+        key_name="beacon-recovery",
+        verbosity=0,
+    )
+    assert recovery_path.stat().st_mode & 0o777 == 0o600
+    recovery_key = recovery_path.read_text().strip()
+    recovered = authenticate_admin_key(recovery_key)
+    headers = {"Authorization": "Bearer " + recovery_key}
+    inspected = client.get(f"/api/v1/admin/beacons/{beacon.pk}", headers=headers)
+    assert inspected.status_code == 200 and inspected.json()["id"] == str(beacon.pk)
+    body = json.dumps({"beacon_id": str(beacon.pk)})
+    headers["Idempotency-Key"] = "upgrade-recovered-beacon-withdraw"
+    withdrawn = client.post(
+        "/api/v1/admin/beacons/withdraw",
+        data=body,
+        content_type="application/json",
+        headers=headers,
+    )
+    assert withdrawn.status_code == 200
+    receipt = withdrawn.json()
+    assert receipt["resource"]["id"] == str(beacon.pk)
+    assert receipt["resource"]["end_reason"] == Beacon.EndReason.WITHDRAWN
+    retry = client.post(
+        "/api/v1/admin/beacons/withdraw",
+        data=body,
+        content_type="application/json",
+        headers=headers,
+    )
+    assert retry.status_code == 200 and retry.json() == receipt
+    assert AuditEvent.objects.filter(
+        action="beacon.ended", actor_admin_credential=recovered, channel="admin_api"
+    ).exists()
+    assert read_board(credential=credential).items == ()
+    assert resolve_tunnel(credential=credential, address=expected["fresh_address"]).pk == tunnel.pk
+    checkpoint.refresh_from_db()
+    assert checkpoint.last_event_position == expected["fresh_checkpoint_position"]
+    assert Message.objects.filter(cycle=cycle).count() == 2
     connection.close()
 
 
@@ -600,6 +653,8 @@ def main() -> int:
                         "fresh tunnel, sessions, credentials, audit, and checkpoint survive "
                         "Beacon migration",
                         "Beacon publication works after the forward upgrade",
+                        "recovered admin withdraws Beacon with an exact receipt retry",
+                        "Beacon withdrawal preserves the known address, messages, and checkpoint",
                         "admin credentials and non-tunnel receipts retained",
                         "tunnel admin receipts removed",
                         "historical audit",

@@ -242,7 +242,9 @@ def main(argv: list[str] | None = None) -> int:
         # Remove the completed old migration container so startup must rerun migrations.
         run([*command, "rm", "--force", "migrate"])
         run([*command, "up", "-d", "--no-build", "--wait", "--wait-timeout", "180"])
-        print("Services started. Repeat external HTTPS, login, and two-agent verification.")
+        print("Services started. Repeat external access, login, and two-agent verification.")
+        print("On each client machine, download /downloads/star_tunnel.py from this instance.")
+        print("Use the updated client for agent and administrator verification.")
         print("Reload the selected env file in this shell before further Compose commands.")
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         if temporary is not None:

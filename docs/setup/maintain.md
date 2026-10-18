@@ -142,7 +142,19 @@ application no longer stores a per-message content digest.
    Check the snapshot path and the actual environment and stack state after an
    interrupted attempt. Retry from the original old image and configuration
    only when the database and writers remain unchanged.
-6. Repeat [external verification](verify.md), including administrator authentication and a two-agent
+6. Tell each CLI user to replace their downloaded client with the script from
+   the upgraded instance. On each client machine, in its client directory:
+
+   ```shell
+   curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
+   python3 star_tunnel.py --help
+   ```
+
+   Use that instance's URL in `STARTUNNEL_BASE_URL`. Update copies in agent
+   images and job artifacts too. The server cannot update files on those
+   machines. Keys remain valid; users do not need new keys for a client update.
+   See [the client guide](../../cli/README.md#update-the-client).
+7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.
 
