@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -133,6 +134,58 @@ def test_release_workflow_promotes_evidence_without_rebuilding() -> None:
     assert "secrets: inherit" not in workflow + candidate
     assert "OPENAI" not in candidate
     assert candidate.count("docker/build-push-action") == 1
+
+
+@pytest.mark.parametrize("summary", ["", "  \n", "  Generated release summary.\n"])
+def test_release_notes_merge_keeps_reviewed_notes_and_validation_link(
+    tmp_path: Path, summary: str
+) -> None:
+    workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
+    merge_step = workflow.split("- name: Keep reviewed deployment instructions", 1)[1].split(
+        "- name: Create or recover the draft release", 1
+    )[0]
+    script = textwrap.dedent(
+        merge_step.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    )
+    notes = tmp_path / "release-notes.md"
+    reviewed = (
+        "Reviewed release notes.\n\n## Deployment record\n\n"
+        "Source commit: `abc123`\n\nImage: `example/image@sha256:abc`"
+    )
+    notes.write_text(reviewed)
+    environment = {
+        **os.environ,
+        "GENERATED_NOTES": summary,
+        "GITHUB_REPOSITORY": "owner/repository",
+        "VALIDATION_RUN_ID": "12345",
+    }
+    subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=environment, check=True)
+
+    merged = notes.read_text()
+    assert "Reviewed release notes." in merged
+    assert "Source commit: `abc123`" in merged
+    assert "Image: `example/image@sha256:abc`" in merged
+    assert "Validation: https://github.com/owner/repository/actions/runs/12345" in merged
+    if summary.strip():
+        assert merged.startswith("Generated release summary.\n\n")
+    else:
+        assert not merged.startswith("Generated release summary.")
+
+
+def test_release_summary_step_is_optional_and_uses_only_successful_output() -> None:
+    workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
+    scribe_step = workflow.split("- name: Generate the change summary", 1)[1].split(
+        "- name: Keep reviewed deployment instructions", 1
+    )[0]
+    assert "GENERATE_RELEASE_SUMMARY: ${{ secrets.OPENAI_API_KEY != '' }}" in workflow
+    assert "if: env.GENERATE_RELEASE_SUMMARY == 'true'" in scribe_step
+    assert "continue-on-error: true" in scribe_step
+    assert "openai_api_key: ${{ secrets.OPENAI_API_KEY }}" in scribe_step
+    assert (
+        "GENERATED_NOTES: ${{ steps.notes.outcome == 'success' && "
+        "steps.notes.outputs.release_notes || '' }}" in workflow
+    )
+    assert "OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}" not in workflow
 
 
 def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:

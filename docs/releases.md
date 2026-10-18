@@ -80,13 +80,15 @@ building or testing another image. It checks that the new registry tag resolves
 to exactly the same digest. Production continues to use the digest reference.
 There is no mutable `latest` tag.
 
-[Release Notes Scribe](https://github.com/btfranklin/release-notes-scribe) generates
-the change summary from source history. Set the repository Actions secret
-`OPENAI_API_KEY`; it is passed only to that action step. For the first version,
-the action compares with the empty tree. Reviewed configuration, database, and
-rollback instructions from `releases/VERSION.md` remain in the notes, followed
-by the exact source, image digest, and validation run link. Generated summaries
-do not establish migration compatibility.
+[Release Notes Scribe](https://github.com/btfranklin/release-notes-scribe) can
+generate a change summary from source history. Set the repository Actions secret
+`OPENAI_API_KEY` to enable it. The key is passed only to that action step. If the
+key is missing, the action fails, or it returns no text, the draft uses the
+reviewed notes and validation run link. If it returns a summary, the workflow
+adds it before the reviewed notes. The notes include configuration, database,
+and rollback instructions from `releases/VERSION.md`, plus the exact source,
+image digest, and validation run link. A generated summary does not establish
+migration compatibility.
 
 The workflow creates a **draft** GitHub release with `release.json`. Use manual
 dispatch with the existing tag to retry or recover a draft. Recovery uses the
