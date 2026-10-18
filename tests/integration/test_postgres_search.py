@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from django.db import connection
 from django.test import Client
 
-from tunnels.search import search_messages
+from core.limits import effective_limits
+from tunnels.search import SearchHit, search_hit_payload, search_messages
 from tunnels.services import create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -40,6 +43,7 @@ def _reply(
     content: dict[str, Any],
     mentions: list[Any] | None = None,
     correlation_id: str = "recovery-plan",
+    session: str | None = None,
 ) -> Any:
     return post_reply(
         credential=credential,
@@ -49,6 +53,7 @@ def _reply(
         content=content,
         mentions=[item.id for item in mentions or []],
         correlation_id=correlation_id,
+        session=session,
     ).message
 
 
@@ -253,6 +258,126 @@ def test_public_search_and_participant_routes_use_the_postgresql_services(
     assert {str(coordinator.id), str(worker.id)} <= {
         item["agent_id"] for item in participant_response.json()["participants"]
     }
+
+
+def test_search_byte_budget_stops_before_the_next_full_hit(
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coordinator, _ = credential_factory(name="Budget coordinator")
+    worker, _ = credential_factory(name="Budget worker")
+    created = _create(coordinator, key="search-budget-create")
+    content = {"type": "text", "text": "Budget boundary match."}
+    first = _reply(
+        worker,
+        created,
+        created.root,
+        key="search-budget-first",
+        content=content,
+        session="budget-session",
+    )
+    second = _reply(
+        worker,
+        created,
+        created.root,
+        key="search-budget-second",
+        content=content,
+        session="budget-session",
+    )
+    first_hit = SearchHit(message=first, snippet=content["text"], rank=0)
+    response_budget = len(
+        json.dumps(
+            search_hit_payload(first_hit),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    monkeypatch.setattr(
+        "core.limits.effective_limits",
+        lambda: replace(
+            effective_limits(),
+            maximum_search_response_bytes=response_budget,
+        ),
+    )
+
+    page = search_messages(
+        credential=coordinator,
+        address=created.address,
+        cycle_id=created.cycle.id,
+        sender_id=worker.id,
+        limit=10,
+    )
+
+    assert [hit.message.id for hit in page.hits] == [first.id]
+    assert second.id not in {hit.message.id for hit in page.hits}
+    assert page.used_bytes == response_budget
+    assert page.complete is False
+    assert page.next_after_message_id == first.id
+
+
+@pytest.mark.parametrize(
+    ("microsecond", "expected_wire_timestamp"),
+    [
+        (123456, "2026-10-18T12:34:56.123Z"),
+        (0, "2026-10-18T12:34:56Z"),
+    ],
+)
+def test_public_search_preserves_timestamp_wire_format_and_counts_full_precision(
+    client: Client,
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    microsecond: int,
+    expected_wire_timestamp: str,
+) -> None:
+    coordinator, _ = credential_factory(name="Timestamp coordinator")
+    worker, key = credential_factory(name="Timestamp worker")
+    mentioned, _ = credential_factory(name="Timestamp mention")
+    created = _create(coordinator, key="search-timestamp-create")
+    stored_timestamp = datetime(2026, 10, 18, 12, 34, 56, microsecond, tzinfo=UTC)
+    with monkeypatch.context() as timestamp_clock:
+        timestamp_clock.setattr("django.utils.timezone.now", lambda: stored_timestamp)
+        reply = _reply(
+            worker,
+            created,
+            created.root,
+            key="search-timestamp-reply",
+            content={"type": "text", "text": "A café timestamp match."},
+            mentions=[mentioned],
+            correlation_id="timestamp-check",
+            session="session-é",
+        )
+
+    response = client.post(
+        "/api/v1/search",
+        data=json.dumps(
+            {
+                "address": created.address,
+                "cycle_id": str(created.cycle.id),
+                "sender_id": str(worker.id),
+                "query": None,
+            }
+        ),
+        content_type="application/json",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+
+    assert response.status_code == 200, response.content
+    result = response.json()["results"][0]
+    assert result["message_id"] == str(reply.id)
+    assert result["sender"]["session"] == "session-é"
+    assert result["mention_ids"] == [str(mentioned.id)]
+    assert result["created_at"] == expected_wire_timestamp
+    hit = SearchHit(message=reply, snippet="A café timestamp match.", rank=0)
+    expected_bytes = len(
+        json.dumps(
+            search_hit_payload(hit),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    assert response.json()["used_bytes"] == expected_bytes
 
 
 def test_exclusion_search_keeps_zero_rank_matches_across_pages(credential_factory: Any) -> None:

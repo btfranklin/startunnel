@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from django.contrib.postgres.search import SearchHeadline, SearchQuery, SearchRank, SearchVector
@@ -26,6 +27,29 @@ class SearchHit:
     message: Message
     snippet: str
     rank: int
+
+
+def search_hit_payload(hit: SearchHit) -> dict[str, Any]:
+    """Return the public search result fields for one hit."""
+
+    message = hit.message
+    return {
+        "message_id": str(message.id),
+        "cycle_id": str(message.cycle_id),
+        "parent_id": str(message.parent_id) if message.parent_id else None,
+        "sender": {
+            "id": str(message.sender_id),
+            "name": message.sender_name,
+            "session": message.session,
+        },
+        "mention_ids": sorted(str(item.credential_id) for item in message.mentions.all()),
+        "correlation_id": message.correlation_id or None,
+        "sequence": message.sequence,
+        "depth": message.depth,
+        "created_at": message.created_at.isoformat(),
+        "rank": hit.rank,
+        "snippet": hit.snippet,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,28 +141,6 @@ def _validated_search_values(
     ):
         raise InvalidRequest("sequence_after must be less than sequence_before.")
     return query_text, correlation
-
-
-def _hit_response_bytes(*, message: Message, snippet: str, rank: int) -> int:
-    public_item = {
-        "message_id": str(message.id),
-        "cycle_id": str(message.cycle_id),
-        "parent_id": str(message.parent_id) if message.parent_id else None,
-        "sender": {
-            "id": str(message.sender_id),
-            "name": message.sender_name,
-            "session": message.session,
-        },
-        "mention_ids": sorted(str(item.credential_id) for item in message.mentions.all()),
-        "correlation_id": message.correlation_id or None,
-        "sequence": message.sequence,
-        "depth": message.depth,
-        "created_at": message.created_at.isoformat(),
-        "rank": rank,
-        "snippet": snippet,
-    }
-    canonical = json.dumps(public_item, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return len(canonical.encode("utf-8"))
 
 
 def search_messages(
@@ -268,17 +270,19 @@ def search_messages(
     for message in selected[:limit]:
         snippet = str(message.search_snippet)[:SNIPPET_MAX_CHARACTERS]  # type: ignore[attr-defined]
         rank = int(message.search_rank)  # type: ignore[attr-defined]
-        hit_bytes = _hit_response_bytes(message=message, snippet=snippet, rank=rank)
+        hit = SearchHit(message=message, snippet=snippet, rank=rank)
+        hit_bytes = len(
+            json.dumps(
+                search_hit_payload(hit),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        )
         if hits and used_bytes + hit_bytes > limits.maximum_search_response_bytes:
             byte_truncated = True
             break
-        hits.append(
-            SearchHit(
-                message=message,
-                snippet=snippet,
-                rank=rank,
-            )
-        )
+        hits.append(hit)
         used_bytes += hit_bytes
 
     confirmed = resolve_tunnel(credential=credential, address=address)

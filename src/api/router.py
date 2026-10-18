@@ -27,7 +27,7 @@ from tunnels.errors import InvalidCursor, InvalidRequest, TunnelDomainError, Tun
 from tunnels.message_data import cycle_payload, message_payload
 from tunnels.models import Cycle, Message, Tunnel
 from tunnels.participants import list_participants
-from tunnels.search import search_messages
+from tunnels.search import search_hit_payload, search_messages
 from tunnels.services import (
     CreatedTunnel,
     LeafPage,
@@ -1194,29 +1194,7 @@ def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
     return {
         "cycle_id": page.cycle.id,
         "snapshot_sequence": page.snapshot_sequence,
-        "results": [
-            {
-                "message_id": hit.message.id,
-                "cycle_id": hit.message.cycle_id,
-                "parent_id": hit.message.parent_id,
-                "sender": {
-                    "id": hit.message.sender_id,
-                    "name": hit.message.sender_name,
-                    "session": hit.message.session,
-                },
-                "mention_ids": sorted(
-                    (mention.credential_id for mention in hit.message.mentions.all()),
-                    key=str,
-                ),
-                "correlation_id": hit.message.correlation_id or None,
-                "sequence": hit.message.sequence,
-                "depth": hit.message.depth,
-                "created_at": hit.message.created_at,
-                "rank": hit.rank,
-                "snippet": hit.snippet,
-            }
-            for hit in page.hits
-        ],
+        "results": [search_hit_payload(hit) for hit in page.hits],
         "next_page_cursor": next_cursor,
         "complete": page.complete,
         "used_bytes": page.used_bytes,

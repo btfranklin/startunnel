@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from tunnels.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
-from tunnels.search import _base_query, _branch_message_ids, _hit_response_bytes, search_messages
+from tunnels.search import (
+    SearchHit,
+    _base_query,
+    _branch_message_ids,
+    search_hit_payload,
+    search_messages,
+)
 from tunnels.services import create_tunnel, post_reply
 
 pytestmark = pytest.mark.django_db
@@ -188,17 +195,45 @@ def test_base_query_composes_metadata_branch_and_sequence_filters(
     }
 
 
-def test_search_byte_count_uses_the_canonical_public_result_shape(
+def test_search_hit_payload_preserves_public_fields_and_full_timestamp_precision(
     credential_factory: Any,
 ) -> None:
-    credential, _ = credential_factory(name="Byte count agent")
-    created = _create(credential, key="search-validation-bytes")
+    credential, _ = credential_factory(name="Byte count café")
+    mentioned, _ = credential_factory(name="Mentioned agent")
+    also_mentioned, _ = credential_factory(name="Also mentioned")
+    created = _create(credential, key="search-validation-payload")
+    message = post_reply(
+        credential=credential,
+        idempotency_key="search-validation-payload-reply",
+        address=created.address,
+        parent_id=created.root.id,
+        content={"type": "text", "text": "A safe café snippet."},
+        mentions=[also_mentioned.id, mentioned.id],
+        session="session-é",
+        correlation_id="search-validation",
+    ).message
+    created_at = datetime(2026, 2, 3, 4, 5, 6, 123456, tzinfo=UTC)
+    type(message).objects.filter(pk=message.pk).update(created_at=created_at)
+    message.refresh_from_db()
 
-    count = _hit_response_bytes(
-        message=created.root,
-        snippet="A safe snippet.",
-        rank=42,
+    payload = search_hit_payload(
+        SearchHit(message=message, snippet="A safe café snippet.", rank=42)
     )
 
-    assert count > len(b"A safe snippet.")
-    assert count < 2_048
+    assert payload == {
+        "message_id": str(message.id),
+        "cycle_id": str(message.cycle_id),
+        "parent_id": str(created.root.id),
+        "sender": {
+            "id": str(credential.id),
+            "name": "Byte count café",
+            "session": "session-é",
+        },
+        "mention_ids": sorted([str(also_mentioned.id), str(mentioned.id)]),
+        "correlation_id": "search-validation",
+        "sequence": message.sequence,
+        "depth": message.depth,
+        "created_at": "2026-02-03T04:05:06.123456+00:00",
+        "rank": 42,
+        "snippet": "A safe café snippet.",
+    }
