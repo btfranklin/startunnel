@@ -155,9 +155,14 @@ def test_concurrent_daemon_cleanup_is_a_narrow_skip(monkeypatch: pytest.MonkeyPa
     isolation.prune_disposable_images({})
 
 
+@pytest.mark.parametrize("linked", [False, True])
 def test_source_helpers_can_write_private_host_artifacts(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, linked: bool
 ) -> None:
+    target = tmp_path / "reports" if linked else tmp_path / "artifacts"
+    if linked:
+        target.mkdir(mode=0o700)
+        (tmp_path / "artifacts").symlink_to(target, target_is_directory=True)
     monkeypatch.setattr(isolation, "ROOT", tmp_path)
     monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
     monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
@@ -173,6 +178,8 @@ def test_source_helpers_can_write_private_host_artifacts(
         artifacts = tmp_path / "artifacts"
         assert artifacts.stat().st_mode & 0o777 == 0o700
         assert artifacts.stat().st_uid == (expected_uid if os.getuid() == 0 else os.getuid())
+        (artifacts / "proof.json").write_text("completed")
+    assert (target / "proof.json").read_text() == "completed"
 
 
 def test_docker_desktop_helpers_do_not_use_the_macos_staff_group(

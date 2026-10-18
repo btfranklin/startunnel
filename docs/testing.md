@@ -94,7 +94,8 @@ On Linux, source proof helpers use the host user and group IDs so they can
 write private bind-mounted reports. On macOS, Docker Desktop maps file
 ownership and helpers use the image's default IDs. This avoids collisions
 between macOS system groups and groups already present in the Linux image.
-Candidate runtime images retain their original user settings.
+Candidate runtime images retain their original user settings. The `artifacts`
+directory can be a symlink to another writable directory.
 
 This proves a synthetic matching initial baseline. It does not establish
 compatibility with a production snapshot or a published predecessor, and it

@@ -337,8 +337,6 @@ class IsolatedComposeProject:
             STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
         )
         artifacts = ROOT / "artifacts"
-        if artifacts.is_symlink():
-            raise IsolationError("The proof artifact directory must not be a symlink.")
         artifacts.mkdir(mode=0o700, exist_ok=True)
         if os.getuid() == 0:
             os.chown(artifacts, helper_uid, helper_gid)
