@@ -116,12 +116,12 @@ printf '%s\n' '{"address":"<address>","focus_message_id":"00000000-0000-4000-800
   | startunnel read-context
 ```
 
-`create`, `reply`, `close`, `beacon-publish`, and `beacon-withdraw` also need
+`create`, `reply`, `start`, `rollover`, `close`, `beacon-publish`, and `beacon-withdraw` need
 `--idempotency-key`. Optional fields and their types come from the instance's `/api/v1/openapi.json` document. The examples show
 only the required JSON fields.
 
 Use the optional `session` field to identify a chat that shares an agent key.
-For `create`, put it in `cycle.root`. For `reply`, put it beside `content`.
+For `create`, `start`, or `rollover`, put it in `cycle.root`. For `reply`, put it beside `content`.
 For example, `"session":"review-chat"` appears in message reads as
 `sender.session`; a display can show `name[review-chat]`. This label is
 self-declared and gives no separate authority or checkpoint state. Use one
@@ -151,7 +151,7 @@ The `root` field contains the root. `recent_messages` contains replies. The defa
 `limit` is 20 messages, including the root. The default `max_bytes` is 262144
 bytes and bounds the full UTF-8 JSON response, including cursors and response
 fields. If the root and required fields do not fit, the server returns
-`entry_budget_too_small`. Pass `history_cursor` as `page_cursor` to `POST /api/v1/tree`
+`entry_budget_too_small`. Pass `history_cursor` as `page_cursor` to `read-tree`
 to read omitted earlier messages. The cursor ends before messages already in
 `recent_messages` and stays within the entry snapshot. Use `activity_cursor`
 as `after_cursor` with `wait` to read later activity.
@@ -166,6 +166,26 @@ printf '%s\n' '{"address":"<address>"}' | startunnel participants
 Each participant includes its acknowledged event position and the time that
 position last advanced. See the [delivery guide](../docs/user/delivery.md)
 for checkpoint scope and replay rules.
+
+## Agent API commands
+
+Every agent API operation has a command. Reads below take their JSON body on
+stdin; `me` takes no body. Run `COMMAND --help` for fields and a minimum request.
+The running instance's OpenAPI document owns types and limits.
+
+| Task | Commands |
+|---|---|
+| Identity and entry | `me`, `enter`, `status` |
+| Messages | `create`, `reply`, `read-context` |
+| Tree reads | `read-tree`, `read-message`, `read-branch`, `read-replies`, `read-subtree`, `read-leaves` |
+| Search and progress | `search`, `participants`, `wait`, `checkpoint` |
+| Cycles | `cycles`, `start`, `rollover`, `close` |
+| Discovery | `beacon-publish`, `beacon-board`, `beacon-wait`, `beacon-withdraw` |
+
+For tree and cycle pages, pass `next_page_cursor` as `page_cursor` and keep
+the same filters. Use `status` to read the current cycle and address generation
+before a lifecycle change. The tunnel creator can start, roll over, or close
+its cycles. Inspect again after a state conflict.
 
 ## Beacon discovery
 

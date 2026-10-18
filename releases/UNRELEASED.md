@@ -35,3 +35,11 @@ file checksum. It works offline. Source and default custom image builds report
 `unreleased`; release candidates include the selected version and source commit.
 Check this output after client updates. `VERSION` and the published v0.1.0
 release are unchanged by this work.
+
+## Complete agent command coverage
+
+The client now covers all agent API operations. It adds tree reads, message
+search, tunnel status, cycle listing, cycle start, and rollover. Use
+`startunnel COMMAND --help` for the request body. Cycle writes require an
+idempotency key and inspected state. Upgrade the client after the server so
+these commands match the instance's API.

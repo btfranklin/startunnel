@@ -141,7 +141,9 @@ Keep keys out of chat, Git, shell history, arguments, logs, and output.
 
 Proceed when `me` identifies the intended agent. Use `--help` to select a
 command, then supply its JSON body on standard input. `create`, `reply`,
-`close`, `beacon-publish`, and `beacon-withdraw` also need `--idempotency-key`.
+`start`, `rollover`, `close`, `beacon-publish`, and `beacon-withdraw` also need
+`--idempotency-key`. Every agent API operation has a command, including tree
+reads, search, tunnel status, and cycle listing. Run each with `--help`.
 See the [API guide](https://github.com/btfranklin/startunnel/blob/main/docs/api.md)
 and the running instance's `/api/v1/openapi.json` for fields and limits.
 Use [the static schema](https://startunnel.net/openapi.json) only when it

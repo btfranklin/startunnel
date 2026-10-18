@@ -41,7 +41,11 @@ def _command(
         environment["STARTUNNEL_SENDER_KEY"] = tutorial_keys[0]
         environment["STARTUNNEL_RECEIVER_KEY"] = tutorial_keys[1]
     return subprocess.run(
-        [sys.executable, "-I", str(cli_path), *arguments],
+        (
+            [str(cli_path), *arguments]
+            if cli_path.name == "startunnel"
+            else [sys.executable, "-I", str(cli_path), *arguments]
+        ),
         cwd=cli_path.parent,
         env=environment,
         input=json.dumps(body) if body is not None else None,
@@ -87,7 +91,7 @@ def _run_action(
     )
 
 
-def _prove_six_actions(
+def _prove_tunnel_commands(
     cli_path: Path,
     *,
     base_url: str,
@@ -181,6 +185,30 @@ def _prove_six_actions(
     )
     assert checkpoint["advanced"] is True
 
+    def read(action: str, body: dict[str, Any]) -> dict[str, Any]:
+        return _run_action(cli_path, base_url=base_url, key=receiver_key, action=action, body=body)
+
+    scope = {"address": address, "cycle_id": cycle_id}
+    for action, fields, collection, expected_ids in (
+        ("read-tree", {}, "nodes", [root_id, reply_id]),
+        ("read-branch", {"leaf_id": reply_id}, "messages", [root_id, reply_id]),
+        ("read-replies", {"message_id": root_id}, "messages", [reply_id]),
+        ("read-subtree", {"message_id": root_id}, "nodes", [root_id, reply_id]),
+        ("read-leaves", {}, "leaves", [reply_id]),
+    ):
+        page = read(action, {**scope, **fields})
+        assert [item["id"] for item in page[collection]] == expected_ids
+    exact = read("read-message", {**scope, "message_id": reply_id})
+    assert exact["message"]["id"] == reply_id
+    assert exact["message"]["parent_id"] == root_id
+    found = read("search", {**scope, "query": "complete"})
+    assert [item["message_id"] for item in found["results"]] == [reply_id]
+    status = read("status", {"address": address})
+    assert status["state"] == "active"
+    assert status["current_cycle"]["id"] == cycle_id
+    directory = read("cycles", {"address": address})
+    assert [item["id"] for item in directory["items"]] == [cycle_id]
+
     closed = _run_action(
         cli_path,
         base_url=base_url,
@@ -198,10 +226,71 @@ def _prove_six_actions(
         body=context_body,
     )
     assert [item["message"]["id"] for item in retained["items"]] == [root_id, reply_id]
+
+    next_cycle = _run_action(
+        cli_path,
+        base_url=base_url,
+        key=sender_key,
+        action="start",
+        idempotency_key=f"standalone-start-{uuid4().hex}",
+        body={
+            "address": address,
+            "expected_address_generation": status["address_generation"],
+            "cycle": {
+                "root": {
+                    "content": {"type": "text", "text": "Start the next task."},
+                    "session": "next-work",
+                }
+            },
+        },
+    )["cycle"]
+    assert next_cycle["number"] == 2
+    next_root = read(
+        "read-message",
+        {"address": address, "cycle_id": next_cycle["id"], "message_id": next_cycle["root"]["id"]},
+    )
+    assert next_root["message"]["sender"]["session"] == "next-work"
+    rolled = _run_action(
+        cli_path,
+        base_url=base_url,
+        key=sender_key,
+        action="rollover",
+        idempotency_key=f"standalone-rollover-{uuid4().hex}",
+        body={
+            "address": address,
+            "expected_address_generation": status["address_generation"],
+            "expected_cycle_id": next_cycle["id"],
+            "cycle": {
+                "root": {
+                    "content": {"type": "text", "text": "Continue in a new cycle."},
+                    "session": "continued-work",
+                }
+            },
+        },
+    )["cycle"]
+    assert rolled["number"] == 3
+    rolled_root = read(
+        "read-message",
+        {"address": address, "cycle_id": rolled["id"], "message_id": rolled["root"]["id"]},
+    )
+    assert rolled_root["message"]["sender"]["session"] == "continued-work"
+    directory = read("cycles", {"address": address})
+    states = {item["id"]: item["state"] for item in directory["items"]}
+    assert states == {cycle_id: "closed", next_cycle["id"]: "closed", rolled["id"]: "active"}
+    _run_action(
+        cli_path,
+        base_url=base_url,
+        key=sender_key,
+        action="close",
+        idempotency_key=f"standalone-final-close-{uuid4().hex}",
+        body={"address": address, "expected_cycle_id": rolled["id"]},
+    )
     return address, cycle_id, reply_id
 
 
-def test_downloaded_agent_cli_runs_without_repository_imports(tmp_path: Path) -> None:
+def test_downloaded_agent_cli_runs_without_repository_imports(
+    tmp_path: Path, executable_dir: Path
+) -> None:
     required = {
         "STARTUNNEL_BASE_URL",
         "STARTUNNEL_SENDER_KEY",
@@ -218,6 +307,15 @@ def test_downloaded_agent_cli_runs_without_repository_imports(tmp_path: Path) ->
     assert download.headers["X-Content-Type-Options"] == "nosniff"
     cli_path = tmp_path / "star_tunnel.py"
     cli_path.write_bytes(download.content)
+    installed = _successful_json(
+        _command(
+            cli_path,
+            base_url=base_url,
+            key=None,
+            arguments=["install", "--bin-dir", str(executable_dir / "bin")],
+        )
+    )
+    cli_path = Path(installed["command_path"])
 
     sender_key = os.environ["STARTUNNEL_SENDER_KEY"]
     receiver_key = os.environ["STARTUNNEL_RECEIVER_KEY"]
@@ -242,7 +340,7 @@ def test_downloaded_agent_cli_runs_without_repository_imports(tmp_path: Path) ->
     )
     assert sender["agent"]["id"]
 
-    _prove_six_actions(
+    _prove_tunnel_commands(
         cli_path,
         base_url=base_url,
         sender_key=sender_key,

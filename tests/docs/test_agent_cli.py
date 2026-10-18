@@ -265,6 +265,49 @@ def test_me_uses_get_and_returns_the_native_response() -> None:
 
 
 @pytest.mark.parametrize(
+    ("action", "suffix", "status"),
+    [
+        ("read-tree", "/tree", 200),
+        ("read-message", "/tree/message", 200),
+        ("read-branch", "/tree/branch", 200),
+        ("read-replies", "/tree/replies", 200),
+        ("read-subtree", "/tree/subtree", 200),
+        ("read-leaves", "/tree/leaves", 200),
+        ("search", "/search", 200),
+        ("status", "/tunnel/status", 200),
+        ("cycles", "/cycles", 200),
+        ("start", "/cycles/start", 201),
+        ("rollover", "/cycles/rollover", 201),
+    ],
+)
+def test_complete_agent_commands_preserve_bodies_and_write_headers(
+    action: str, suffix: str, status: int
+) -> None:
+    cli = _load_cli_module()
+    body = cli.AGENT_COMMANDS[action]["example"]
+    arguments = (
+        ["--idempotency-key", "complete-command-001"] if action in {"start", "rollover"} else []
+    )
+    response = {"result": action}
+    with serve(Response(status, response)) as (base_url, scenario):
+        result = run_cli(base_url, action, *arguments, body=body)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == response
+    assert len(scenario.requests) == 1
+    request = scenario.requests[0]
+    assert request["method"] == "POST"
+    assert request["path"] == "/api/v1" + suffix
+    assert request["body"] == body
+    assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
+    if action in {"start", "rollover"}:
+        assert request["headers"]["Idempotency-Key"] == "complete-command-001"
+        assert request["body"]["cycle"]["root"]["session"] == "review"
+    else:
+        assert "Idempotency-Key" not in request["headers"]
+
+
+@pytest.mark.parametrize(
     "base_url",
     [
         "http://localhost:8000?credential=visible-marker",
@@ -631,9 +674,9 @@ def test_client_version_is_offline_and_describes_the_running_file() -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="Executable installation requires Linux or macOS.")
 def test_install_produces_a_standalone_command_and_replaces_an_existing_copy(
-    tmp_path: Path,
+    executable_dir: Path,
 ) -> None:
-    directory = tmp_path / "bin"
+    directory = executable_dir / "bin"
     directory.mkdir()
     command = directory / "startunnel"
     command.write_text("old client", encoding="utf-8")
@@ -657,7 +700,7 @@ def test_install_produces_a_standalone_command_and_replaces_an_existing_copy(
     }
     assert command.read_bytes() == CLI.read_bytes()
     assert command.stat().st_mode & 0o777 == 0o755
-    unrelated = tmp_path / "unrelated"
+    unrelated = executable_dir / "unrelated"
     unrelated.mkdir()
     help_result = subprocess.run(
         ["startunnel", "--help"],
@@ -717,15 +760,15 @@ def test_install_failure_preserves_existing_command_and_removes_temporary_files(
 
 
 def test_installed_command_updates_from_the_selected_instance_without_credentials(
-    tmp_path: Path,
+    executable_dir: Path,
 ) -> None:
-    command = tmp_path / "startunnel"
+    command = executable_dir / "startunnel"
     command.write_bytes(CLI.read_bytes())
     command.chmod(0o755)
     updated = CLI.read_bytes().replace(
         b'USER_AGENT = "startunnel-agent-cli"', b'USER_AGENT = "startunnel-agent-cli-updated"'
     )
-    release_client = tmp_path / "release.py"
+    release_client = executable_dir / "release.py"
     release_client.write_bytes(updated)
     stamp_client(release_client, "v0.1.0", "a" * 40)
     updated = release_client.read_bytes()
@@ -755,7 +798,7 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     assert json.loads(identity.stdout) == {"agent": {"id": "agent-id"}}
     assert command.read_bytes() == updated
     assert command.stat().st_mode & 0o777 == 0o755
-    assert list(tmp_path.iterdir()) == [command]
+    assert list(executable_dir.iterdir()) == [command]
     assert scenario.requests[0]["method"] == "GET"
     assert scenario.requests[0]["path"] == "/downloads/star_tunnel.py"
     assert "Authorization" not in scenario.requests[0]["headers"]
@@ -783,8 +826,10 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     ],
     ids=["http-error", "redirect", "html", "syntax", "truncated", "too-large"],
 )
-def test_failed_update_preserves_the_installed_command(tmp_path: Path, response: Response) -> None:
-    command = tmp_path / "startunnel"
+def test_failed_update_preserves_the_installed_command(
+    executable_dir: Path, response: Response
+) -> None:
+    command = executable_dir / "startunnel"
     original = CLI.read_bytes()
     command.write_bytes(original)
     command.chmod(0o700)
@@ -806,7 +851,7 @@ def test_failed_update_preserves_the_installed_command(tmp_path: Path, response:
     assert "Authorization" not in scenario.requests[0]["headers"]
     assert command.read_bytes() == original
     assert command.stat().st_mode & 0o777 == 0o700
-    assert list(tmp_path.iterdir()) == [command]
+    assert list(executable_dir.iterdir()) == [command]
 
 
 def test_update_write_failure_preserves_the_command(
@@ -853,9 +898,26 @@ def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
     assert set(commands) == {"me", "tutorial", *cli.ROUTES}
     assert commands["me"]["example"] is None
     assert commands["tutorial"]["example"] is None
+    agent_operations = {
+        (method.upper(), path)
+        for path, operations in document["paths"].items()
+        if path.startswith("/api/v1/") and not path.startswith("/api/v1/admin/")
+        for method in operations
+        if method in {"get", "post"}
+    }
+    assert {(method, "/api/v1" + suffix) for method, suffix, _expected in cli.ROUTES.values()} | {
+        ("GET", "/api/v1/me")
+    } == agent_operations
 
     for action, (method, suffix, _expected) in cli.ROUTES.items():
         operation = document["paths"]["/api/v1" + suffix][method.lower()]
+        requires_key = any(
+            parameter["in"] == "header"
+            and parameter["name"] == "Idempotency-Key"
+            and parameter.get("required")
+            for parameter in operation.get("parameters", [])
+        )
+        assert (action in cli.WRITE_COMMANDS) == requires_key
         request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
         resolved = _resolve_schema(request_schema, document)
         properties = resolved["properties"]
@@ -933,25 +995,7 @@ def test_admin_cycle_commands_forward_root_session(
     assert request["headers"]["Idempotency-Key"] == f"start-session-{command}"
 
 
-@pytest.mark.parametrize(
-    "action",
-    [
-        "me",
-        "create",
-        "reply",
-        "wait",
-        "enter",
-        "participants",
-        "read-context",
-        "checkpoint",
-        "close",
-        "beacon-publish",
-        "beacon-withdraw",
-        "beacon-board",
-        "beacon-wait",
-        "tutorial",
-    ],
-)
+@pytest.mark.parametrize("action", tuple(_load_cli_module().AGENT_COMMANDS))
 def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -> None:
     result = subprocess.run(
         [sys.executable, str(CLI), action, "--help"],
@@ -964,7 +1008,7 @@ def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -
     spec = _load_cli_module().AGENT_COMMANDS[action]
     for field_name in (*spec["required"], *spec["optional"]):
         assert field_name in result.stdout
-    if action in {"create", "reply", "close", "beacon-publish", "beacon-withdraw"}:
+    if action in _load_cli_module().WRITE_COMMANDS:
         assert "--idempotency-key" in result.stdout
 
 

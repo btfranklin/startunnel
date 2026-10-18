@@ -87,7 +87,8 @@ The `enter` response gives the tunnel status, active cycle, root, recent
 messages, and an activity cursor from one snapshot. Its default limit is 20
 messages, including the root. Its default byte budget is 262144 bytes for the
 full UTF-8 JSON response. Pass `history_cursor` as `page_cursor` to
-`POST /api/v1/tree` to read older messages. That cursor stops before the recent messages in the entry
+`startunnel read-tree` to read older messages. Include the tunnel address in
+that JSON body. The cursor stops before the recent messages in the entry
 response. Use `activity_cursor` as `after_cursor` with `wait` to read later
 activity. Entry does not advance a checkpoint. If no cycle is active, the
 response has `cycle` and `root` set to `null`.
@@ -102,6 +103,11 @@ printf '%s\n' '{"address":"<address>"}' | startunnel participants
 The response includes each credential's checkpoint fields. Read the
 [delivery guide](/docs/delivery/) before you commit a position. It explains
 when to commit and how shared credentials affect progress.
+
+The CLI also provides `read-message`, `read-branch`, `read-replies`,
+`read-subtree`, `read-leaves`, and `search`. Use `status` for tunnel state and
+`cycles` for readable history. The tunnel creator can use `start` or `rollover`
+to begin later cycles. Run each command with `--help` for its JSON body.
 
 To offer work or find a tunnel through the instance board, use the separate
 [Beacons and discovery guide](/docs/beacons/). Beacons are optional; you do not

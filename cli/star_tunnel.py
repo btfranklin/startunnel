@@ -418,12 +418,32 @@ ROUTES = {
     "enter": ("POST", "/enter", {200}),
     "participants": ("POST", "/participants", {200}),
     "read-context": ("POST", "/context", {200}),
+    "read-tree": ("POST", "/tree", {200}),
+    "read-message": ("POST", "/tree/message", {200}),
+    "read-branch": ("POST", "/tree/branch", {200}),
+    "read-replies": ("POST", "/tree/replies", {200}),
+    "read-subtree": ("POST", "/tree/subtree", {200}),
+    "read-leaves": ("POST", "/tree/leaves", {200}),
+    "search": ("POST", "/search", {200}),
+    "status": ("POST", "/tunnel/status", {200}),
+    "cycles": ("POST", "/cycles", {200}),
+    "start": ("POST", "/cycles/start", {201}),
+    "rollover": ("POST", "/cycles/rollover", {201}),
     "checkpoint": ("POST", "/activity/checkpoint", {200}),
     "close": ("POST", "/cycles/close", {204}),
     "beacon-publish": ("POST", "/beacons", {201}),
     "beacon-withdraw": ("POST", "/beacons/withdraw", {200}),
     "beacon-board": ("POST", "/beacons/board", {200}),
     "beacon-wait": ("POST", "/beacons/wait", {200}),
+}
+WRITE_COMMANDS = {
+    "create",
+    "reply",
+    "close",
+    "start",
+    "rollover",
+    "beacon-publish",
+    "beacon-withdraw",
 }
 
 
@@ -487,6 +507,91 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         "optional": (),
         "example": {"address": "<address>", "cursor": "<activity-cursor>"},
     },
+    "read-tree": {
+        "required": ("address",),
+        "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
+        "example": {"address": "<address>"},
+    },
+    "read-message": {
+        "required": ("address", "message_id"),
+        "optional": ("cycle_id",),
+        "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
+    },
+    "read-branch": {
+        "required": ("address", "leaf_id"),
+        "optional": ("cycle_id",),
+        "example": {"address": "<address>", "leaf_id": "00000000-0000-4000-8000-000000000001"},
+    },
+    "read-replies": {
+        "required": ("address", "message_id"),
+        "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
+        "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
+    },
+    "read-subtree": {
+        "required": ("address", "message_id"),
+        "optional": ("cycle_id", "limit", "max_depth", "page_cursor", "snapshot_cursor"),
+        "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
+    },
+    "read-leaves": {
+        "required": ("address",),
+        "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
+        "example": {"address": "<address>"},
+    },
+    "search": {
+        "required": ("address",),
+        "optional": (
+            "branch_root_id",
+            "correlation_id",
+            "cycle_id",
+            "limit",
+            "mentioned_agent_id",
+            "page_cursor",
+            "query",
+            "sender_id",
+            "sequence_after",
+            "sequence_before",
+        ),
+        "example": {"address": "<address>", "query": "review"},
+    },
+    "status": {
+        "required": ("address",),
+        "optional": (),
+        "example": {"address": "<address>"},
+    },
+    "cycles": {
+        "required": ("address",),
+        "optional": ("limit", "page_cursor"),
+        "example": {"address": "<address>"},
+    },
+    "start": {
+        "required": ("address", "expected_address_generation", "cycle"),
+        "optional": (),
+        "example": {
+            "address": "<address>",
+            "expected_address_generation": 1,
+            "cycle": {
+                "root": {
+                    "content": {"type": "text", "text": "Start the next task."},
+                    "session": "review",
+                }
+            },
+        },
+    },
+    "rollover": {
+        "required": ("address", "expected_address_generation", "cycle", "expected_cycle_id"),
+        "optional": (),
+        "example": {
+            "address": "<address>",
+            "expected_address_generation": 1,
+            "expected_cycle_id": "00000000-0000-4000-8000-000000000003",
+            "cycle": {
+                "root": {
+                    "content": {"type": "text", "text": "Continue with the next task."},
+                    "session": "review",
+                }
+            },
+        },
+    },
     "close": {
         "required": ("address", "expected_cycle_id"),
         "optional": (),
@@ -540,12 +645,13 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
         + (", ".join(spec["optional"]) or "none")
         + ".\n"
     )
-    if action in {"create", "reply", "close", "beacon-publish", "beacon-withdraw"}:
+    if action in WRITE_COMMANDS:
         command.epilog += "This write also requires --idempotency-key.\n"
-    if action in {"create", "reply"}:
+    if action in {"create", "reply", "start", "rollover"}:
         command.epilog += (
             "session is an optional self-declared label of 1 to 32 characters. "
-            "For create, put it inside cycle.root; for reply, put it at the top level.\n"
+            "For create, start, or rollover, put it inside cycle.root; "
+            "for reply, put it at the top level.\n"
         )
     if action.startswith("beacon-"):
         command.epilog += (
@@ -1090,24 +1196,14 @@ def build_parser() -> argparse.ArgumentParser:
     me.formatter_class = argparse.RawDescriptionHelpFormatter
     add_agent_help(me, "me")
 
-    for action in ("create", "reply", "close", "beacon-publish", "beacon-withdraw"):
+    for action in ROUTES:
         command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
         command.formatter_class = argparse.RawDescriptionHelpFormatter
         add_agent_help(command, action)
-        command.add_argument("--idempotency-key", required=True, help="Retry key for this write.")
-
-    for action in (
-        "wait",
-        "enter",
-        "participants",
-        "read-context",
-        "checkpoint",
-        "beacon-board",
-        "beacon-wait",
-    ):
-        command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
-        command.formatter_class = argparse.RawDescriptionHelpFormatter
-        add_agent_help(command, action)
+        if action in WRITE_COMMANDS:
+            command.add_argument(
+                "--idempotency-key", required=True, help="Retry key for this write."
+            )
 
     tutorial = subparsers.add_parser("tutorial", help="Run a complete two-agent tutorial exchange.")
     tutorial.formatter_class = argparse.RawDescriptionHelpFormatter

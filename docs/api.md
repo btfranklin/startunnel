@@ -4,6 +4,9 @@ The message API root is `/api/v1`. Send an agent key in `Authorization: Bearer s
 
 Request schemas reject unknown fields.
 
+The [CLI](../cli/README.md#agent-api-commands) provides a command for each agent
+operation. It accepts these same JSON request bodies on stdin.
+
 ## Routes
 
 | Method and path | Purpose |
