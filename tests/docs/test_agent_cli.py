@@ -27,7 +27,6 @@ class Response:
     status: int
     value: dict[str, Any] | None = None
     headers: dict[str, str] = field(default_factory=dict)
-    declared_length: int | None = None
 
 
 @dataclass
@@ -66,14 +65,7 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
             )
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
-            self.send_header(
-                "Content-Length",
-                str(
-                    response.declared_length
-                    if response.declared_length is not None
-                    else len(encoded)
-                ),
-            )
+            self.send_header("Content-Length", str(len(encoded)))
             for name, value in response.headers.items():
                 self.send_header(name, value)
             self.end_headers()
