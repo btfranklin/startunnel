@@ -159,7 +159,9 @@ critical image vulnerabilities.
 Tool errors appear in the job log. CI uploads reports that were written before
 a failure. A missing report does not make a failed security job pass.
 
-Replace `IMAGE_DIGEST` with the actual official digest reference. The isolated
+For official release promotion, use the official digest reference. Self-hosted
+operators can use an image from their own registry pinned with `@sha256:`.
+Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
 proof helpers, and verify application service image IDs. The system proof covers
 health, agent exchanges, browser flows, runtime database privileges, backup,

@@ -14,9 +14,14 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
+
+if TYPE_CHECKING or __package__:
+    from .start_production import validate_image_reference
+else:
+    from start_production import validate_image_reference
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILES = ("compose.yaml", "compose.test.yaml")
@@ -331,10 +336,11 @@ class IsolatedComposeProject:
         source_environment: Mapping[str, str] | None = None,
         candidate_image: str | None = None,
     ) -> None:
-        if candidate_image and not re.fullmatch(
-            r"ghcr\.io/btfranklin/startunnel@sha256:[0-9a-f]{64}", candidate_image
-        ):
-            raise IsolationError("Candidate image must be an official immutable digest reference.")
+        if candidate_image:
+            try:
+                validate_image_reference(candidate_image, name="Candidate image")
+            except ValueError as error:
+                raise IsolationError(str(error)) from error
         self.candidate_image = candidate_image
         self._candidate_overlay: Path | None = None
         self.project_name = validate_project_name(project_name)

@@ -15,6 +15,7 @@ from scripts import release_candidate as candidate
 from scripts import release_draft as draft
 
 IMAGE = "ghcr.io/btfranklin/startunnel@sha256:" + "a" * 64
+CUSTOM_IMAGE = "registry.example:5000/team/startunnel@sha256:" + "a" * 64
 COMMIT = "b" * 40
 IMAGE_ID = "sha256:" + "c" * 64
 
@@ -160,15 +161,17 @@ def test_draft_recovery_cannot_change_deployed_image() -> None:
 
 @pytest.mark.parametrize("image", ["ghcr.io/btfranklin/startunnel:v0.1.0", "startunnel:local"])
 def test_candidate_rejects_unpinned_images(image: str) -> None:
-    with pytest.raises(isolation.IsolationError, match="immutable"):
+    with pytest.raises(isolation.IsolationError, match="pinned"):
         isolation.IsolatedComposeProject("sttest-candidate-fixture", candidate_image=image)
 
 
 @pytest.mark.skipif(
     shutil.which("docker") is None, reason="Compose rendering is checked on the host."
 )
+@pytest.mark.parametrize("image", [IMAGE, CUSTOM_IMAGE])
 def test_candidate_overlay_cannot_rebuild_runtime_and_survives_backup_configuration(
     monkeypatch: pytest.MonkeyPatch,
+    image: str,
 ) -> None:
     monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
     monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
@@ -176,7 +179,7 @@ def test_candidate_overlay_cannot_rebuild_runtime_and_survives_backup_configurat
     monkeypatch.setattr(isolation.IsolatedComposeProject, "cleanup", lambda self: None)
     with isolation.IsolatedComposeProject(
         "sttest-candidate-fixture",
-        candidate_image=IMAGE,
+        candidate_image=image,
         source_environment={"PATH": os.environ["PATH"]},
     ) as stack:
         result = subprocess.run(
@@ -190,7 +193,7 @@ def test_candidate_overlay_cannot_rebuild_runtime_and_survives_backup_configurat
         model = json.loads(result.stdout)
         for service in ("web", "migrate", "maintenance"):
             assert "build" not in model["services"][service]
-            assert model["services"][service]["image"] == IMAGE
+            assert model["services"][service]["image"] == image
         assert len(stack.compose_files()) == 3
         assert (
             model["services"]["web"]["environment"]["DJANGO_SETTINGS_MODULE"]
@@ -198,14 +201,16 @@ def test_candidate_overlay_cannot_rebuild_runtime_and_survives_backup_configurat
         )
 
 
+@pytest.mark.parametrize("image", [IMAGE, CUSTOM_IMAGE])
 @pytest.mark.parametrize("service", ["web", "migrate", "maintenance"])
 def test_runtime_identity_rejects_a_different_service_image(
     monkeypatch: pytest.MonkeyPatch,
     service: str,
+    image: str,
 ) -> None:
     stack = isolation.IsolatedComposeProject(
         "sttest-candidate-identity",
-        candidate_image=IMAGE,
+        candidate_image=image,
         source_environment={},
     )
     monkeypatch.setattr(stack, "capture", lambda step, *args: args[-1])
@@ -218,12 +223,14 @@ def test_runtime_identity_rejects_a_different_service_image(
         stack.verify_candidate_services()
 
 
+@pytest.mark.parametrize("image", [IMAGE, CUSTOM_IMAGE])
 def test_candidate_pull_rejects_wrong_source_before_services_start(
     monkeypatch: pytest.MonkeyPatch,
+    image: str,
 ) -> None:
     stack = isolation.IsolatedComposeProject(
         "sttest-candidate-revision",
-        candidate_image=IMAGE,
+        candidate_image=image,
         source_environment={},
     )
     monkeypatch.setattr(
