@@ -400,13 +400,16 @@ def test_cli_refuses_redirects_and_does_not_send_a_second_request() -> None:
     assert "visible-marker" not in result.stderr
 
 
-def test_cli_rejects_a_declared_oversized_response() -> None:
-    with serve(Response(200, declared_length=2 * 1024 * 1024 + 1)) as (base_url, _scenario):
-        result = run_cli(base_url, "me")
+def test_cli_reads_a_large_tree_page() -> None:
+    response = {"nodes": [{"content": {"type": "text", "text": "x" * 65536}} for _ in range(33)]}
+    assert len(json.dumps(response).encode()) > 2 * 1024 * 1024
+    with serve(Response(200, response)) as (base_url, _scenario):
+        transport = _load_cli_module().StarTunnelTransport(base_url, "st_test-agent-key")
+        result = transport.request(
+            "POST", "/api/v1/tree", body={"address": "glyphs", "limit": 100}, expected={200}
+        )
 
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert json.loads(result.stderr)["error"]["code"] == "response_too_large"
+    assert result == response
 
 
 def test_tutorial_runs_the_complete_exchange_with_separate_credentials() -> None:

@@ -27,7 +27,6 @@ from urllib.parse import SplitResult, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 MAX_INPUT_BYTES = 2 * 1024 * 1024
-MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
 
@@ -43,7 +42,6 @@ SAFE_ERROR_MESSAGES = {
     "invalid_input": "Provide one JSON object through standard input.",
     "invalid_request": "The request is not valid.",
     "invalid_response": "The service returned an unexpected response.",
-    "response_too_large": "The service response is too large.",
     "usage_error": "The command arguments are not valid. Run --help for usage.",
 }
 PUBLIC_ERROR_CODES = {
@@ -183,34 +181,33 @@ def _safe_server_error(error: HTTPError) -> CliError:
     message = None
     field_errors = None
     try:
-        raw = error.read(MAX_RESPONSE_BYTES + 1)
-        if len(raw) <= MAX_RESPONSE_BYTES:
-            value = json.loads(raw.decode("utf-8"))
-            envelope = value.get("error") if isinstance(value, dict) else None
-            if isinstance(envelope, dict):
-                candidate_code = envelope.get("code")
-                candidate_request_id = envelope.get("request_id")
-                if isinstance(candidate_code, str) and candidate_code in PUBLIC_ERROR_CODES:
-                    code = candidate_code
-                    candidate_message = envelope.get("message")
-                    if isinstance(candidate_message, str):
-                        message = candidate_message
-                    candidate_field_errors = envelope.get("field_errors")
-                    if isinstance(candidate_field_errors, list) and all(
-                        isinstance(item, dict)
-                        and isinstance(item.get("field"), str)
-                        and isinstance(item.get("message"), str)
+        raw = error.read()
+        value = json.loads(raw.decode("utf-8"))
+        envelope = value.get("error") if isinstance(value, dict) else None
+        if isinstance(envelope, dict):
+            candidate_code = envelope.get("code")
+            candidate_request_id = envelope.get("request_id")
+            if isinstance(candidate_code, str) and candidate_code in PUBLIC_ERROR_CODES:
+                code = candidate_code
+                candidate_message = envelope.get("message")
+                if isinstance(candidate_message, str):
+                    message = candidate_message
+                candidate_field_errors = envelope.get("field_errors")
+                if isinstance(candidate_field_errors, list) and all(
+                    isinstance(item, dict)
+                    and isinstance(item.get("field"), str)
+                    and isinstance(item.get("message"), str)
+                    for item in candidate_field_errors
+                ):
+                    field_errors = [
+                        {"field": item["field"], "message": item["message"]}
                         for item in candidate_field_errors
-                    ):
-                        field_errors = [
-                            {"field": item["field"], "message": item["message"]}
-                            for item in candidate_field_errors
-                        ]
-                if isinstance(candidate_request_id, str):
-                    try:
-                        request_id = str(uuid.UUID(candidate_request_id))
-                    except ValueError:
-                        request_id = None
+                    ]
+            if isinstance(candidate_request_id, str):
+                try:
+                    request_id = str(uuid.UUID(candidate_request_id))
+                except ValueError:
+                    request_id = None
     except OSError:
         pass
     except UnicodeDecodeError:
@@ -311,22 +308,13 @@ class StarTunnelTransport:
                     raise CliError("http_error", status=response.status)
                 if response.status == 204:
                     return {}
-                length = response.headers.get("Content-Length")
-                if length is not None:
-                    try:
-                        if int(length) > MAX_RESPONSE_BYTES:
-                            raise CliError("response_too_large", status=response.status)
-                    except ValueError:
-                        pass
-                raw = response.read(MAX_RESPONSE_BYTES + 1)
+                raw = response.read()
         except HTTPError as error:
             raise _safe_server_error(error) from error
         except (URLError, OSError, TimeoutError, HTTPException) as error:
             raise CliError("connection_failed") from error
         except (UnicodeError, ValueError) as error:
             raise CliError("configuration_error") from error
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise CliError("response_too_large", status=response.status)
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
