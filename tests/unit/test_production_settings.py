@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _environment() -> dict[str, str]:
     environment = os.environ.copy()
+    environment.pop("STARTUNNEL_SECURE_SSL_REDIRECT", None)
     environment.update(
         {
             "PYTHONPATH": str(ROOT / "src"),
@@ -25,7 +26,6 @@ def _environment() -> dict[str, str]:
             "STARTUNNEL_ALLOWED_HOSTS": "test.startunnel.test",
             "STARTUNNEL_CSRF_TRUSTED_ORIGINS": "https://test.startunnel.test",
             "STARTUNNEL_BASE_URL": "https://test.startunnel.test",
-            "STARTUNNEL_SECURE_SSL_REDIRECT": "true",
         }
     )
     return environment
@@ -51,9 +51,10 @@ def test_production_rejects_invalid_boolean_settings(name: str) -> None:
     assert f"{name} must be true or false." in result.stderr
 
 
-def test_production_accepts_explicit_true_and_false_boolean_settings() -> None:
+@pytest.mark.parametrize("value", ["true", "false"])
+def test_production_accepts_explicit_true_and_false_boolean_settings(value: str) -> None:
     environment = _environment()
-    environment["STARTUNNEL_SECURE_SSL_REDIRECT"] = "false"
+    environment["STARTUNNEL_SECURE_SSL_REDIRECT"] = value
     result = _import_production(environment)
     assert result.returncode == 0, result.stderr
 
@@ -111,12 +112,71 @@ def test_production_keeps_the_configured_postgresql_pool() -> None:
         "https://other.startunnel.test",
     ],
 )
-def test_production_requires_one_allowed_public_https_origin(base_url: str) -> None:
+def test_production_requires_one_allowed_public_origin(base_url: str) -> None:
     environment = _environment()
     environment["STARTUNNEL_BASE_URL"] = base_url
     result = _import_production(environment)
     assert result.returncode != 0
     assert "STARTUNNEL_BASE_URL" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("base_url", "trusted_origin", "canonical_url"),
+    [
+        ("http://web:8000", "http://web:8000", "http://web:8000"),
+        ("http://192.168.1.20:8000", "http://192.168.1.20:8000", "http://192.168.1.20:8000"),
+        ("http://10.8.0.5", "http://10.8.0.5", "http://10.8.0.5"),
+        ("http://10.8.0.5:8080/", "http://10.8.0.5:8080/", "http://10.8.0.5:8080"),
+    ],
+)
+def test_production_http_origin_disables_https_only_settings(
+    base_url: str, trusted_origin: str, canonical_url: str
+) -> None:
+    environment = _environment()
+    environment["STARTUNNEL_ALLOWED_HOSTS"] = base_url.split("//", 1)[1].split(":", 1)[0]
+    environment["STARTUNNEL_BASE_URL"] = base_url
+    environment["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] = trusted_origin
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from startunnel.settings.production import *; "
+            "assert STARTUNNEL_BASE_URL == " + repr(canonical_url) + "; "
+            "assert SECURE_SSL_REDIRECT is False; "
+            "assert SESSION_COOKIE_SECURE is False; "
+            "assert CSRF_COOKIE_SECURE is False; "
+            "assert SECURE_HSTS_SECONDS == 0; "
+            "assert SECURE_HSTS_INCLUDE_SUBDOMAINS is False; "
+            "assert SECURE_HSTS_PRELOAD is False",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_production_https_defaults_to_secure_settings() -> None:
+    environment = _environment()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from startunnel.settings.production import *; "
+            "assert SECURE_SSL_REDIRECT is True; "
+            "assert SESSION_COOKIE_SECURE is True; "
+            "assert CSRF_COOKIE_SECURE is True; "
+            "assert SECURE_HSTS_SECONDS == 31536000",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_production_requires_public_origin_in_csrf_trust() -> None:

@@ -59,7 +59,7 @@ In `production.env`, set `STARTUNNEL_DOMAIN` to the bare public IPv4 address,
 without a scheme or path. Despite its name, the production Compose file uses
 this value for the allowed host, HTTPS origin, base URL, and Caddy site address.
 Use `https://PUBLIC_IPV4` as the instance URL throughout installation and client
-setup. Do not disable certificate checks or use plain HTTP for team credentials.
+setup. This public IPv4 setup uses HTTPS. An operator can select HTTP for a trusted container, VPN, or private network.
 
 ## Verify and maintain
 

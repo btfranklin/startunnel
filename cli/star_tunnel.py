@@ -9,7 +9,6 @@ JSON result to standard output.
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import math
 import os
@@ -99,15 +98,6 @@ class NoRedirectHandler(HTTPRedirectHandler):
         return None
 
 
-def _is_loopback(hostname: str) -> bool:
-    if hostname.lower() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(hostname).is_loopback
-    except ValueError:
-        return False
-
-
 def validate_base_url(value: str) -> str:
     """Return a safe origin URL for authenticated API requests."""
 
@@ -132,8 +122,6 @@ def validate_base_url(value: str) -> str:
         or parsed.fragment
         or parsed.path not in {"", "/"}
     ):
-        raise CliError("configuration_error")
-    if parsed.scheme == "http" and not _is_loopback(hostname):
         raise CliError("configuration_error")
     if port is not None and not 1 <= port <= 65535:
         raise CliError("configuration_error")

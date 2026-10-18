@@ -236,7 +236,6 @@ def test_me_uses_get_and_returns_the_native_response() -> None:
 @pytest.mark.parametrize(
     "base_url",
     [
-        "http://example.test",
         "http://localhost:8000?credential=visible-marker",
         "http://user:visible-marker@localhost:8000",
         "http://localhost:8000/#visible-marker",
@@ -251,6 +250,18 @@ def test_cli_rejects_unsafe_base_urls_without_exposing_them(base_url: str) -> No
     assert json.loads(result.stderr)["error"]["code"] == "configuration_error"
     assert "visible-marker" not in result.stderr
     assert "st_test-agent-key" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://web:8000",
+        "http://192.168.1.20:8000",
+        "http://10.8.0.5:8080",
+    ],
+)
+def test_cli_accepts_http_origins_for_private_networks(base_url: str) -> None:
+    assert _load_cli_module().validate_base_url(base_url) == base_url
 
 
 def test_api_error_keeps_authored_message_and_discards_unknown_fields() -> None:
@@ -538,7 +549,6 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
         "contextlib",
         "dataclasses",
         "email",
-        "ipaddress",
         "http",
         "json",
         "math",

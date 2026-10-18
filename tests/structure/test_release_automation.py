@@ -129,6 +129,52 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
     assert os.access(ROOT / "docker/app/maintenance-healthcheck.sh", os.X_OK)
 
 
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("http://startunnel.internal:8000", "http://startunnel.internal:8000"),
+        (None, "https://startunnel.example.test"),
+    ],
+)
+def test_production_compose_uses_operator_origin_or_https_default(
+    base_url: str | None, expected: str
+) -> None:
+    environment = os.environ.copy()
+    environment.update(
+        STARTUNNEL_DOMAIN="startunnel.example.test",
+        STARTUNNEL_APP_IMAGE="startunnel:test",
+    )
+    environment.pop("STARTUNNEL_BASE_URL", None)
+    if base_url is not None:
+        environment["STARTUNNEL_BASE_URL"] = base_url
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "-f",
+            "compose.yaml",
+            "-f",
+            "compose.prod.yaml",
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for name in ("migrate", "web", "maintenance"):
+        assert services[name]["environment"]["STARTUNNEL_BASE_URL"] == expected
+        assert services[name]["environment"]["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] == expected
+
+
 def test_system_health_probe_outlasts_database_pool_acquisition() -> None:
     proof = system_proof._web_health_script(503)
 

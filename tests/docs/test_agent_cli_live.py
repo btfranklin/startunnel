@@ -6,13 +6,8 @@ import json
 import os
 import subprocess
 import sys
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
 from uuid import uuid4
 
 import httpx
@@ -24,68 +19,6 @@ pytestmark = pytest.mark.skipif(
     not ENABLED,
     reason="Set STARTUNNEL_STANDALONE_E2E=1 in the isolated examples lane.",
 )
-
-
-class _QuietProxy(ThreadingHTTPServer):
-    daemon_threads = True
-
-
-@contextmanager
-def _loopback_proxy(target_base_url: str) -> Iterator[str]:
-    """Forward loopback HTTP without logging credentials or private request data."""
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self._forward()
-
-        def do_POST(self) -> None:
-            self._forward()
-
-        def _forward(self) -> None:
-            length = int(self.headers.get("Content-Length", "0"))
-            content = self.rfile.read(length) if length else None
-            headers = {
-                name: value
-                for name in ("Accept", "Authorization", "Content-Type", "Idempotency-Key")
-                if (value := self.headers.get(name)) is not None
-            }
-            try:
-                response = httpx.request(
-                    self.command,
-                    urljoin(target_base_url.rstrip("/") + "/", self.path.lstrip("/")),
-                    content=content,
-                    headers=headers,
-                    timeout=30,
-                )
-            except httpx.HTTPError:
-                self.send_error(502)
-                return
-            self.send_response(response.status_code)
-            for name, value in response.headers.items():
-                if name.lower() not in {
-                    "connection",
-                    "content-encoding",
-                    "content-length",
-                    "transfer-encoding",
-                }:
-                    self.send_header(name, value)
-            self.send_header("Content-Length", str(len(response.content)))
-            self.end_headers()
-            self.wfile.write(response.content)
-
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = _QuietProxy(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        port = server.server_address[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 def _command(
@@ -278,40 +211,40 @@ def test_downloaded_agent_cli_runs_without_repository_imports(tmp_path: Path) ->
     assert not missing, "Missing standalone CLI setting names: " + ", ".join(missing)
 
     target_base_url = os.environ["STARTUNNEL_BASE_URL"]
-    with _loopback_proxy(target_base_url) as loopback_url:
-        download = httpx.get(f"{loopback_url}/downloads/star_tunnel.py", timeout=30)
-        assert download.status_code == 200
-        assert "attachment" in download.headers["Content-Disposition"]
-        assert download.headers["X-Content-Type-Options"] == "nosniff"
-        cli_path = tmp_path / "star_tunnel.py"
-        cli_path.write_bytes(download.content)
+    base_url = target_base_url.rstrip("/")
+    download = httpx.get(f"{base_url}/downloads/star_tunnel.py", timeout=30)
+    assert download.status_code == 200
+    assert "attachment" in download.headers["Content-Disposition"]
+    assert download.headers["X-Content-Type-Options"] == "nosniff"
+    cli_path = tmp_path / "star_tunnel.py"
+    cli_path.write_bytes(download.content)
 
-        sender_key = os.environ["STARTUNNEL_SENDER_KEY"]
-        receiver_key = os.environ["STARTUNNEL_RECEIVER_KEY"]
-        tutorial = _successful_json(
-            _command(
-                cli_path,
-                base_url=loopback_url,
-                key=None,
-                arguments=["tutorial"],
-                tutorial_keys=(sender_key, receiver_key),
-            )
-        )
-        assert tutorial["status"] == "complete"
-
-        sender = _successful_json(
-            _command(
-                cli_path,
-                base_url=loopback_url,
-                key=sender_key,
-                arguments=["me"],
-            )
-        )
-        assert sender["agent"]["id"]
-
-        _prove_six_actions(
+    sender_key = os.environ["STARTUNNEL_SENDER_KEY"]
+    receiver_key = os.environ["STARTUNNEL_RECEIVER_KEY"]
+    tutorial = _successful_json(
+        _command(
             cli_path,
-            base_url=loopback_url,
-            sender_key=sender_key,
-            receiver_key=receiver_key,
+            base_url=base_url,
+            key=None,
+            arguments=["tutorial"],
+            tutorial_keys=(sender_key, receiver_key),
         )
+    )
+    assert tutorial["status"] == "complete"
+
+    sender = _successful_json(
+        _command(
+            cli_path,
+            base_url=base_url,
+            key=sender_key,
+            arguments=["me"],
+        )
+    )
+    assert sender["agent"]["id"]
+
+    _prove_six_actions(
+        cli_path,
+        base_url=base_url,
+        sender_key=sender_key,
+        receiver_key=receiver_key,
+    )

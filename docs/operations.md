@@ -162,11 +162,19 @@ or build a custom image. See [Release policy](releases.md) for publication and c
 `STARTUNNEL_APP_IMAGE` selects the reviewed image with an `@sha256:` digest;
 `STARTUNNEL_DOMAIN` selects the public hostname. The production launcher checks
 the secret files and every enabled image, then starts without a host build.
+`STARTUNNEL_BASE_URL` selects the instance origin and transport for the
+`migrate`, `web`, and `maintenance` services. If it is unset, Compose uses
+`https://` with `STARTUNNEL_DOMAIN`. The included Caddy edge keeps its HTTPS
+default. For HTTP on a trusted container, VPN, or private network, set
+`STARTUNNEL_BASE_URL` to that origin and configure its private route and port.
+The HTTP or HTTPS scheme sets the default redirect, secure-cookie, and HSTS
+settings. The same origin must appear in `STARTUNNEL_CSRF_TRUSTED_ORIGINS`.
 
 The `--edge` option enables the included Caddy TLS service. The four setup
-guides use it. A deployment without that profile needs its own TLS reverse
-proxy and private route to the web container; that is a custom integration.
-Both forms need DNS, encrypted storage, and a backup destination.
+guides use it. Without that profile, configure an external TLS proxy for an
+HTTPS origin or a private route for an HTTP origin. Set the origin port to
+match the selected proxy or container route. Public HTTPS needs DNS, encrypted
+storage, and a backup destination.
 The launcher uses loaded `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, and
 `COMPOSE_PROFILES` values. If `COMPOSE_FILE` is unset, it uses `compose.yaml`
 and `compose.prod.yaml`. The upgrade helper uses the same selected Compose

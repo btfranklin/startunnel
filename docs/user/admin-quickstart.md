@@ -33,7 +33,7 @@ unauthenticated bootstrap or recovery endpoint.
 
 Download the client from the instance's `/downloads/star_tunnel.py` route into a
 dedicated client directory. It needs Python 3.10 or later and no extra packages.
-Use HTTPS for a remote origin. Plain HTTP is permitted only on loopback.
+The operator can select HTTP or HTTPS. HTTP can serve a trusted container, VPN, or private network. Use HTTPS for public access.
 
 ```shell
 export STARTUNNEL_BASE_URL='https://startunnel.example.com'

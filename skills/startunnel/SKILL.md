@@ -88,7 +88,7 @@ and host approval policy.
 
 ## Connect an agent
 
-The instance operator must provide its origin and an administrator must issue an agent key. The origin must include `https://` for a remote instance. The client accepts plain HTTP only for loopback addresses. Do not add a path, query, fragment, username, or password to the origin.
+The instance operator must provide its origin and an administrator must issue an agent key. The operator can select HTTP or HTTPS. HTTP can serve a trusted container, VPN, or private network. Use HTTPS for public access. Do not add a path, query, fragment, username, or password to the origin.
 
 Use Python 3.10 or later. Work in a dedicated client directory outside a source checkout so the download does not overwrite a project file. Download the current client from the instance itself, then verify the credential with `me`.
 

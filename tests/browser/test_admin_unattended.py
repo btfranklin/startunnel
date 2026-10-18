@@ -18,7 +18,6 @@ from tests.browser.test_browser_experience import (  # noqa: F401
     _download_key,
     browser,
 )
-from tests.docs.test_agent_cli_live import _loopback_proxy
 
 ROOT = Path(__file__).resolve().parents[2]
 ENABLED = os.getenv("STARTUNNEL_BROWSER_TESTS") == "1"
@@ -114,182 +113,179 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
     )
     assert created.returncode == 0, created.stderr
     assert bootstrap_file.stat().st_mode & 0o777 == 0o600
-    target_url = os.getenv("STARTUNNEL_BASE_URL", "http://web:8000")
-    with _loopback_proxy(target_url) as base_url:
-        download = httpx.get(base_url + "/downloads/star_tunnel.py", timeout=30)
-        assert download.status_code == 200
-        cli_path = tmp_path / "star_tunnel.py"
-        cli_path.write_bytes(download.content)
-        client = UnattendedClient(cli_path, base_url, bootstrap_file)
-        identity = client.command("admin", "me")
-        admin_id = identity["admin"]["id"]
-        old_key_id = identity["credential_id"]
-        assert identity["admin"]["browser_access"] is False
-        assert identity["authority"] == "instance_admin"
-        assert client.command("admin", "doctor")["healthy"] is True
-        assert "keys.create" in client.command("admin", "capabilities")["operations"]
+    base_url = os.getenv("STARTUNNEL_BASE_URL", "http://web:8000").rstrip("/")
+    download = httpx.get(base_url + "/downloads/star_tunnel.py", timeout=30)
+    assert download.status_code == 200
+    cli_path = tmp_path / "star_tunnel.py"
+    cli_path.write_bytes(download.content)
+    client = UnattendedClient(cli_path, base_url, bootstrap_file)
+    identity = client.command("admin", "me")
+    admin_id = identity["admin"]["id"]
+    old_key_id = identity["credential_id"]
+    assert identity["admin"]["browser_access"] is False
+    assert identity["authority"] == "instance_admin"
+    assert client.command("admin", "doctor")["healthy"] is True
+    assert "keys.create" in client.command("admin", "capabilities")["operations"]
 
-        second_file = tmp_path / "second-admin.key"
-        second = client.mutation(
-            "accounts",
-            "create",
-            {
-                "username": "second_" + uuid4().hex[:20],
-                "key_name": "initial",
-            },
-            secret_output=second_file,
-        )
-        assert second["browser_access"] is False
-        assert (
-            client.command("admin", "me", admin_key_file=second_file)["admin"]["id"] == second["id"]
-        )
-        password_account = client.mutation(
-            "accounts",
-            "create",
-            {
-                "username": "password_" + uuid4().hex[:20],
-                "password": "Valid-password-7291!",
-            },
-        )
-        assert password_account["browser_access"] is True
-        assert client.command("admin", "accounts", "get", second["id"])["active"] is True
+    second_file = tmp_path / "second-admin.key"
+    second = client.mutation(
+        "accounts",
+        "create",
+        {
+            "username": "second_" + uuid4().hex[:20],
+            "key_name": "initial",
+        },
+        secret_output=second_file,
+    )
+    assert second["browser_access"] is False
+    assert client.command("admin", "me", admin_key_file=second_file)["admin"]["id"] == second["id"]
+    password_account = client.mutation(
+        "accounts",
+        "create",
+        {
+            "username": "password_" + uuid4().hex[:20],
+            "password": "Valid-password-7291!",
+        },
+    )
+    assert password_account["browser_access"] is True
+    assert client.command("admin", "accounts", "get", second["id"])["active"] is True
 
-        agent_file = tmp_path / "worker.key"
-        agent = client.mutation(
-            "agents", "create", {"name": "Unattended worker"}, secret_output=agent_file
-        )
-        assert client.command("me", agent_key_file=agent_file)["agent"]["id"] == agent["id"]
-        created_tunnel = client.command(
-            "create",
-            "--idempotency-key",
-            uuid4().hex,
-            agent_key_file=agent_file,
-            body={
-                "label": "Unattended administration proof",
-                "cycle": {"root": {"content": {"type": "text", "text": "Review this note."}}},
-            },
-        )
-        tunnel_id = created_tunnel["tunnel"]["id"]
-        address = created_tunnel["tunnel"]["address"]
-        cycle_id = created_tunnel["cycle"]["id"]
-        root_id = created_tunnel["cycle"]["root"]["id"]
-        reply = client.command(
-            "reply",
-            "--idempotency-key",
-            uuid4().hex,
-            agent_key_file=agent_file,
-            body={
-                "address": address,
-                "parent_id": root_id,
-                "content": {"type": "text", "text": "The note is reviewed."},
-            },
-        )
-        context = client.command(
-            "read-context",
-            agent_key_file=agent_file,
-            body={
-                "address": address,
-                "cycle_id": cycle_id,
-                "focus_message_id": reply["message"]["id"],
-                "max_items": 10,
-                "max_bytes": 32768,
-            },
-        )
-        assert {root_id, reply["message"]["id"]}.issubset(
-            {item["message"]["id"] for item in context["items"]}
-        )
-        tunnel = client.command("admin", "tunnels", "get", tunnel_id)
-        generation = tunnel["address_generation"]
-        client.mutation(
-            "tunnels",
-            "close",
-            {
-                "tunnel_id": tunnel_id,
-                "expected_cycle_id": cycle_id,
-            },
-        )
-        started = client.mutation(
-            "tunnels",
-            "start",
-            {
-                "tunnel_id": tunnel_id,
-                "expected_address_generation": generation,
-                "root_content": {"type": "text", "text": "Start the next review."},
-            },
-        )
-        rolled = client.mutation(
-            "tunnels",
-            "rollover",
-            {
-                "tunnel_id": tunnel_id,
-                "expected_cycle_id": started["active_cycle_id"],
-                "expected_address_generation": generation,
-                "root_content": {"type": "text", "text": "Start the final review."},
-            },
-        )
-        assert rolled["active_cycle_id"] != started["active_cycle_id"]
-        cycles = client.command("admin", "tunnels", "cycles", tunnel_id)
-        assert len(cycles["items"]) == 3
-        rotated = client.mutation(
-            "tunnels",
-            "rotate",
-            {
-                "tunnel_id": tunnel_id,
-                "expected_address_generation": generation,
-            },
-        )
-        assert rotated["address_generation"] == generation + 1
-        rotated_address = rotated["address"]
-        assert rotated_address
-        inspected = client.command("admin", "tunnels", "get", tunnel_id)
-        assert rotated_address == inspected["address"]
-        retired = client.mutation(
-            "tunnels",
-            "retire",
-            {
-                "tunnel_id": tunnel_id,
-                "expected_address_generation": generation + 1,
-                "confirmation": inspected["retirement_confirmation"],
-            },
-        )
-        assert retired["state"] == "retired"
+    agent_file = tmp_path / "worker.key"
+    agent = client.mutation(
+        "agents", "create", {"name": "Unattended worker"}, secret_output=agent_file
+    )
+    assert client.command("me", agent_key_file=agent_file)["agent"]["id"] == agent["id"]
+    created_tunnel = client.command(
+        "create",
+        "--idempotency-key",
+        uuid4().hex,
+        agent_key_file=agent_file,
+        body={
+            "label": "Unattended administration proof",
+            "cycle": {"root": {"content": {"type": "text", "text": "Review this note."}}},
+        },
+    )
+    tunnel_id = created_tunnel["tunnel"]["id"]
+    address = created_tunnel["tunnel"]["address"]
+    cycle_id = created_tunnel["cycle"]["id"]
+    root_id = created_tunnel["cycle"]["root"]["id"]
+    reply = client.command(
+        "reply",
+        "--idempotency-key",
+        uuid4().hex,
+        agent_key_file=agent_file,
+        body={
+            "address": address,
+            "parent_id": root_id,
+            "content": {"type": "text", "text": "The note is reviewed."},
+        },
+    )
+    context = client.command(
+        "read-context",
+        agent_key_file=agent_file,
+        body={
+            "address": address,
+            "cycle_id": cycle_id,
+            "focus_message_id": reply["message"]["id"],
+            "max_items": 10,
+            "max_bytes": 32768,
+        },
+    )
+    assert {root_id, reply["message"]["id"]}.issubset(
+        {item["message"]["id"] for item in context["items"]}
+    )
+    tunnel = client.command("admin", "tunnels", "get", tunnel_id)
+    generation = tunnel["address_generation"]
+    client.mutation(
+        "tunnels",
+        "close",
+        {
+            "tunnel_id": tunnel_id,
+            "expected_cycle_id": cycle_id,
+        },
+    )
+    started = client.mutation(
+        "tunnels",
+        "start",
+        {
+            "tunnel_id": tunnel_id,
+            "expected_address_generation": generation,
+            "root_content": {"type": "text", "text": "Start the next review."},
+        },
+    )
+    rolled = client.mutation(
+        "tunnels",
+        "rollover",
+        {
+            "tunnel_id": tunnel_id,
+            "expected_cycle_id": started["active_cycle_id"],
+            "expected_address_generation": generation,
+            "root_content": {"type": "text", "text": "Start the final review."},
+        },
+    )
+    assert rolled["active_cycle_id"] != started["active_cycle_id"]
+    cycles = client.command("admin", "tunnels", "cycles", tunnel_id)
+    assert len(cycles["items"]) == 3
+    rotated = client.mutation(
+        "tunnels",
+        "rotate",
+        {
+            "tunnel_id": tunnel_id,
+            "expected_address_generation": generation,
+        },
+    )
+    assert rotated["address_generation"] == generation + 1
+    rotated_address = rotated["address"]
+    assert rotated_address
+    inspected = client.command("admin", "tunnels", "get", tunnel_id)
+    assert rotated_address == inspected["address"]
+    retired = client.mutation(
+        "tunnels",
+        "retire",
+        {
+            "tunnel_id": tunnel_id,
+            "expected_address_generation": generation + 1,
+            "confirmation": inspected["retirement_confirmation"],
+        },
+    )
+    assert retired["state"] == "retired"
 
-        replacement_file = tmp_path / "replacement.key"
-        replacement = client.mutation(
-            "keys",
-            "create",
-            {
-                "admin_id": admin_id,
-                "name": "replacement",
-            },
-            secret_output=replacement_file,
-        )
-        client.admin_key_file = replacement_file
-        assert client.command("admin", "me")["credential_id"] == replacement["id"]
-        revoked = client.mutation("keys", "revoke", {"key_id": old_key_id})
-        assert revoked["available"] is False
-        rejected = client.command("admin", "me", admin_key_file=bootstrap_file, success=False)
-        assert rejected["error"]["status"] == 401
-        agent_revoked = client.mutation("agents", "revoke", {"credential_id": agent["id"]})
-        assert agent_revoked["available"] is False
-        rejected_agent = client.command("me", agent_key_file=agent_file, success=False)
-        assert rejected_agent["error"]["status"] == 401
+    replacement_file = tmp_path / "replacement.key"
+    replacement = client.mutation(
+        "keys",
+        "create",
+        {
+            "admin_id": admin_id,
+            "name": "replacement",
+        },
+        secret_output=replacement_file,
+    )
+    client.admin_key_file = replacement_file
+    assert client.command("admin", "me")["credential_id"] == replacement["id"]
+    revoked = client.mutation("keys", "revoke", {"key_id": old_key_id})
+    assert revoked["available"] is False
+    rejected = client.command("admin", "me", admin_key_file=bootstrap_file, success=False)
+    assert rejected["error"]["status"] == 401
+    agent_revoked = client.mutation("agents", "revoke", {"credential_id": agent["id"]})
+    assert agent_revoked["available"] is False
+    rejected_agent = client.command("me", agent_key_file=agent_file, success=False)
+    assert rejected_agent["error"]["status"] == 401
 
-        audit = client.command("admin", "audit", "list", "--limit", "100")
-        by_id = {event["id"]: event for event in audit["items"]}
-        for receipt in client.receipts:
-            operation = client.command("admin", "operations", "get", receipt["id"])
-            assert operation["result"]["operation"] == receipt
-            event = by_id[receipt["audit_event_id"]]
-            assert event["actor_id"] == admin_id
-            assert event["channel"] == "admin_api"
-            assert event["credential_id"] in {old_key_id, replacement["id"]}
-        assert any(
-            event["action"] == "admin.bootstrap"
-            and event["channel"] == "server"
-            and event["actor_id"] == admin_id
-            for event in audit["items"]
-        )
+    audit = client.command("admin", "audit", "list", "--limit", "100")
+    by_id = {event["id"]: event for event in audit["items"]}
+    for receipt in client.receipts:
+        operation = client.command("admin", "operations", "get", receipt["id"])
+        assert operation["result"]["operation"] == receipt
+        event = by_id[receipt["audit_event_id"]]
+        assert event["actor_id"] == admin_id
+        assert event["channel"] == "admin_api"
+        assert event["credential_id"] in {old_key_id, replacement["id"]}
+    assert any(
+        event["action"] == "admin.bootstrap"
+        and event["channel"] == "server"
+        and event["actor_id"] == admin_id
+        for event in audit["items"]
+    )
 
 
 def test_admin_pages_and_key_controls_work_without_javascript(

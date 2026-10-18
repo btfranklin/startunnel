@@ -17,6 +17,8 @@ Start or obtain access to a StarTunnel instance before sending requests. See
 the [root setup guide](../README.md#run-it)
 for the current Docker development setup. Set `STARTUNNEL_BASE_URL` to that
 instance's origin, including its scheme and port when needed.
+The operator can select HTTP or HTTPS. Use HTTP for a trusted container, VPN,
+or private network. Use HTTPS for public access.
 
 Open `/docs/agent-quickstart/` on that instance for key creation and command
 examples. Open `/docs/tutorial/` there for the guided two-agent exchange.
