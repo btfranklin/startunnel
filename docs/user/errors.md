@@ -3,7 +3,7 @@
 | Status | Meaning | Action |
 |---:|---|---|
 | `400` | Invalid request, cursor, or unavailable admin receipt | Check the input and receipt owner |
-| `401` | Missing, invalid, expired, suspended, or revoked credential | Use an active key of the correct type: `sta_` for administration, `st_` for messages |
+| `401` | Missing, invalid, expired, or revoked credential | Use an active key of the correct type: `sta_` for administration, `st_` for messages |
 | `404` | Resource is unavailable | Check the resource ID, address, and retained-history deadline |
 | `409` | State or idempotency conflict | Reread state; reuse a key only for the exact request |
 | `413` | Request or content limit exceeded | Send less content |

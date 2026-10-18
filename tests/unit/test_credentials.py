@@ -51,13 +51,11 @@ def test_decoder_length_and_unknown_key_are_rejected(monkeypatch: pytest.MonkeyP
         authenticate_key("st_" + "A" * 43)
 
 
-@pytest.mark.parametrize("state", ["revoked", "suspended", "expired"])
+@pytest.mark.parametrize("state", ["revoked", "expired"])
 def test_unavailable_keys_cannot_authenticate(credential_factory: Any, state: str) -> None:
     credential, key = credential_factory()
     if state == "revoked":
         credential.revoked_at = timezone.now()
-    elif state == "suspended":
-        credential.suspended_at = timezone.now()
     else:
         credential.expires_at = timezone.now() - timedelta(seconds=1)
     credential.save()
@@ -98,7 +96,7 @@ def test_instance_credential_limit_blocks_new_keys(user_factory: Any, settings: 
         create_credential(actor=actor, name="Second")
 
 
-@pytest.mark.parametrize("state", ["expired", "suspended"])
+@pytest.mark.parametrize("state", ["expired", "revoked"])
 def test_unavailable_credential_does_not_consume_quota(
     user_factory: Any,
     settings: Any,
@@ -111,8 +109,8 @@ def test_unavailable_credential_does_not_consume_quota(
         first.expires_at = timezone.now() - timedelta(seconds=1)
         first.save(update_fields=["expires_at"])
     else:
-        first.suspended_at = timezone.now()
-        first.save(update_fields=["suspended_at"])
+        first.revoked_at = timezone.now()
+        first.save(update_fields=["revoked_at"])
     assert create_credential(actor=actor, name="Replacement").credential.is_available
 
 

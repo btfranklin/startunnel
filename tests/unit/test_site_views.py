@@ -196,22 +196,22 @@ def test_agent_page_renders_form_and_domain_errors(
     assert b"No capacity" in response.content
 
 
-def test_expired_and_suspended_credentials_are_not_active(
+def test_expired_and_revoked_credentials_are_not_active(
     client: Client, user_factory: Any, credential_factory: Any
 ) -> None:
     client.force_login(user_factory())
     expired, _ = credential_factory(name="Expired agent")
     expired.expires_at = timezone.now() - timedelta(seconds=1)
     expired.save(update_fields=["expires_at"])
-    suspended, _ = credential_factory(name="Suspended agent")
-    suspended.suspended_at = timezone.now()
-    suspended.save(update_fields=["suspended_at"])
+    revoked, _ = credential_factory(name="Revoked agent")
+    revoked.revoked_at = timezone.now()
+    revoked.save(update_fields=["revoked_at"])
 
     dashboard = client.get("/app/")
     agents = client.get("/app/agents/")
     assert dashboard.context["active_agent_count"] == 0
     assert b"Expired" in agents.content
-    assert b"Suspended" in agents.content
+    assert b"Revoked" in agents.content
 
 
 @pytest.mark.parametrize("action", ["close", "start", "rollover", "retire"])

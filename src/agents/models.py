@@ -14,10 +14,9 @@ from django.utils import timezone
 class AgentCredentialQuerySet(models.QuerySet["AgentCredential"]):
     def available(self, *, at: datetime | None = None) -> AgentCredentialQuerySet:
         checked_at = at or timezone.now()
-        return self.filter(
-            revoked_at__isnull=True,
-            suspended_at__isnull=True,
-        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=checked_at))
+        return self.filter(revoked_at__isnull=True).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=checked_at)
+        )
 
 
 class AgentCredential(models.Model):
@@ -36,7 +35,6 @@ class AgentCredential(models.Model):
     last_used_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
-    suspended_at = models.DateTimeField(null=True, blank=True)
     objects = AgentCredentialQuerySet.as_manager()
 
     class Meta:
@@ -47,8 +45,6 @@ class AgentCredential(models.Model):
 
     @property
     def is_available(self) -> bool:
-        return (
-            self.revoked_at is None
-            and self.suspended_at is None
-            and (self.expires_at is None or self.expires_at > timezone.now())
+        return self.revoked_at is None and (
+            self.expires_at is None or self.expires_at > timezone.now()
         )

@@ -291,6 +291,37 @@ def test_agent_key_is_one_time_and_tunnel_address_rotates(
         context.close()
 
 
+def test_agent_list_shows_expired_and_revoked_credentials(
+    browser: Browser, base_url: str, account: BrowserAccount
+) -> None:
+    expired_name = f"Expired {uuid4().hex[:12]}"
+    revoked_name = f"Revoked {uuid4().hex[:12]}"
+    _database_shell(
+        "from datetime import timedelta; "
+        "from django.utils import timezone; "
+        "from accounts.models import User; "
+        "from agents.services import create_credential; "
+        f"actor = User.objects.get(username={account.username!r}); "
+        f"expired = create_credential(actor=actor, name={expired_name!r}).credential; "
+        "expired.expires_at = timezone.now() - timedelta(seconds=1); "
+        "expired.save(update_fields=['expires_at']); "
+        f"revoked = create_credential(actor=actor, name={revoked_name!r}).credential; "
+        "revoked.revoked_at = timezone.now(); "
+        "revoked.save(update_fields=['revoked_at'])"
+    )
+    context = _authenticated_context(browser, account)
+    page = context.new_page()
+    try:
+        page.goto(f"{base_url}/app/agents/")
+        expired_row = page.locator("li").filter(has_text=expired_name)
+        revoked_row = page.locator("li").filter(has_text=revoked_name)
+        expect(expired_row.get_by_text("Expired", exact=True)).to_be_visible()
+        expect(revoked_row.get_by_text("Revoked", exact=True)).to_be_visible()
+    finally:
+        page.close()
+        context.close()
+
+
 def test_no_javascript_admin_forms_work(
     browser: Browser, base_url: str, account: BrowserAccount
 ) -> None:

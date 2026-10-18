@@ -249,11 +249,8 @@ def list_admin_resources(
                 queryset = queryset.filter(
                     Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
                 )
-                queryset = (
-                    queryset.filter(owner__is_active=True)
-                    if kind == "keys"
-                    else queryset.filter(suspended_at__isnull=True)
-                )
+                if kind == "keys":
+                    queryset = queryset.filter(owner__is_active=True)
         else:
             queryset = queryset.filter(state=state)
     if admin_id and kind == "keys":

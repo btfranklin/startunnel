@@ -318,7 +318,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     assert tunnel_resource(created.tunnel)["address"] is None
 
 
-@pytest.mark.parametrize("inactive_reason", ["revoked", "suspended", "expired"])
+@pytest.mark.parametrize("inactive_reason", ["revoked", "expired"])
 def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
     user_factory: Any, credential_factory: Any, inactive_reason: str
 ) -> None:
@@ -336,9 +336,6 @@ def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
     if inactive_reason == "revoked":
         creator.revoked_at = timezone.now()
         creator.save(update_fields=["revoked_at"])
-    elif inactive_reason == "suspended":
-        creator.suspended_at = timezone.now()
-        creator.save(update_fields=["suspended_at"])
     else:
         creator.expires_at = timezone.now() - timedelta(seconds=1)
         creator.save(update_fields=["expires_at"])

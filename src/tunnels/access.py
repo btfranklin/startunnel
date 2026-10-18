@@ -20,12 +20,7 @@ from .models import Cycle, Tunnel, TunnelAddress
 def credential_is_active(credential: AgentCredential) -> bool:
     now = timezone.now()
     row = AgentCredential.objects.filter(pk=credential.pk).first()
-    return bool(
-        row
-        and not row.revoked_at
-        and not row.suspended_at
-        and (row.expires_at is None or row.expires_at > now)
-    )
+    return bool(row and not row.revoked_at and (row.expires_at is None or row.expires_at > now))
 
 
 def limits_for(credential: AgentCredential) -> Limits:

@@ -393,7 +393,7 @@ def test_all_mentions_are_resolved_in_one_query(
     assert {mention.name for mention in mentions} == {credential.name for credential in credentials}
 
 
-@pytest.mark.parametrize("unavailable", ["revoked_at", "suspended_at", "expires_at", "missing"])
+@pytest.mark.parametrize("unavailable", ["revoked_at", "expires_at", "missing"])
 def test_mention_batch_rejects_any_unavailable_credential(
     unavailable: str, credential_factory: Any, django_assert_num_queries: Any
 ) -> None:

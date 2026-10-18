@@ -32,8 +32,6 @@
               <div><strong>{{ credential.name }}</strong><code>{{ credential.display_prefix }}••••</code><small>Created {{ credential.created_at|date:"j M Y" }}</small></div>
               {% if credential.revoked_at %}
                 <span class="state state--muted">Revoked</span>
-              {% elif credential.suspended_at %}
-                <span class="state state--warning">Suspended</span>
               {% elif credential.expires_at and not credential.is_available %}
                 <span class="state state--muted">Expired</span>
               {% else %}
