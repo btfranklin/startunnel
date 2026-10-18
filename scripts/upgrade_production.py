@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,16 @@ def validate_existing_web_images(command: list[str], configured_image: str) -> N
             )
 
 
+def create_private_sibling_file(env_file: Path, *, prefix: str) -> Path:
+    with tempfile.NamedTemporaryFile(
+        dir=env_file.parent,
+        prefix=prefix,
+        suffix=".tmp",
+        delete=False,
+    ) as stream:
+        return Path(stream.name)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -134,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     writers_stopped = False
+    temporary: Path | None = None
     try:
         record = json.loads(args.record.read_text())
         validate_record(record)
@@ -216,23 +228,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         if revision != record["source_commit"]:
             raise ValueError("New image revision label does not match the release record.")
-        saved = env_file.with_name(f"{env_file.name}.before-{record['version']}")
-        with saved.open("x") as stream:
-            os.chmod(saved, 0o600)
-            stream.write(text)
-        temporary = env_file.with_name(f"{env_file.name}.upgrade")
-        with temporary.open("x") as stream:
-            os.chmod(temporary, 0o600)
-            stream.write(new_text)
+        saved = create_private_sibling_file(
+            env_file, prefix=f"{env_file.name}.before-{record['version']}."
+        )
+        saved.write_text(text)
+        print(f"Configuration snapshot: {saved}")
+        temporary = create_private_sibling_file(env_file, prefix=f"{env_file.name}.upgrade.")
+        temporary.write_text(new_text)
         run([*command, "stop", "web", "maintenance"])
         writers_stopped = True
         temporary.replace(env_file)
+        temporary = None
         # Remove the completed old migration container so startup must rerun migrations.
         run([*command, "rm", "--force", "migrate"])
         run([*command, "up", "-d", "--no-build", "--wait", "--wait-timeout", "180"])
         print("Services started. Repeat external HTTPS, login, and two-agent verification.")
         print("Reload the selected env file in this shell before further Compose commands.")
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                print(f"Could not remove temporary configuration file: {cleanup_error}")
         print(f"Upgrade failed: {error}")
         if writers_stopped:
             print("Application writers may be stopped. Inspect migrations before recovery.")

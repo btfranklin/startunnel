@@ -131,13 +131,17 @@ application no longer stores a per-message content digest.
    check. The helper pulls the selected image and checks its revision before
    stopping writers. The preview can run while web is stopped or absent. The
    helper checks existing web container images and runs the old image's
-   migration check in a disposable Compose `web` container. It preserves a private
-   copy of the old configuration,
-   changes only the application image reference, removes the completed old
-   migration container, and waits for the production stack. It never deletes
-   database volumes or regenerates secrets. There is no automatic rollback.
-   If a prior attempt left recovery files, inspect them and the actual stack
-   state before retrying; the helper refuses to overwrite them.
+   migration check in a disposable Compose `web` container. Each apply saves
+   the old configuration in a unique mode `0600` file and prints its path. It
+   keeps earlier snapshots. It writes the new configuration to a unique sibling
+   file, then replaces the selected file atomically. It removes an unused
+   temporary file after a normal error. It changes only the application image
+   reference, removes the completed old migration container, and waits for the
+   production stack. It never deletes database volumes or regenerates secrets.
+   There is no automatic rollback.
+   Check the snapshot path and the actual environment and stack state after an
+   interrupted attempt. Retry from the original old image and configuration
+   only when the database and writers remain unchanged.
 6. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.

@@ -303,9 +303,14 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         original.replace(old_image, candidate["image"]) if mutated else original
     )
     if mutated:
-        saved = configuration.resolve().with_name(f"{configuration.name}.before-v0.1.0")
+        snapshots = list(
+            configuration.resolve().parent.glob(f"{configuration.name}.before-v0.1.0.*.tmp")
+        )
+        assert len(snapshots) == 1
+        saved = snapshots[0]
         assert saved.read_text() == original
         assert saved.stat().st_mode & 0o777 == 0o600
+        assert not list(configuration.resolve().parent.glob(f"{configuration.name}.upgrade.*.tmp"))
         if mode == "apply-link" or custom:
             assert configuration.is_symlink()
         stop_index = next(index for index, command in enumerate(commands) if "stop" in command)
@@ -342,3 +347,97 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
             for command in compose_calls
         )
         assert all("-f" not in command and "--profile" not in command for command in compose_calls)
+
+
+@pytest.mark.parametrize("interrupt_at", ["after-snapshot", "after-candidate"])
+def test_interrupted_upgrade_retry_preserves_snapshots_and_replaces_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    interrupt_at: str,
+) -> None:
+    candidate = record()
+    release_file = tmp_path / "release.json"
+    release_file.write_text(json.dumps(candidate))
+    old_image = "ghcr.io/btfranklin/startunnel@sha256:" + "c" * 64
+    configuration = tmp_path / "production.env"
+    original = f"STARTUNNEL_APP_IMAGE={old_image}\nSTARTUNNEL_DOMAIN=tunnel.example\n"
+    configuration.write_text(original)
+    configuration.chmod(0o600)
+    monkeypatch.setattr(upgrade, "ROOT", tmp_path)
+    monkeypatch.setenv("STARTUNNEL_APP_IMAGE", old_image)
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "startunnel-team")
+    monkeypatch.delenv("COMPOSE_FILE", raising=False)
+    monkeypatch.delenv("COMPOSE_PROFILES", raising=False)
+    monkeypatch.setattr(upgrade, "validate_production_secret_files", lambda directory: None)
+    monkeypatch.setattr(upgrade, "rendered_images", lambda command: [candidate["image"]])
+    monkeypatch.setattr(upgrade, "validate_rendered_images", lambda images: None)
+
+    commands: list[list[str]] = []
+    fail_stop = interrupt_at == "after-candidate"
+
+    def run(command: list[str], **kwargs: Any) -> str:
+        commands.append(command)
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return str(candidate["source_commit"])
+        if command[-3:] == ["config", "--format", "json"]:
+            return json.dumps({"services": {"web": {"image": os.environ["STARTUNNEL_APP_IMAGE"]}}})
+        if "ps" in command:
+            return ""
+        if command[:3] == ["docker", "image", "inspect"]:
+            if command[3] == old_image:
+                return json.dumps({"org.opencontainers.image.revision": "d" * 40})
+            return str(candidate["source_commit"])
+        if command[:3] == ["git", "merge-base", "--is-ancestor"]:
+            return ""
+        if command[:3] == ["git", "diff", "--name-only"]:
+            return ""
+        if "stop" in command and fail_stop:
+            raise subprocess.CalledProcessError(1, command)
+        return ""
+
+    monkeypatch.setattr(upgrade, "run", run)
+    make_file = upgrade.create_private_sibling_file
+    if interrupt_at == "after-snapshot":
+        calls = 0
+
+        def fail_second_file(env_file: Path, *, prefix: str) -> Path:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("interrupted after snapshot write")
+            return make_file(env_file, prefix=prefix)
+
+        monkeypatch.setattr(upgrade, "create_private_sibling_file", fail_second_file)
+    args = [str(release_file), "--apply", "--backup-verified"]
+    assert upgrade.main(args) == 2
+    assert configuration.read_text() == original
+    assert not list(tmp_path.glob("production.env.upgrade.*.tmp"))
+    snapshots = list(tmp_path.glob("production.env.before-v0.1.0.*.tmp"))
+    assert len(snapshots) == 1
+    prior_snapshot = snapshots[0]
+    assert prior_snapshot.read_text() == original
+    assert prior_snapshot.stat().st_mode & 0o777 == 0o600
+    first_output = capsys.readouterr().out
+    assert str(prior_snapshot) in first_output
+
+    monkeypatch.setattr(upgrade, "create_private_sibling_file", make_file)
+    monkeypatch.setenv("STARTUNNEL_APP_IMAGE", old_image)
+    fail_stop = False
+    assert upgrade.main(args) == 0
+    assert configuration.read_text() == original.replace(old_image, candidate["image"])
+    assert prior_snapshot.exists()
+    snapshots = list(tmp_path.glob("production.env.before-v0.1.0.*.tmp"))
+    assert len(snapshots) == 2
+    assert all(snapshot.read_text() == original for snapshot in snapshots)
+    assert all(snapshot.stat().st_mode & 0o777 == 0o600 for snapshot in snapshots)
+    assert not list(tmp_path.glob("production.env.upgrade.*.tmp"))
+    retry_output = capsys.readouterr().out
+    assert any(
+        str(snapshot) in retry_output for snapshot in snapshots if snapshot != prior_snapshot
+    )
+    stops = [index for index, command in enumerate(commands) if "stop" in command]
+    starts = [index for index, command in enumerate(commands) if "up" in command]
+    assert len(stops) == (1 if interrupt_at == "after-snapshot" else 2)
+    assert len(starts) == 1
+    assert stops[-1] < starts[0]

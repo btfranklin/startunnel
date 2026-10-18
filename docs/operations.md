@@ -180,6 +180,9 @@ The launcher uses loaded `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, and
 and `compose.prod.yaml`. The upgrade helper uses the same selected Compose
 project and profiles. Use `--env-file` for a config file other than
 `production.env`; load that file in the shell before preview or apply.
+Each apply keeps a unique mode `0600` snapshot of the old environment file and
+prints its path. See [Maintain the instance](setup/maintain.md) before you retry
+an interrupted upgrade.
 No OAuth registration or external cache is required. Use the setup guide's
 production shell for administrator and maintenance commands.
 
