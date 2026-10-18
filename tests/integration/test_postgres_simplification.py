@@ -44,12 +44,6 @@ from tunnels.services import close_cycle, create_tunnel
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-@pytest.fixture(autouse=True)
-def require_postgresql() -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL coordination tests.")
-
-
 def _connection_kwargs() -> dict[str, Any]:
     database = connection.settings_dict
     return {

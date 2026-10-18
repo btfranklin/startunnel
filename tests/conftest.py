@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import re
 import secrets
 from collections.abc import Callable
 
@@ -12,6 +13,22 @@ from django.conf import settings
 
 from accounts.models import User
 from agents.models import AgentCredential
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if settings.DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+        return
+    postgres = [item for item in items if item.get_closest_marker("postgres") is not None]
+    if not postgres:
+        return
+    if re.search(r"\bpostgres\b", config.option.markexpr):
+        raise pytest.UsageError(
+            "The postgres marker requires TEST_DATABASE_URL with PostgreSQL. "
+            "Run: pdm run python scripts/run_isolated_test_lane.py postgres"
+        )
+    items[:] = [item for item in items if item not in postgres]
+    config.hook.pytest_deselected(items=postgres)
 
 
 @pytest.fixture

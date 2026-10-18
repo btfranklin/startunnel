@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from django.db import close_old_connections, connection
+from django.db import close_old_connections
 
 from agents.models import AgentCredential
 from tunnels.beacons import beacon_data, beacon_queryset, publish_beacon, withdraw_beacon
@@ -17,12 +17,6 @@ from tunnels.models import Beacon, BoardState, TunnelEvent
 from tunnels.services import close_cycle, create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
-
-
-@pytest.fixture(autouse=True)
-def require_postgresql() -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL Beacon tests.")
 
 
 def _credential(credential_id: UUID) -> AgentCredential:

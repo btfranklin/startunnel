@@ -57,6 +57,8 @@ CRITICAL_TARGETS = (
     CriticalTarget("src/tunnels/maintenance.py", ("cleanup_once",)),
 )
 
+POSTGRES_TARGETS = (CriticalTarget("src/tunnels/services.py", ("_postgresql_subtree_page",)),)
+
 
 def _line_range(source_path: Path, function_name: str) -> range:
     tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
@@ -87,12 +89,12 @@ def _missing_branch_sources(file_report: dict[str, Any]) -> set[int]:
     return {int(branch[0]) for branch in file_report.get("missing_branches", [])}
 
 
-def find_gaps(report: dict[str, Any], root: Path = ROOT) -> list[str]:
+def find_gaps(report: dict[str, Any], root: Path = ROOT, *, postgres: bool = False) -> list[str]:
     """Return human-readable gaps in the authoritative critical target set."""
 
     files = report.get("files", {})
     gaps: list[str] = []
-    for target in CRITICAL_TARGETS:
+    for target in POSTGRES_TARGETS if postgres else CRITICAL_TARGETS:
         file_report = files.get(target.path)
         if file_report is None:
             gaps.append(f"{target.path}: file is absent from the coverage report")
@@ -119,11 +121,11 @@ def find_gaps(report: dict[str, Any], root: Path = ROOT) -> list[str]:
     return gaps
 
 
-def check_report(report_path: Path, root: Path = ROOT) -> list[str]:
+def check_report(report_path: Path, root: Path = ROOT, *, postgres: bool = False) -> list[str]:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
         raise ValueError("Coverage JSON must contain an object.")
-    return find_gaps(report, root)
+    return find_gaps(report, root, postgres=postgres)
 
 
 def _print_gaps(gaps: Iterable[str]) -> None:
@@ -134,18 +136,20 @@ def _print_gaps(gaps: Iterable[str]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("report", nargs="?", default="coverage.json")
+    parser.add_argument("--postgres", action="store_true")
     args = parser.parse_args()
     report_path = ROOT / args.report
+    recovery = "pdm run test-postgres" if args.postgres else "pdm run check"
     if not report_path.is_file():
         print(f"Coverage report does not exist: {report_path}")
-        print("Recovery: run `pdm run check` to create and inspect coverage.json.")
+        print(f"Recovery: run `{recovery}` to create and inspect the coverage report.")
         return 1
-    gaps = check_report(report_path)
+    gaps = check_report(report_path, postgres=args.postgres)
     if gaps:
         print("Critical protocol coverage is incomplete:")
         _print_gaps(gaps)
         print("Source of truth: docs/testing.md#coverage")
-        print("Recovery: add behavior tests for the named functions, then run `pdm run check`.")
+        print(f"Recovery: add behavior tests for the named functions, then run `{recovery}`.")
         return 1
     print("Critical protocol functions have complete line and branch coverage.")
     return 0

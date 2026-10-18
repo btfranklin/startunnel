@@ -45,12 +45,6 @@ def board_listener(monkeypatch: pytest.MonkeyPatch) -> ActivityListener:
     return listener
 
 
-@pytest.fixture(autouse=True)
-def require_postgresql() -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL board-wait tests.")
-
-
 def _worker[T](function: Callable[[], T]) -> T:
     try:
         return function()

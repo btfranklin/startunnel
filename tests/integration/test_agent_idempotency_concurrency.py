@@ -22,12 +22,6 @@ from tunnels.services import create_tunnel, post_reply
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-@pytest.fixture(autouse=True)
-def require_postgresql() -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL receipt tests.")
-
-
 def test_concurrent_agent_requests_with_changed_input_conflict(credential_factory: Any) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(

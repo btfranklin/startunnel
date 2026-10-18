@@ -139,3 +139,12 @@ maintenance commands and check leader takeover after the first leader stops.
 The activity listener now wakes registered activity and board waits after both
 PostgreSQL subscriptions return. Database reads can then find changes that
 committed during the connection gap. Bounded fallback waits remain available.
+
+## PostgreSQL test evidence
+
+Test runs now create a fresh database by default. SQLite test collection
+deselects PostgreSQL tests; explicit PostgreSQL marker selection fails when the
+backend is unavailable. The isolated PostgreSQL lane measures recursive-query
+coverage and requires complete critical coverage. New tests check deep subtree
+pages, forced close/post and expiry/post lock orders, and physical deletion of
+a branched message history.

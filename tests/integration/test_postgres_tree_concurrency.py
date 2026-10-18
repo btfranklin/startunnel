@@ -18,7 +18,7 @@ from core import limits as instance_limits
 from core.limits import Limits
 from tunnels.codec import parse_address
 from tunnels.context import get_context
-from tunnels.errors import CycleClosed, InvalidCredential, InvalidRequest, QuotaExceeded
+from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 from tunnels.services import (
     PostedReply,
@@ -32,12 +32,6 @@ from tunnels.services import (
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
-
-
-@pytest.fixture(autouse=True)
-def require_postgresql(monkeypatch: pytest.MonkeyPatch) -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL concurrency tests.")
 
 
 def _post_in_thread(
@@ -324,72 +318,6 @@ def test_concurrent_exact_idempotency_retry_creates_one_reply(
         ).count()
         == 1
     )
-
-
-def test_post_racing_cycle_close_has_one_atomic_boundary(credential_factory: Any) -> None:
-    creator, _ = credential_factory(name="Close creator")
-    worker, _ = credential_factory(name="Close worker")
-    created = create_tunnel(
-        credential=creator,
-        idempotency_key="tree-close-create",
-        root_content={"type": "text", "text": "Close this cycle safely."},
-    )
-    barrier = threading.Barrier(2)
-
-    def post() -> str:
-        try:
-            _post_in_thread(
-                credential_id=worker.id,
-                address=created.address,
-                parent_id=created.root.id,
-                idempotency_key="tree-close-racing-reply",
-                barrier=barrier,
-                content="This reply either commits before closure or does not exist.",
-            )
-        except CycleClosed:
-            return "closed"
-        return "posted"
-
-    def close() -> None:
-        close_old_connections()
-        try:
-            credential = AgentCredential.objects.get(pk=creator.id)
-            barrier.wait(timeout=15)
-            close_cycle(
-                credential=credential,
-                idempotency_key="concurrent-close-001",
-                address=created.address,
-                expected_cycle_id=created.cycle.id,
-            )
-        finally:
-            close_old_connections()
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        post_future = executor.submit(post)
-        close_future = executor.submit(close)
-        outcome = post_future.result(timeout=30)
-        close_future.result(timeout=30)
-
-    cycle = Cycle.objects.get(pk=created.cycle.id)
-    tunnel = Tunnel.objects.get(pk=created.tunnel.id)
-    messages = list(Message.objects.filter(cycle=cycle).order_by("sequence"))
-    events = list(TunnelEvent.objects.filter(tunnel=tunnel).order_by("position"))
-
-    assert cycle.state == Cycle.State.CLOSED
-    assert tunnel.state == Tunnel.State.DORMANT
-    assert cycle.final_sequence == len(messages)
-    assert cycle.message_count == len(messages)
-    assert cycle.content_bytes == sum(message.byte_count for message in messages)
-    assert [event.position for event in events] == list(range(1, len(events) + 1))
-    assert [event.event_type for event in events[-2:]] == [
-        TunnelEvent.Type.CYCLE_CLOSED,
-        TunnelEvent.Type.TUNNEL_DORMANT,
-    ]
-    assert tunnel.next_event_position == len(events) + 1
-    assert len(messages) == (2 if outcome == "posted" else 1)
-    if outcome == "posted":
-        assert events[-3].event_type == TunnelEvent.Type.MESSAGE_POSTED
-        assert events[-3].message_id == messages[-1].id
 
 
 def test_concurrent_posts_cannot_cross_the_message_limit(

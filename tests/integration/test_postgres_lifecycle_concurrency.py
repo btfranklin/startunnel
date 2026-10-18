@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from django.db import close_old_connections, connection
+from django.db import close_old_connections
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -25,12 +25,6 @@ from tunnels.services import (
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
-
-
-@pytest.fixture(autouse=True)
-def require_postgresql(monkeypatch: pytest.MonkeyPatch) -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL lifecycle tests.")
 
 
 def _thread_credential(credential_id: UUID) -> AgentCredential:

@@ -25,9 +25,11 @@ def _function_lines(path: Path, name: str) -> tuple[list[int], list[int]]:
     return lines, branch_lines
 
 
+@pytest.mark.parametrize("postgres", [False, True])
 def test_focused_coverage_gate_detects_a_missing_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
 ) -> None:
     source = tmp_path / "critical.py"
     source.write_text(
@@ -45,18 +47,21 @@ def test_focused_coverage_gate_detects_a_missing_branch(
         }
     }
     monkeypatch.setattr(
-        "scripts.check_critical_coverage.CRITICAL_TARGETS",
+        "scripts.check_critical_coverage."
+        + ("POSTGRES_TARGETS" if postgres else "CRITICAL_TARGETS"),
         (CriticalTarget("critical.py", ("decide",)),),
     )
 
-    gaps = find_gaps(report, tmp_path)
+    gaps = find_gaps(report, tmp_path, postgres=postgres)
 
     assert gaps == ["critical.py:decide: missing branch from lines 2"]
 
 
+@pytest.mark.parametrize("postgres", [False, True])
 def test_focused_coverage_gate_accepts_complete_function(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    postgres: bool,
 ) -> None:
     source = tmp_path / "critical.py"
     source.write_text("def done() -> bool:\n    return True\n", encoding="utf-8")
@@ -71,8 +76,9 @@ def test_focused_coverage_gate_accepts_complete_function(
         }
     }
     monkeypatch.setattr(
-        "scripts.check_critical_coverage.CRITICAL_TARGETS",
+        "scripts.check_critical_coverage."
+        + ("POSTGRES_TARGETS" if postgres else "CRITICAL_TARGETS"),
         (CriticalTarget("critical.py", ("done",)),),
     )
 
-    assert find_gaps(report, tmp_path) == []
+    assert find_gaps(report, tmp_path, postgres=postgres) == []

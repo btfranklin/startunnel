@@ -19,9 +19,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 @pytest.fixture(autouse=True)
-def require_postgresql(monkeypatch: pytest.MonkeyPatch) -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL search tests.")
+def allow_api_operations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
 
 

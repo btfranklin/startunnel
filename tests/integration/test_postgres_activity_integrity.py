@@ -18,12 +18,6 @@ from tunnels.services import CreatedTunnel, close_cycle, create_tunnel, post_rep
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-@pytest.fixture(autouse=True)
-def require_postgresql(monkeypatch: pytest.MonkeyPatch) -> None:
-    if connection.vendor != "postgresql":
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integrity tests.")
-
-
 def _create_board(credential: AgentCredential, *, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,

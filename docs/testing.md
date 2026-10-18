@@ -24,6 +24,12 @@ pdm run test
 pdm run openapi
 ```
 
+Each test run creates a fresh test database by default. `--reuse-db` is an
+explicit local option. With SQLite, bare `pdm run test` deselects PostgreSQL
+tests. Explicit `-m postgres` selection requires a PostgreSQL test database and
+fails with the isolated lane command when that setup is missing. Browser and
+live-agent tests keep their own dependency and opt-in checks.
+
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
 It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
 External web links are not fetched. Run `pdm run linkbust --no-color` for a
@@ -73,6 +79,15 @@ examples, and API or CLI contracts. Do not require particular sentences,
 heading text, marketing words, or paragraph lengths. Example programs must
 report failure through their exit status; their printed prose can change.
 
+## Coverage
+
+The fast aggregate gate requires at least 90 percent total coverage and complete
+line and branch coverage for its critical protocol functions. The PostgreSQL
+lane runs the `test-postgres` PDM composite. It records a separate
+`postgres-coverage.json` report, then requires complete line and branch coverage
+for the recursive subtree query. It does not combine SQLite coverage with that
+report or apply the fast suite's total threshold to PostgreSQL-only tests.
+
 ## Compose lanes
 
 ```shell
@@ -84,6 +99,11 @@ pdm run python scripts/run_isolated_test_lane.py browser
 ```
 
 The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions. The privilege test grants the runtime role normal table permissions before it checks the migration's history-delete revocation.
+Subtree tests check deep preorder pages, fixed snapshots, depth limits, and
+invalid continuations. Lifecycle tests force both post/close lock orders and
+both expiry-close/post orders, with PostgreSQL lock-wait evidence. Retention
+tests delete a branched message tree and check mentions, Beacon content,
+checkpoints, retry receipts, and the retained event spine.
 Maintenance tests run two command processes against the active test database.
 They stop the leader and check that the surviving process acquires the lock and
 deletes new due work. Separate concurrent refresh tests check that batch deletion
