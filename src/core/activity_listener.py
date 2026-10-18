@@ -10,7 +10,7 @@ from uuid import UUID
 import psycopg
 from django.conf import settings
 
-from .notifications import ACTIVITY_CHANNEL
+from .notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ class ActivityListener:
         self._ready = asyncio.Event()
         self._stopping = False
         self._waiters: dict[UUID, set[asyncio.Event]] = {}
+        self._board_waiters: set[asyncio.Event] = set()
 
     def start(self) -> None:
         if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
@@ -65,6 +66,15 @@ class ActivityListener:
         if not tunnel_waiters:
             self._waiters.pop(tunnel_id, None)
 
+    def register_board(self) -> asyncio.Event:
+        self.start()
+        waiter = asyncio.Event()
+        self._board_waiters.add(waiter)
+        return waiter
+
+    def unregister_board(self, waiter: asyncio.Event) -> None:
+        self._board_waiters.discard(waiter)
+
     async def wait(self, waiter: asyncio.Event, timeout: float) -> None:
         if timeout <= 0:
             return
@@ -79,6 +89,8 @@ class ActivityListener:
         for tunnel_waiters in self._waiters.values():
             for waiter in tunnel_waiters:
                 waiter.set()
+        for waiter in self._board_waiters:
+            waiter.set()
 
     async def _run(self) -> None:
         backoff = 1.0
@@ -90,9 +102,16 @@ class ActivityListener:
                 )
                 async with connection:
                     await connection.execute(f"LISTEN {ACTIVITY_CHANNEL}")
+                    await connection.execute(f"LISTEN {BOARD_CHANNEL}")
                     self._ready.set()
                     backoff = 1.0
                     async for notification in connection.notifies():
+                        if notification.channel == BOARD_CHANNEL:
+                            for waiter in self._board_waiters:
+                                waiter.set()
+                            continue
+                        if notification.channel != ACTIVITY_CHANNEL:
+                            continue
                         try:
                             tunnel_id = UUID(notification.payload)
                         except ValueError:

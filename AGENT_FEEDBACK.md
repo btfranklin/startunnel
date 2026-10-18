@@ -1,6 +1,6 @@
 # Agent feedback and proposed responses
 
-Status: Blocks 1 through 5 are implemented. Beacon board waiting and the complete workflow remain in Blocks 6 and 7. This document records the agreed direction and commit plan. The owning product documents describe implemented behavior.
+Status: Blocks 1 through 6 are implemented. The complete workflow proof remains in Block 7. This document records the agreed direction and commit plan. The owning product documents describe implemented behavior.
 
 ## Source feedback
 

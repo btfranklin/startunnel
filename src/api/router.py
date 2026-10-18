@@ -20,7 +20,7 @@ from core.cursors import cursor_uuid as _cursor_uuid
 from core.cursors import decode_cursor as _decoded_cursor
 from core.cursors import encode_cursor as _cursor
 from tunnels.activity import commit_checkpoint, read_activity_async
-from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
+from tunnels.beacons import publish_beacon, read_board, wait_for_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
 from tunnels.entry import enter_tunnel, entry_payload
@@ -62,6 +62,8 @@ from .schemas import (
     BeaconBoardRequest,
     BeaconBoardResponse,
     BeaconPublishRequest,
+    BeaconWaitRequest,
+    BeaconWaitResponse,
     BeaconWithdrawRequest,
     BeaconWriteResponse,
     BranchRequest,
@@ -1575,10 +1577,24 @@ def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> dict[str,
     )
     return {
         "items": page.items,
+        "board_cursor": page.board_cursor,
         "snapshot_position": page.snapshot_position,
         "next_page_cursor": page.next_cursor,
         "complete": page.complete,
     }
+
+
+@router.post(
+    "/beacons/wait",
+    auth=activity_bearer,
+    response={200: BeaconWaitResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+async def wait_beacon_board(request: HttpRequest, payload: BeaconWaitRequest) -> dict[str, Any]:
+    return await wait_for_board(
+        credential=_credential(request),
+        after_cursor=payload.after_cursor,
+        wait_seconds=payload.wait_seconds,
+    )
 
 
 api.add_router("/v1", router)

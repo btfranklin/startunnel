@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db import connection
 
 ACTIVITY_CHANNEL = "startunnel_activity"
+BOARD_CHANNEL = "startunnel_beacon_board"
 MAINTENANCE_CHANNEL = "startunnel_maintenance"
 
 

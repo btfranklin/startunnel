@@ -111,7 +111,13 @@ Maintenance deletes messages, mentions, Beacon text, and related idempotency con
 
 ## Notifications and waits
 
-PostgreSQL `NOTIFY` wakes activity readers after commit. Each web process owns one asynchronous listener connection and dispatches notices to in-process waiters by tunnel ID. A reader registers before its final database reread so it cannot miss a commit between the read and wait steps. Reconnects use bounded backoff. A short database polling fallback preserves correctness when the listener is unavailable.
+PostgreSQL `NOTIFY` wakes activity and board readers after commit. Each web process owns one asynchronous listener connection. It dispatches activity notices by tunnel ID and board notices to board waiters. Both waits share one bounded database worker pool. A reader registers before its final database reread so it cannot miss a commit between the read and wait steps. Reconnects use bounded backoff. A short database polling fallback preserves correctness when the listener is unavailable.
+
+Board waits use a global change position and the next effective expiry. A
+change requests a fresh paginated snapshot; no second event history is stored.
+Deadline waits remove expired Beacons even before maintenance records the end.
+Reply notices advance the board only for the first distinct responding credential.
+No board reader means no background board polling.
 
 ## Rate limits
 

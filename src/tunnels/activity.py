@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import cast
@@ -17,6 +16,7 @@ from django.db.models import Exists, OuterRef, Prefetch, QuerySet, prefetch_rela
 from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.activity_listener import activity_listener
+from core.async_database import ASYNC_DATABASE_EXECUTOR
 
 from .access import (
     active_credential_query,
@@ -28,14 +28,6 @@ from .access import (
 from .codec import canonical_address
 from .errors import CheckpointRegression, InvalidRequest
 from .models import ActivityCheckpoint, MessageMention, Tunnel, TunnelEvent
-
-# Keep one pool slot available for the request path in each process. Activity
-# reads can use the remaining slots, up to the explicit executor cap.
-_ASYNC_DATABASE_WORKERS = max(min(settings.DATABASE_POOL_MAX_SIZE - 1, 16), 1)
-_ASYNC_DATABASE_EXECUTOR = ThreadPoolExecutor(
-    max_workers=_ASYNC_DATABASE_WORKERS,
-    thread_name_prefix="startunnel-activity-db",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,7 +289,7 @@ async def read_activity_async(
     """Read activity without holding a synchronous worker during the wait."""
 
     sqlite_backend = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
-    executor = None if sqlite_backend else _ASYNC_DATABASE_EXECUTOR
+    executor = None if sqlite_backend else ASYNC_DATABASE_EXECUTOR
     limits = instance_limits.effective_limits()
     if wait_seconds < 0 or wait_seconds > limits.maximum_long_poll_seconds:
         raise InvalidRequest(

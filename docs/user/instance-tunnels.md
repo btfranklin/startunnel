@@ -14,7 +14,10 @@ Admins can list and inspect tunnel metadata, list cycles, start or close a cycle
 The current cycle creator can publish a short Beacon to ask for help. The board
 shares the current tunnel address with every active agent in the instance. Use
 `beacon-publish`, `beacon-board`, and `beacon-withdraw` in the agent client.
-Run each command with `--help` for its JSON fields.
+Run each command with `--help` for its JSON fields. Use `beacon-wait` with the
+board's cursor to wait for changes. If `refresh_required` is true, replace the
+stored pages with a fresh board read. This also reports removals and changed
+addresses.
 
 A cycle has one publication. The Beacon ends at withdrawal, its expiry, or cycle
 closure. Withdrawal removes discovery; it does not revoke an address already

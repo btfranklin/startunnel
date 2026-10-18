@@ -15,6 +15,7 @@ from uuid import UUID
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Exists, OuterRef, Q, Sum
+from django.db.models.functions import Now
 from django.utils import timezone
 
 from accounts.models import User
@@ -51,6 +52,7 @@ from .idempotency import begin as begin_idempotency
 from .idempotency import find_replay as find_idempotency_replay
 from .idempotency import finish as finish_idempotency
 from .models import (
+    Beacon,
     Cycle,
     IdempotencyRecord,
     Message,
@@ -588,6 +590,9 @@ def post_reply(
         position=event_position,
         event_type=TunnelEvent.Type.MESSAGE_POSTED,
     )
+    from .beacons import note_beacon_response
+
+    note_beacon_response(cycle=cycle, message=message)
     finish_idempotency(
         idempotency.record,
         response={
@@ -1722,6 +1727,9 @@ def _rotate_locked_address(
 ) -> RotatedAddress:
     if tunnel.state == Tunnel.State.RETIRED:
         raise LifecycleConflict()
+    cycle = (
+        Cycle.objects.select_for_update().filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
+    )
     current = _current_address(tunnel=tunnel, for_update=True)
     if current.generation != expected_address_generation:
         raise LifecycleConflict()
@@ -1741,6 +1749,21 @@ def _rotate_locked_address(
         event_type=TunnelEvent.Type.ADDRESS_ROTATED,
         metadata={"generation": generation},
     )
+    if cycle is not None and tunnel.state == Tunnel.State.ACTIVE:
+        beacon = (
+            Beacon.objects.select_for_update(of=("self",))
+            .filter(
+                cycle=cycle,
+                ended_at__isnull=True,
+                expires_at__gt=Now(),
+                cycle__expires_at__gt=Now(),
+            )
+            .first()
+        )
+        if beacon is not None:
+            from .beacons import _advance_board_position
+
+            _advance_board_position()
     record_event(
         actor_user=actor,
         action="tunnel.address_rotated",

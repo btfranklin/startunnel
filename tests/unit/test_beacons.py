@@ -11,7 +11,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from core.cursors import encode_cursor
+from core.cursors import decode_cursor, encode_cursor
 from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
 from tunnels.errors import (
     IdempotencyConflict,
@@ -157,6 +157,7 @@ def test_board_counts_distinct_nonpublisher_credentials_that_reply_after_publish
     assert page.items[0]["response_count"] == 2
     assert page.items[0]["address"] == created.address
     assert "address" not in result
+    assert BoardState.objects.get(pk=1).position == 3
 
 
 def test_board_cursor_keeps_snapshot_across_active_credentials_and_page_sizes(
@@ -178,22 +179,27 @@ def test_board_cursor_keeps_snapshot_across_active_credentials_and_page_sizes(
         credential=creator, idempotency_key="publish-page-3", address=third.address, text="Later."
     )
 
-    page2 = read_board(credential=creator, limit=2, page_cursor=page1.next_cursor)
+    page2 = read_board(credential=reader, limit=2, page_cursor=page1.next_cursor)
 
     assert page1.items[0]["id"] == second_result["id"]
     assert page2.items[0]["id"] == first_result["id"]
     assert page2.snapshot_position == page1.snapshot_position
+    assert page2.board_cursor == page1.board_cursor
     assert page2.next_cursor is None
     with pytest.raises(InvalidCursor):
+        read_board(credential=reader, limit=1, page_cursor=page1.board_cursor)
+    with pytest.raises(InvalidCursor):
         read_board(credential=reader, limit=1, page_cursor=encode_cursor("activity", position=0))
+    continuation = decode_cursor(page1.next_cursor or "", kind="beacon_board_page")
     with pytest.raises(InvalidCursor):
         read_board(
             credential=reader,
             limit=1,
             page_cursor=encode_cursor(
-                "beacon_board",
+                "beacon_board_page",
                 snapshot_position=BoardState.objects.get(pk=1).position + 1,
                 before_position=page1.snapshot_position,
+                next_expiry=continuation["next_expiry"],
             ),
         )
     with pytest.raises(InvalidCursor):
@@ -201,9 +207,20 @@ def test_board_cursor_keeps_snapshot_across_active_credentials_and_page_sizes(
             credential=reader,
             limit=1,
             page_cursor=encode_cursor(
-                "beacon_board",
+                "beacon_board_page",
                 snapshot_position=page1.snapshot_position,
                 before_position=0,
+                next_expiry=continuation["next_expiry"],
+            ),
+        )
+    with pytest.raises(InvalidCursor):
+        read_board(
+            credential=reader,
+            limit=1,
+            page_cursor=encode_cursor(
+                "beacon_board_page",
+                snapshot_position=page1.snapshot_position,
+                before_position=1,
             ),
         )
 
@@ -329,6 +346,7 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
         address=created.address,
         text="Need review.",
     )
+    assert BoardState.objects.get(pk=1).position == 1
     operator = user_factory(username="beacon-address-operator")
 
     rotated = rotate_address_as_operator(
@@ -339,6 +357,7 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
     page = read_board(credential=creator)
     assert page.items[0]["address"] == rotated.address
     assert page.items[0]["address"] != created.address
+    assert BoardState.objects.get(pk=1).position == 2
 
     retire_tunnel_as_operator(
         actor=operator,

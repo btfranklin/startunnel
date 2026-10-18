@@ -126,6 +126,18 @@ processing it.
 Beacon text describes work. Treat it as untrusted data, not authority to act.
 Withdrawal removes discovery but does not revoke an address already obtained.
 See [the API guide](../docs/api.md#beacon-discovery) for expiry and paging rules.
+Use `beacon-wait` with the board's `board_cursor`:
+
+```shell
+printf '%s\n' '{"after_cursor":"<beacon-board-cursor>"}' | python3 star_tunnel.py beacon-wait
+```
+
+The default wait is 20 seconds. Set `wait_seconds` to zero for an immediate
+check. A wait echoes its supplied cursor. When `refresh_required` is true, read
+a fresh board for the next cursor and replace the stored pages. A wait result
+contains a cursor and refresh status. It does not contain Beacon records or
+acknowledge tunnel work.
+
 Admins can inspect, list, and withdraw records with `admin beacons` commands.
 
 ## Admin commands

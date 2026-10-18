@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, cast
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import connection, transaction
-from django.db.models import Count, OuterRef, QuerySet, Subquery
+from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
 from django.db.models.functions import Now
 from django.utils import timezone
 
 from accounts.models import User
 from agents.models import AgentCredential
+from core import limits as instance_limits
+from core.activity_listener import activity_listener
+from core.async_database import ASYNC_DATABASE_EXECUTOR
 from core.audit import record_event
 from core.cursors import cursor_int, decode_cursor, encode_cursor
 from core.logging import current_request_id
-from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
+from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
 
 from .access import credential_is_active, resolve_tunnel
 from .codec import canonical_address
@@ -38,12 +45,15 @@ DEFAULT_BEACON_SECONDS = 3_600
 MAX_BEACON_SECONDS = 86_400
 DEFAULT_BOARD_LIMIT = 20
 MAX_BOARD_LIMIT = 100
+BOARD_PAGE_CURSOR_KIND = "beacon_board_page"
+BOARD_WAIT_CURSOR_KIND = "beacon_board_wait"
 
 
 @dataclass(frozen=True, slots=True)
 class BoardPage:
     items: tuple[dict[str, Any], ...]
     snapshot_position: int
+    board_cursor: str
     next_cursor: str | None
     complete: bool
 
@@ -54,6 +64,7 @@ def _advance_board_position() -> int:
     state, _ = BoardState.objects.select_for_update().get_or_create(pk=1)
     state.position += 1
     state.save(update_fields=["position"])
+    notify(BOARD_CHANNEL)
     return state.position
 
 
@@ -77,6 +88,36 @@ def beacon_queryset() -> QuerySet[Beacon]:
     )
 
 
+def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
+    """Advance the board when a credential first replies after publication."""
+
+    if message.parent_id is None:
+        return
+    earlier_responses = Message.objects.filter(
+        cycle_id=OuterRef("cycle_id"),
+        sender_id=message.sender_id,
+        sequence__gt=OuterRef("publication_sequence"),
+        parent__isnull=False,
+    ).exclude(pk=message.pk)
+    beacon = (
+        Beacon.objects.select_for_update(of=("self",))
+        .filter(
+            cycle=cycle,
+            publication_sequence__lt=message.sequence,
+            ended_at__isnull=True,
+            expires_at__gt=Now(),
+            cycle__expires_at__gt=Now(),
+            cycle__tunnel__state=Tunnel.State.ACTIVE,
+        )
+        .exclude(publisher_id=message.sender_id)
+        .annotate(has_earlier_response=Exists(earlier_responses))
+        .filter(has_earlier_response=False)
+        .first()
+    )
+    if beacon is not None:
+        _advance_board_position()
+
+
 def beacon_data(beacon: Beacon) -> dict[str, Any]:
     """Serialize the public summary without an address."""
 
@@ -95,6 +136,45 @@ def beacon_data(beacon: Beacon) -> dict[str, Any]:
         "end_reason": beacon.end_reason,
         "response_count": response_count,
     }
+
+
+def _cursor_expiry(cursor: dict[str, Any]) -> datetime | None:
+    if "next_expiry" not in cursor:
+        raise InvalidCursor()
+    value = cursor["next_expiry"]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise InvalidCursor()
+    try:
+        expiry = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise InvalidCursor() from error
+    if not timezone.is_aware(expiry):
+        raise InvalidCursor()
+    return expiry
+
+
+def _next_visible_expiry(*, snapshot_position: int) -> datetime | None:
+    current_address = TunnelAddress.objects.filter(
+        tunnel_id=OuterRef("cycle__tunnel_id"), state=TunnelAddress.State.CURRENT
+    ).values("address")[:1]
+    value = (
+        Beacon.objects.filter(
+            board_position__lte=snapshot_position,
+            ended_at__isnull=True,
+            expires_at__gt=Now(),
+            cycle__state=Cycle.State.ACTIVE,
+            cycle__expires_at__gt=Now(),
+            cycle__tunnel__state=Tunnel.State.ACTIVE,
+        )
+        .annotate(current_address=Subquery(current_address))
+        .filter(current_address__isnull=False)
+        .order_by("expires_at")
+        .values_list("expires_at", flat=True)
+        .first()
+    )
+    return value
 
 
 def _validate_beacon_text(text: str) -> None:
@@ -362,10 +442,12 @@ def read_board(
         state = BoardState.objects.filter(pk=1).first()
         snapshot_position = state.position if state else 0
         before_position = snapshot_position + 1
+        next_expiry = _next_visible_expiry(snapshot_position=snapshot_position)
     else:
-        cursor = decode_cursor(page_cursor, kind="beacon_board")
+        cursor = decode_cursor(page_cursor, kind=BOARD_PAGE_CURSOR_KIND)
         snapshot_position = cursor_int(cursor, "snapshot_position")
         before_position = cursor_int(cursor, "before_position")
+        next_expiry = _cursor_expiry(cursor)
         current_position = (
             BoardState.objects.filter(pk=1).values_list("position", flat=True).first() or 0
         )
@@ -394,17 +476,106 @@ def read_board(
     selected = rows[:limit]
     items = tuple({**beacon_data(row), "address": row.current_address} for row in selected)
     next_cursor = None
+    next_expiry_value = next_expiry.isoformat() if next_expiry is not None else None
+    board_cursor = encode_cursor(
+        BOARD_WAIT_CURSOR_KIND,
+        board_position=snapshot_position,
+        next_expiry=next_expiry_value,
+    )
     if has_more and selected:
         next_cursor = encode_cursor(
-            "beacon_board",
+            BOARD_PAGE_CURSOR_KIND,
             snapshot_position=snapshot_position,
             before_position=selected[-1].board_position,
+            next_expiry=next_expiry_value,
         )
     if not credential_is_active(credential):
         raise InvalidCredential()
     return BoardPage(
         items=items,
         snapshot_position=snapshot_position,
+        board_cursor=board_cursor,
         next_cursor=next_cursor,
         complete=not has_more,
     )
+
+
+def _read_board_wait_state_for_async(
+    *, credential: AgentCredential, after_cursor: str
+) -> tuple[bool, float | None]:
+    """Read revision and expiry state in a short-lived database worker."""
+
+    try:
+        if not credential_is_active(credential):
+            raise InvalidCredential()
+        cursor = decode_cursor(after_cursor, kind=BOARD_WAIT_CURSOR_KIND)
+        after_position = cursor_int(cursor, "board_position")
+        next_expiry = _cursor_expiry(cursor)
+        current_position = (
+            BoardState.objects.filter(pk=1).values_list("position", flat=True).first() or 0
+        )
+        if after_position > current_position:
+            raise InvalidCursor()
+        now = _database_now()
+        refresh_required = after_position < current_position or (
+            next_expiry is not None and next_expiry <= now
+        )
+        seconds_until_expiry = (
+            (next_expiry - now).total_seconds() if next_expiry is not None else None
+        )
+        if not credential_is_active(credential):
+            raise InvalidCredential()
+        return refresh_required, seconds_until_expiry
+    finally:
+        connection.close()
+
+
+async def wait_for_board(
+    *,
+    credential: AgentCredential,
+    after_cursor: str,
+    wait_seconds: int = 20,
+) -> dict[str, Any]:
+    """Wait for a shared board revision or its captured expiry boundary."""
+
+    limits = instance_limits.effective_limits()
+    if (
+        isinstance(wait_seconds, bool)
+        or not isinstance(wait_seconds, int)
+        or wait_seconds < 0
+        or wait_seconds > limits.maximum_long_poll_seconds
+    ):
+        raise InvalidRequest(
+            f"wait_seconds must be from 0 through {limits.maximum_long_poll_seconds}."
+        )
+    sqlite_backend = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
+    executor = None if sqlite_backend else ASYNC_DATABASE_EXECUTOR
+    inspect = sync_to_async(
+        partial(
+            _read_board_wait_state_for_async,
+            credential=credential,
+            after_cursor=after_cursor,
+        ),
+        thread_sensitive=sqlite_backend,
+        executor=executor,
+    )
+    if wait_seconds == 0:
+        refresh_required, _ = await inspect()
+        return {"refresh_required": refresh_required, "board_cursor": after_cursor}
+
+    deadline = time.monotonic() + wait_seconds
+    waiter = activity_listener.register_board()
+    try:
+        while True:
+            refresh_required, seconds_until_expiry = await inspect()
+            if refresh_required:
+                return {"refresh_required": True, "board_cursor": after_cursor}
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"refresh_required": False, "board_cursor": after_cursor}
+            wait_for = remaining
+            if seconds_until_expiry is not None:
+                wait_for = min(wait_for, max(seconds_until_expiry, 0))
+            await activity_listener.wait(waiter, wait_for)
+    finally:
+        activity_listener.unregister_board(waiter)

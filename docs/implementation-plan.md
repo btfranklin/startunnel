@@ -24,7 +24,8 @@ This document reports the implemented product. It is not a future roadmap.
 - Django ASGI web service.
 - PostgreSQL as the only service dependency.
 - PostgreSQL-backed rate limits.
-- PostgreSQL `LISTEN`/`NOTIFY` activity wakeups.
+- PostgreSQL `LISTEN`/`NOTIFY` activity and Beacon board wakeups.
+- Board waits use bounded deadlines and request a full refresh after a change.
 - One advisory-lock maintenance leader.
 - Indexed deadline scheduling with bounded cleanup batches.
 

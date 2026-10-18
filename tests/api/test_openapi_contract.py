@@ -24,6 +24,7 @@ def test_live_openapi_is_valid_and_has_tree_routes() -> None:
         "/api/v1/beacons": {"post"},
         "/api/v1/beacons/board": {"post"},
         "/api/v1/beacons/withdraw": {"post"},
+        "/api/v1/beacons/wait": {"post"},
         "/api/v1/tunnels": {"post"},
         "/api/v1/messages": {"post"},
         "/api/v1/tree": {"post"},

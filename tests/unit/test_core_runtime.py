@@ -12,7 +12,7 @@ import pytest
 from django.test import Client
 
 from core.activity_listener import ActivityListener, _connection_kwargs
-from core.notifications import notify, notify_maintenance
+from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
 
 pytestmark = pytest.mark.django_db
 
@@ -75,9 +75,11 @@ def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr("core.notifications.connection.vendor", "postgresql")
     monkeypatch.setattr("core.notifications.connection.cursor", Cursor)
     notify("channel", "payload")
+    notify(BOARD_CHANNEL)
     notify_maintenance()
     assert executed == [
         ("SELECT pg_notify(%s, %s)", ["channel", "payload"]),
+        ("SELECT pg_notify(%s, %s)", [BOARD_CHANNEL, "1"]),
         ("SELECT pg_notify(%s, %s)", ["startunnel_maintenance", "1"]),
     ]
 
@@ -111,7 +113,8 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
     tunnel_id = uuid4()
 
     class Notification:
-        def __init__(self, payload: str) -> None:
+        def __init__(self, channel: str, payload: str) -> None:
+            self.channel = channel
             self.payload = payload
 
     class Connection:
@@ -122,11 +125,12 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
             return None
 
         async def execute(self, sql: str) -> None:
-            assert sql == "LISTEN startunnel_activity"
+            assert sql in {"LISTEN startunnel_activity", f"LISTEN {BOARD_CHANNEL}"}
 
         async def notifies(self) -> Any:
-            yield Notification("invalid")
-            yield Notification(str(tunnel_id))
+            yield Notification("startunnel_activity", "invalid")
+            yield Notification("startunnel_activity", str(tunnel_id))
+            yield Notification(BOARD_CHANNEL, "1")
             raise asyncio.CancelledError
 
     async def connect(**kwargs: Any) -> Connection:
@@ -135,10 +139,13 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
     monkeypatch.setattr("core.activity_listener.psycopg.AsyncConnection.connect", connect)
     listener = ActivityListener()
     waiter = listener.register(tunnel_id)
+    board_waiter = listener.register_board()
     assert listener._task is not None
     with pytest.raises(asyncio.CancelledError):
         await listener._task
     assert waiter.is_set()
+    assert board_waiter.is_set()
+    assert listener._board_waiters == {board_waiter}
     await listener.stop()
 
 
@@ -148,18 +155,43 @@ async def test_listener_reconnects_after_database_error(
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")
     calls = 0
+    subscriptions: list[str] = []
 
     async def connect(**kwargs: Any) -> Any:
         nonlocal calls
         calls += 1
-        raise psycopg.OperationalError("down")
+        if calls == 1:
+            raise psycopg.OperationalError("down")
+        return RestoredConnection()
+
+    class RestoredConnection:
+        async def __aenter__(self) -> RestoredConnection:
+            return self
+
+        async def __aexit__(self, *arguments: Any) -> None:
+            return None
+
+        async def execute(self, query: str) -> None:
+            subscriptions.append(query)
+
+        async def notifies(self) -> Any:
+            assert listener._ready.is_set()
+            yield SimpleNamespace(channel=BOARD_CHANNEL, payload="1")
+            listener._stopping = True
 
     async def sleep(seconds: float) -> None:
         assert seconds == 1.0
-        listener._stopping = True
 
     monkeypatch.setattr("core.activity_listener.psycopg.AsyncConnection.connect", connect)
     monkeypatch.setattr("core.activity_listener.asyncio.sleep", sleep)
     listener = ActivityListener()
+    board_waiter = asyncio.Event()
+    listener._board_waiters.add(board_waiter)
+    tunnel_id = uuid4()
+    activity_waiter = asyncio.Event()
+    listener._waiters[tunnel_id] = {activity_waiter}
     await listener._run()
-    assert calls == 1
+    assert calls == 2
+    assert subscriptions == [f"LISTEN {ACTIVITY_CHANNEL}", f"LISTEN {BOARD_CHANNEL}"]
+    assert board_waiter.is_set()
+    assert activity_waiter.is_set()

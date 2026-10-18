@@ -188,6 +188,14 @@ def run_cli(
             {"beacon": {"id": "beacon-id"}, "idempotent_replay": False},
         ),
         (
+            "beacon-wait",
+            [],
+            {"after_cursor": "board-cursor"},
+            "/beacons/wait",
+            200,
+            {"refresh_required": False, "board_cursor": "board-cursor"},
+        ),
+        (
             "beacon-board",
             [],
             {},
@@ -222,7 +230,7 @@ def test_commands_preserve_public_request_bodies_and_map_scope(
     request = scenario.requests[0]
     assert request["path"] == "/api/v1" + suffix
     expected_body = dict(body)
-    if action == "wait":
+    if action in {"wait", "beacon-wait"}:
         expected_body["wait_seconds"] = 20
     assert request["body"] == expected_body
     assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
@@ -703,6 +711,7 @@ def test_admin_cycle_commands_forward_root_session(
         "beacon-publish",
         "beacon-withdraw",
         "beacon-board",
+        "beacon-wait",
         "tutorial",
     ],
 )

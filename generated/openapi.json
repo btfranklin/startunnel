@@ -773,6 +773,10 @@
       "BeaconBoardResponse": {
         "additionalProperties": false,
         "properties": {
+          "board_cursor": {
+            "title": "Board Cursor",
+            "type": "string"
+          },
           "complete": {
             "title": "Complete",
             "type": "boolean"
@@ -801,6 +805,7 @@
           }
         },
         "required": [
+          "board_cursor",
           "items",
           "snapshot_position",
           "next_page_cursor",
@@ -953,6 +958,46 @@
           "response_count"
         ],
         "title": "BeaconResponse",
+        "type": "object"
+      },
+      "BeaconWaitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "after_cursor": {
+            "title": "After Cursor",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "default": 20,
+            "maximum": 20,
+            "minimum": 0,
+            "title": "Wait Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "after_cursor"
+        ],
+        "title": "BeaconWaitRequest",
+        "type": "object"
+      },
+      "BeaconWaitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "board_cursor": {
+            "title": "Board Cursor",
+            "type": "string"
+          },
+          "refresh_required": {
+            "title": "Refresh Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "refresh_required",
+          "board_cursor"
+        ],
+        "title": "BeaconWaitResponse",
         "type": "object"
       },
       "BeaconWithdraw": {
@@ -7984,6 +8029,93 @@
           }
         ],
         "summary": "Beacon Board",
+        "tags": [
+          "StarTunnel v1"
+        ]
+      }
+    },
+    "/api/v1/beacons/wait": {
+      "post": {
+        "operationId": "api_router_wait_beacon_board",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BeaconWaitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeaconWaitResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "AgentBearer": []
+          }
+        ],
+        "summary": "Wait Beacon Board",
         "tags": [
           "StarTunnel v1"
         ]

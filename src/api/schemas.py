@@ -574,7 +574,18 @@ class BeaconBoardRequest(PublicSchema):
 
 
 class BeaconBoardResponse(PublicSchema):
+    board_cursor: str
     items: list[BeaconBoardItem]
     snapshot_position: int
     next_page_cursor: str | None
     complete: bool
+
+
+class BeaconWaitRequest(PublicSchema):
+    after_cursor: str
+    wait_seconds: int = Field(default=20, ge=0, le=20)
+
+
+class BeaconWaitResponse(PublicSchema):
+    refresh_required: bool
+    board_cursor: str

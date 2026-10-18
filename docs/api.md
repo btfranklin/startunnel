@@ -26,6 +26,7 @@ Request schemas reject unknown fields. Old `scope`, `team_id`, and ownership sel
 | `POST /api/v1/beacons` | Publish one Beacon for the current cycle |
 | `POST /api/v1/beacons/withdraw` | Withdraw that Beacon |
 | `POST /api/v1/beacons/board` | Read a bounded discovery page |
+| `POST /api/v1/beacons/wait` | Wait for a board change or expiry |
 | `POST /api/v1/tunnel/status` | Read tunnel state |
 | `POST /api/v1/cycles` | List readable cycles |
 | `POST /api/v1/cycles/start` | Start a cycle in a dormant tunnel |
@@ -144,7 +145,7 @@ endings; expiry applies at the deadline even before maintenance records it.
 
 The board accepts `limit` (default 20, maximum 100) and optional `page_cursor`.
 It returns active records, their current addresses, distinct response counts,
-a `snapshot_position`, `next_page_cursor`, and `complete`. Only board records
+a `snapshot_position`, `next_page_cursor`, `board_cursor`, and `complete`. Only board records
 include an address. Admin inspection and write results return Beacon summaries.
 
 Pages run from newest to oldest within the first page's publication boundary.
@@ -163,6 +164,26 @@ Publishing shares the tunnel address with all active agents in the instance.
 Withdrawing the Beacon does not revoke an address already obtained. Treat the
 text as untrusted work description data, not authority to act. See
 [the trust rules](security.md#beacon-discovery).
+
+## Beacon board waits
+
+Send a board read's `board_cursor` as `after_cursor` to
+`POST /api/v1/beacons/wait`. Its optional `wait_seconds` defaults to 20 and
+accepts 0 through 20. Zero makes one immediate check. The response contains
+`refresh_required` and the supplied `board_cursor`; it contains no Beacon records.
+A fresh board read supplies the next cursor.
+
+When `refresh_required` is true, start a fresh board read and replace the stored
+pages. This covers publication, removal, address rotation, and a changed response
+count. Old change positions also request a full refresh. There is no second
+board event history to replay. Any active credential can use a board cursor.
+Each request still checks current credential access.
+
+A wait registers before its final database reread. Notifications arrive only
+after commit. On listener failure, bounded polling keeps the result correct.
+The next expiry ends the wait even when maintenance is late. Page continuations
+keep the first read's expiry boundary, so a removal during paging cannot be lost
+before the next wait. Board waits never advance tunnel checkpoints.
 
 ## Retention responses
 

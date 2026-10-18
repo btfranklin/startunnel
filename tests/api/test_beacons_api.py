@@ -228,3 +228,104 @@ def test_beacon_board_uses_the_agent_request_allowance(
     limited = _post(client, "/api/v1/beacons/board", {}, key)
     assert limited.status_code == 429
     assert int(limited.headers["Retry-After"]) > 0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_board_wait_returns_explicit_refresh_and_accepts_another_active_reader(
+    client: Any, credential_factory: Any
+) -> None:
+    _, publisher_key = credential_factory()
+    _, reader_key = credential_factory()
+    initial = _post(client, "/api/v1/beacons/board", {}, publisher_key).json()
+    unchanged = _post(
+        client,
+        "/api/v1/beacons/wait",
+        {"after_cursor": initial["board_cursor"], "wait_seconds": 0},
+        reader_key,
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json() == {
+        "refresh_required": False,
+        "board_cursor": initial["board_cursor"],
+    }
+    created = _post(
+        client,
+        "/api/v1/tunnels",
+        {"cycle": {"root": {"content": {"type": "text", "text": "Review request."}}}},
+        publisher_key,
+        "board-wait-api-create",
+    ).json()
+    published = _post(
+        client,
+        "/api/v1/beacons",
+        {"address": created["tunnel"]["address"], "text": "Review request."},
+        publisher_key,
+        "board-wait-api-publish",
+    )
+    assert published.status_code == 201
+    changed = _post(
+        client,
+        "/api/v1/beacons/wait",
+        {"after_cursor": initial["board_cursor"], "wait_seconds": 0},
+        reader_key,
+    )
+    assert changed.status_code == 200
+    assert changed.json()["refresh_required"] is True
+    assert set(changed.json()) == {"refresh_required", "board_cursor"}
+    refreshed = _post(client, "/api/v1/beacons/board", {}, reader_key).json()
+    assert len(refreshed["items"]) == 1
+    assert (
+        _post(
+            client,
+            "/api/v1/beacons/wait",
+            {"after_cursor": refreshed["board_cursor"], "wait_seconds": 0},
+            reader_key,
+        ).json()["refresh_required"]
+        is False
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_board_wait_observes_expiry_without_maintenance(
+    client: Any, credential_factory: Any
+) -> None:
+    from tunnels.beacons import publish_beacon
+    from tunnels.models import Beacon
+    from tunnels.services import create_tunnel
+
+    creator, key = credential_factory()
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="board-expiry-api-create",
+        root_content={"type": "text", "text": "Review request."},
+    )
+    result, _ = publish_beacon(
+        credential=creator,
+        idempotency_key="board-expiry-api-publish",
+        address=created.address,
+        text="Review request.",
+        lifetime_seconds=1,
+    )
+    page = _post(client, "/api/v1/beacons/board", {}, key).json()
+    waited = _post(
+        client,
+        "/api/v1/beacons/wait",
+        {"after_cursor": page["board_cursor"], "wait_seconds": 2},
+        key,
+    )
+    assert waited.status_code == 200
+    assert waited.json()["refresh_required"] is True
+    assert Beacon.objects.get(pk=result["id"]).ended_at is None
+    assert _post(client, "/api/v1/beacons/board", {}, key).json()["items"] == []
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "body",
+    [{}, {"after_cursor": "invalid"}, {"after_cursor": "invalid", "wait_seconds": 21}],
+)
+def test_board_wait_rejects_invalid_requests(
+    client: Any, credential_factory: Any, body: dict[str, Any]
+) -> None:
+    _, key = credential_factory()
+    assert _post(client, "/api/v1/beacons/wait", body, key).status_code == 400
