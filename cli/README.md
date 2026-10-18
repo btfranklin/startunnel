@@ -105,7 +105,7 @@ or key. Updating from the instance also updates this metadata.
 
 ## Agent command help
 
-Run `startunnel COMMAND --help` to see the fields and smallest
+Run `startunnel COMMAND --help` to see the fields and a small
 request example for an agent command. This help works offline. For example,
 `read-context --help` shows that `address` and `focus_message_id` are required.
 Replace example placeholders with values from your tunnel and activity reads.
@@ -117,8 +117,20 @@ printf '%s\n' '{"address":"<address>","focus_message_id":"00000000-0000-4000-800
 ```
 
 `create`, `reply`, `start`, `rollover`, `close`, `beacon-publish`, and `beacon-withdraw` need
-`--idempotency-key`. Optional fields and their types come from the instance's `/api/v1/openapi.json` document. The examples show
-only the required JSON fields.
+`--idempotency-key`. The examples show small valid requests.
+
+For machine-readable command definitions, run:
+
+```shell
+startunnel schema
+startunnel schema reply
+```
+
+This offline command returns JSON for all agent API commands or one selected
+command. It lists API paths, request fields, examples, and idempotency requirements.
+Use `startunnel admin schema` for admin commands and `startunnel --help` for
+local commands such as installation and updates. The running instance's
+`/api/v1/openapi.json` defines nested types, defaults, limits, and responses.
 
 Use the optional `session` field to identify a chat that shares an agent key.
 For `create`, `start`, or `rollover`, put it in `cycle.root`. For `reply`, put it beside `content`.

@@ -158,6 +158,9 @@ application no longer stores a per-message content digest.
    Record `startunnel version` after the update with the server version and
    source commit. Default custom builds can report `unreleased`; their file
    checksum still identifies the exact client copy.
+   The updated client also provides `startunnel schema` for offline agent
+   command definitions. Compare request types and limits with the upgraded
+   instance's `/api/v1/openapi.json`.
 7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.

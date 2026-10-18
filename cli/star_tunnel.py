@@ -676,6 +676,36 @@ def route_path(action: str) -> str:
     return "/api/v1" + ROUTES[action][1]
 
 
+def agent_schema(command: str | None = None) -> dict[str, Any]:
+    """Describe agent API commands without a connection or credential."""
+
+    commands = []
+    for action in ("me", *ROUTES):
+        if command is not None and action != command:
+            continue
+        method, suffix, statuses = ROUTES.get(action, ("GET", "/me", {200}))
+        spec = AGENT_COMMANDS[action]
+        commands.append(
+            {
+                "command": action,
+                "method": method,
+                "path": "/api/v1" + suffix,
+                "stdin_json": action != "me",
+                "idempotency_key_required": action in WRITE_COMMANDS,
+                "required_fields": list(spec["required"]),
+                "optional_fields": list(spec["optional"]),
+                "example": spec["example"],
+                "success_statuses": sorted(statuses),
+            }
+        )
+    return {
+        "authentication": ["STARTUNNEL_AGENT_KEY"],
+        "base_url_environment": "STARTUNNEL_BASE_URL",
+        "openapi_path": "/api/v1/openapi.json",
+        "commands": commands,
+    }
+
+
 def run_action(arguments: argparse.Namespace) -> dict[str, Any]:
     """Run one direct API action."""
 
@@ -1191,6 +1221,8 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--bin-dir", default="~/.local/bin", help="Command directory.")
     subparsers.add_parser("update", help="Update this client from STARTUNNEL_BASE_URL.")
     subparsers.add_parser("version", help="Show this client's release information and checksum.")
+    schema = subparsers.add_parser("schema", help="Show offline agent API command definitions.")
+    schema.add_argument("command", nargs="?", choices=("me", *ROUTES))
     add_admin_parser(subparsers)
     me = subparsers.add_parser("me", help="Show the current agent identity and limits.")
     me.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -1236,6 +1268,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = update_command()
         elif arguments.action == "version":
             result = client_version()
+        elif arguments.action == "schema":
+            result = agent_schema(arguments.command)
         elif arguments.action == "admin":
             result = run_admin(arguments)
         else:

@@ -672,6 +672,35 @@ def test_client_version_is_offline_and_describes_the_running_file() -> None:
     }
 
 
+@pytest.mark.parametrize("command", [None, "me", "start", "read-tree"])
+def test_agent_schema_is_offline_and_can_filter_one_command(command: str | None) -> None:
+    cli = _load_cli_module()
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    arguments = ["schema"] + ([command] if command is not None else [])
+    result = subprocess.run(
+        [sys.executable, str(CLI), *arguments],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    schema = json.loads(result.stdout)
+    assert schema["authentication"] == ["STARTUNNEL_AGENT_KEY"]
+    assert schema["base_url_environment"] == "STARTUNNEL_BASE_URL"
+    assert schema["openapi_path"] == "/api/v1/openapi.json"
+    all_commands = cli.agent_schema()["commands"]
+    assert {item["command"] for item in all_commands} == {"me", *cli.ROUTES}
+    assert schema["commands"] == [
+        item for item in all_commands if command is None or item["command"] == command
+    ]
+    if command is not None:
+        assert len(schema["commands"]) == 1
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Executable installation requires Linux or macOS.")
 def test_install_produces_a_standalone_command_and_replaces_an_existing_copy(
     executable_dir: Path,
@@ -908,6 +937,18 @@ def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
     assert {(method, "/api/v1" + suffix) for method, suffix, _expected in cli.ROUTES.values()} | {
         ("GET", "/api/v1/me")
     } == agent_operations
+    schema_commands = {item["command"]: item for item in cli.agent_schema()["commands"]}
+    assert {(item["method"], item["path"]) for item in schema_commands.values()} == agent_operations
+    for action, item in schema_commands.items():
+        operation = document["paths"][item["path"]][item["method"].lower()]
+        assert item["stdin_json"] == ("requestBody" in operation)
+        assert item["idempotency_key_required"] == (action in cli.WRITE_COMMANDS)
+        assert item["success_statuses"] == sorted(
+            int(status) for status in operation["responses"] if status.startswith("2")
+        )
+        assert item["required_fields"] == list(commands[action]["required"])
+        assert item["optional_fields"] == list(commands[action]["optional"])
+        assert item["example"] == commands[action]["example"]
 
     for action, (method, suffix, _expected) in cli.ROUTES.items():
         operation = document["paths"]["/api/v1" + suffix][method.lower()]

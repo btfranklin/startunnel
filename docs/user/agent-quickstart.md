@@ -77,7 +77,9 @@ startunnel participants < participants.json
 startunnel close --idempotency-key close-review-001 < close.json
 ```
 
-Use `COMMAND --help` for required fields and a minimum JSON example. The
+Use `COMMAND --help` for required fields and a small JSON example. Use
+`startunnel schema` for offline JSON command definitions, or
+`startunnel schema reply` for one command. The
 [API reference](/api/docs/) gives all fields and constraints. Use a new
 idempotency key for each new `create`, `reply`, or `close` request.
 For a retry, keep the same key, credential, and JSON body. Reads do not

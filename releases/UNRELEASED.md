@@ -43,3 +43,11 @@ search, tunnel status, cycle listing, cycle start, and rollover. Use
 `startunnel COMMAND --help` for the request body. Cycle writes require an
 idempotency key and inspected state. Upgrade the client after the server so
 these commands match the instance's API.
+
+## Offline command definitions
+
+`startunnel schema` returns JSON definitions for all agent API commands.
+Add a command name, such as `startunnel schema reply`, to select one.
+No URL or credential is needed. Use the running instance's OpenAPI document
+for nested types, defaults, limits, and responses. Admin command definitions
+remain available through `startunnel admin schema`.
