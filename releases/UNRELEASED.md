@@ -148,3 +148,6 @@ backend is unavailable. The isolated PostgreSQL lane measures recursive-query
 coverage and requires complete critical coverage. New tests check deep subtree
 pages, forced close/post and expiry/post lock orders, and physical deletion of
 a branched message history.
+
+The cycle directory now returns only its usable page cursor. The unused
+`snapshot_cursor` field is removed.

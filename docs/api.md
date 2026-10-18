@@ -194,6 +194,12 @@ The next expiry ends the wait even when maintenance is late. Page continuations
 keep the first read's expiry boundary, so a removal during paging cannot be lost
 before the next wait. Board waits never advance tunnel checkpoints.
 
+## Cycle directory
+
+`POST /api/v1/cycles` lists readable cycles, newest first. Send the returned
+`next_page_cursor` as `page_cursor` to continue. The cursor keeps the first
+page's upper cycle bound. `complete` is true when no later page remains.
+
 ## Retention responses
 
 At a cycle's deletion deadline, content reads return the normal unavailable response even if physical deletion has not run. Deleted cycles are not available through content reads or the cycle directory. PostgreSQL keeps a minimal cycle tombstone and a redacted event spine. Activity positions stay valid, but deleted messages, labels, counts, and content are not returned.

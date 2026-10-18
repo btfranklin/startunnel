@@ -1761,15 +1761,10 @@
               }
             ],
             "title": "Next Page Cursor"
-          },
-          "snapshot_cursor": {
-            "title": "Snapshot Cursor",
-            "type": "string"
           }
         },
         "required": [
           "items",
-          "snapshot_cursor",
           "next_page_cursor",
           "complete"
         ],

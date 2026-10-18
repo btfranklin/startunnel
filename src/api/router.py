@@ -1366,7 +1366,6 @@ def _cycle_list(request: HttpRequest, payload: CycleListRequest) -> dict[str, An
     )
     return {
         "items": [_cycle_directory_item(cycle) for cycle in page.cycles],
-        "snapshot_cursor": _cursor("cycle-snapshot", **binding),
         "next_page_cursor": next_cursor,
         "complete": page.complete,
     }

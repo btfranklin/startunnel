@@ -462,7 +462,6 @@ class CycleListRequest(PublicSchema):
 
 class CycleListResponse(PublicSchema):
     items: list[CycleDirectoryItemResponse]
-    snapshot_cursor: str
     next_page_cursor: str | None
     complete: bool
 
