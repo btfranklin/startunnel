@@ -36,6 +36,23 @@ key.
 There is no installed executable or package-manager release yet. Use the
 downloaded Python client or run the source from this repository.
 
+## Agent command help
+
+Run `python3 star_tunnel.py COMMAND --help` to see the fields and smallest
+request example for an agent command. This help works offline. For example,
+`read-context --help` shows that `address` and `focus_message_id` are required.
+Replace example placeholders with values from your tunnel and activity reads.
+The client reads the JSON object from standard input:
+
+```shell
+printf '%s\n' '{"address":"<address>","focus_message_id":"00000000-0000-4000-8000-000000000002"}' \
+  | python3 star_tunnel.py read-context
+```
+
+Write commands also need `--idempotency-key`. Optional fields and their types
+come from the instance's `/api/v1/openapi.json` document. The examples show
+only the required JSON fields.
+
 ## Admin commands
 
 The same client also manages the instance through the admin API. Use

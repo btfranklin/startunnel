@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLI = PROJECT_ROOT / "cli" / "star_tunnel.py"
@@ -483,3 +485,67 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
         "urllib",
         "uuid",
     }
+
+
+def _load_cli_module() -> Any:
+    spec = importlib.util.spec_from_file_location("startunnel_cli_contract", CLI)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_schema(schema: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
+    reference = schema.get("$ref")
+    if reference is None:
+        return schema
+    assert reference.startswith("#/components/schemas/")
+    name = reference.rsplit("/", 1)[1]
+    resolved = document["components"]["schemas"][name]
+    return _resolve_schema(resolved, document)
+
+
+def test_agent_help_fields_and_examples_match_generated_openapi() -> None:
+    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    cli = _load_cli_module()
+    commands = cli.AGENT_COMMANDS
+    assert set(commands) == {"me", "tutorial", *cli.ROUTES}
+    assert commands["me"]["example"] is None
+    assert commands["tutorial"]["example"] is None
+
+    for action, (method, suffix, _expected) in cli.ROUTES.items():
+        operation = document["paths"]["/api/v1" + suffix][method.lower()]
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+        resolved = _resolve_schema(request_schema, document)
+        properties = resolved["properties"]
+        required = set(resolved.get("required", ()))
+        assert set(commands[action]["required"]) == required
+        assert set(commands[action]["optional"]) == set(properties) - required
+        validation_schema = {**request_schema, "components": document["components"]}
+        Draft202012Validator(validation_schema, format_checker=FormatChecker()).validate(
+            commands[action]["example"]
+        )
+
+
+@pytest.mark.parametrize(
+    "action", ["me", "create", "reply", "wait", "read-context", "checkpoint", "close", "tutorial"]
+)
+def test_agent_command_help_is_offline_and_shows_request_contract(action: str) -> None:
+    result = subprocess.run(
+        [sys.executable, str(CLI), action, "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (
+        "Request fields:" in result.stdout
+        if action in {"me", "tutorial"}
+        else "Required JSON fields:" in result.stdout
+    )
+    if action == "read-context":
+        assert "focus_message_id" in result.stdout
+    if action in {"create", "reply", "close"}:
+        assert "--idempotency-key" in result.stdout

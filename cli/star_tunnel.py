@@ -341,6 +341,98 @@ ROUTES = {
 }
 
 
+# Keep this small table in the downloaded client so command help works offline.
+# The OpenAPI contract test checks these fields and examples against the server.
+AGENT_COMMANDS: dict[str, dict[str, Any]] = {
+    "me": {
+        "required": (),
+        "optional": (),
+        "example": None,
+    },
+    "create": {
+        "required": ("cycle",),
+        "optional": ("label",),
+        "example": {"cycle": {"root": {"content": {"type": "text", "text": "Ready for review."}}}},
+    },
+    "reply": {
+        "required": ("address", "parent_id", "content"),
+        "optional": ("correlation_id", "mentions"),
+        "example": {
+            "address": "<address>",
+            "parent_id": "00000000-0000-4000-8000-000000000001",
+            "content": {"type": "text", "text": "I will review this."},
+        },
+    },
+    "wait": {
+        "required": ("address",),
+        "optional": ("after_cursor", "event_types", "limit", "wait_seconds"),
+        "example": {"address": "<address>"},
+    },
+    "read-context": {
+        "required": ("address", "focus_message_id"),
+        "optional": (
+            "after_cursor",
+            "cycle_id",
+            "include_branch",
+            "include_direct_replies",
+            "include_recent_activity",
+            "max_bytes",
+            "max_items",
+            "referenced_message_ids",
+            "snapshot_cursor",
+        ),
+        "example": {
+            "address": "<address>",
+            "focus_message_id": "00000000-0000-4000-8000-000000000002",
+        },
+    },
+    "checkpoint": {
+        "required": ("address", "cursor"),
+        "optional": (),
+        "example": {"address": "<address>", "cursor": "<activity-cursor>"},
+    },
+    "close": {
+        "required": ("address", "expected_cycle_id"),
+        "optional": (),
+        "example": {
+            "address": "<address>",
+            "expected_cycle_id": "00000000-0000-4000-8000-000000000003",
+        },
+    },
+    "tutorial": {
+        "required": (),
+        "optional": (),
+        "example": None,
+    },
+}
+
+
+def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
+    """Add offline field and request example details to one agent command."""
+
+    spec = AGENT_COMMANDS[action]
+    if action in {"me", "tutorial"}:
+        command.description = "This command accepts no JSON input on standard input."
+        command.epilog = "Request fields: none. Example: python3 star_tunnel.py " + action
+        return
+
+    command.description = "Read one JSON request object from standard input."
+    command.epilog = (
+        "Required JSON fields: "
+        + ", ".join(spec["required"])
+        + ". Optional JSON fields: "
+        + (", ".join(spec["optional"]) or "none")
+        + ".\n"
+    )
+    if action in {"create", "reply", "close"}:
+        command.epilog += "This write also requires --idempotency-key.\n"
+    if action == "wait":
+        command.epilog += "The client uses wait_seconds 20 when it is omitted.\n"
+    command.epilog += "Example JSON (replace placeholder values):\n" + json.dumps(
+        spec["example"], ensure_ascii=False, separators=(",", ":")
+    )
+
+
 def route_path(action: str) -> str:
     """Map one high-level action to its public API route."""
 
@@ -833,16 +925,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
     add_admin_parser(subparsers)
-    subparsers.add_parser("me", help="Show the current agent identity and limits.")
+    me = subparsers.add_parser("me", help="Show the current agent identity and limits.")
+    me.formatter_class = argparse.RawDescriptionHelpFormatter
+    add_agent_help(me, "me")
 
     for action in ("create", "reply", "close"):
         command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
+        command.formatter_class = argparse.RawDescriptionHelpFormatter
+        add_agent_help(command, action)
         command.add_argument("--idempotency-key", required=True, help="Retry key for this write.")
 
     for action in ("wait", "read-context", "checkpoint"):
         command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
+        command.formatter_class = argparse.RawDescriptionHelpFormatter
+        add_agent_help(command, action)
 
-    subparsers.add_parser("tutorial", help="Run a complete two-agent tutorial exchange.")
+    tutorial = subparsers.add_parser("tutorial", help="Run a complete two-agent tutorial exchange.")
+    tutorial.formatter_class = argparse.RawDescriptionHelpFormatter
+    add_agent_help(tutorial, "tutorial")
     return parser
 
 
