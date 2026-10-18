@@ -33,12 +33,6 @@ class TunnelEntry:
     activity_cursor: str
 
 
-def _lock_entry_tunnel(*, credential: AgentCredential, address: str) -> Tunnel:
-    """Lock the tunnel and recheck the active credential and current address."""
-
-    return resolve_tunnel(credential=credential, address=address, for_update=True)
-
-
 def _entry_message_payload(message: Message) -> dict[str, Any]:
     payload = message_payload(message)
     # Keep datetime precision for Pydantic. Its output then matches the shared
@@ -135,7 +129,7 @@ def enter_tunnel(
     if max_bytes < 1 or max_bytes > limits.maximum_context_bytes:
         raise InvalidRequest(f"max_bytes must be from 1 through {limits.maximum_context_bytes}.")
 
-    tunnel = _lock_entry_tunnel(credential=credential, address=address)
+    tunnel = resolve_tunnel(credential=credential, address=address, for_update=True)
     cycle = None
     root = None
     candidates: tuple[Message, ...] = ()
@@ -179,12 +173,6 @@ def enter_tunnel(
                 rows.reverse()
                 candidates = tuple(rows)
 
-    if not credential_is_active(credential):
-        raise InvalidCredential()
-    confirmed_tunnel = _lock_entry_tunnel(credential=credential, address=address)
-    if confirmed_tunnel.id != tunnel.id or confirmed_tunnel.state == Tunnel.State.RETIRED:
-        raise TunnelUnavailable()
-
     chosen: list[Message] = []
     chosen_sizes: list[int] = []
     for message in reversed(candidates):
@@ -213,4 +201,6 @@ def enter_tunnel(
     )
     if _response_wire_size(result, tuple(chosen_sizes)) > max_bytes:
         raise EntryBudgetTooSmall()
+    if not credential_is_active(credential):
+        raise InvalidCredential()
     return result

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -11,14 +10,12 @@ import pytest
 
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
-from core.limits import Limits
 from tunnels.activity import (
     ActivityPage,
     _ActivityStart,
     _begin_activity_wait_for_async,
     _confirm_activity_page_for_async,
     _continue_activity_wait_for_async,
-    _limits_for_async,
     commit_checkpoint,
     read_activity,
     read_activity_async,
@@ -236,15 +233,6 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
     ready = ActivityPage(tunnel, (event,), 2, 3, 3, False, True)
     pages = [empty, ready]
     registered: list[Any] = []
-    returned_connections: list[bool] = []
-    monkeypatch.setattr(
-        "tunnels.activity.connection",
-        SimpleNamespace(
-            vendor="postgresql",
-            in_atomic_block=False,
-            close=lambda: returned_connections.append(True),
-        ),
-    )
 
     class Listener:
         def register(self, tunnel_id: Any) -> asyncio.Event:
@@ -258,9 +246,6 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
             registered.append((tunnel_id, waiter))
 
     monkeypatch.setattr("tunnels.activity.activity_listener", Listener())
-    monkeypatch.setattr(
-        "tunnels.activity.limits_for", lambda _: SimpleNamespace(maximum_long_poll_seconds=20)
-    )
     monkeypatch.setattr(
         "tunnels.activity._begin_activity_wait_for_async",
         lambda **kwargs: _ActivityStart(tunnel=tunnel, position=2, high_water_position=2),
@@ -276,46 +261,6 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
     )
     assert page.events == (event,)
     assert registered[0] == tunnel.id and isinstance(registered[-1], tuple)
-    assert returned_connections == [True]
-
-
-@pytest.mark.parametrize(
-    "vendor,in_atomic,should_close",
-    [("postgresql", False, True), ("postgresql", True, False), ("sqlite", False, False)],
-)
-@pytest.mark.parametrize("invalid_credential", [False, True])
-def test_async_limits_return_worker_connection_even_when_credential_is_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-    vendor: str,
-    in_atomic: bool,
-    should_close: bool,
-    invalid_credential: bool,
-) -> None:
-    returned_connections: list[bool] = []
-    monkeypatch.setattr(
-        "tunnels.activity.connection",
-        SimpleNamespace(
-            vendor=vendor,
-            in_atomic_block=in_atomic,
-            close=lambda: returned_connections.append(True),
-        ),
-    )
-    credential = AgentCredential(id=uuid4(), name="Reader")
-    limits = Limits()
-
-    def check_limits(value: AgentCredential) -> Limits:
-        assert value is credential
-        if invalid_credential:
-            raise InvalidCredential()
-        return limits
-
-    monkeypatch.setattr("tunnels.activity.limits_for", check_limits)
-    if invalid_credential:
-        with pytest.raises(InvalidCredential):
-            _limits_for_async(credential)
-    else:
-        assert _limits_for_async(credential) is limits
-    assert returned_connections == ([True] if should_close else [])
 
 
 @pytest.mark.asyncio

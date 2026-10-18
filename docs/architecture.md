@@ -69,6 +69,10 @@ A tunnel contains ordered cycles. A cycle has one root message. Every later mess
 Messages store validated payloads and their byte counts. The database does not
 store a per-message content hash.
 
+Activity reads obtain the instance wait limit without a database task. Entry
+reads lock the tunnel once for the complete snapshot and check the credential
+after assembly.
+
 Context reads select the tunnel and cycle once, then load the focus message
 within that scope. A final access check applies credential revocation and
 address changes before the assembled result is returned.

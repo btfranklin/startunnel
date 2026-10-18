@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 import time_machine
+from django.utils import timezone
 
 from tunnels.entry import enter_tunnel
-from tunnels.errors import InvalidRequest, TunnelUnavailable
+from tunnels.errors import InvalidCredential, InvalidRequest, TunnelUnavailable
 from tunnels.models import ActivityCheckpoint, Cycle
 from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_operator
 
@@ -133,3 +134,33 @@ def test_entry_rejects_limits_outside_instance_bounds(
     created = _create(creator)
     with pytest.raises(InvalidRequest):
         enter_tunnel(credential=creator, address=created.address, **arguments)
+
+
+def test_entry_rechecks_revocation_after_assembly(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agents.models import AgentCredential
+    from tunnels import entry
+
+    creator, _ = credential_factory()
+    created = _create(creator)
+    original_size = entry._response_wire_size
+
+    def revoke_after_assembly(*args: Any, **kwargs: Any) -> int:
+        size = original_size(*args, **kwargs)
+        AgentCredential.objects.filter(pk=creator.pk).update(revoked_at=timezone.now())
+        return size
+
+    monkeypatch.setattr(entry, "_response_wire_size", revoke_after_assembly)
+    with pytest.raises(InvalidCredential):
+        enter_tunnel(credential=creator, address=created.address)
+
+
+def test_entry_keeps_its_snapshot_without_repeated_tunnel_queries(
+    credential_factory: Any, django_assert_num_queries: Any
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator)
+    with django_assert_num_queries(11):
+        view = enter_tunnel(credential=creator, address=created.address)
+    assert view.root is not None and view.root.pk == created.root.pk

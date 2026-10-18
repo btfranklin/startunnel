@@ -11,6 +11,7 @@ import pytest
 from django.db import DatabaseError, close_old_connections, connection, transaction
 
 from agents.models import AgentCredential
+from tunnels.access import resolve_tunnel
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
 from tunnels.services import CreatedTunnel, close_cycle, create_tunnel, post_reply
 
@@ -234,7 +235,7 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
     release_entry = threading.Event()
     writer_started = threading.Event()
     writer_finished = threading.Event()
-    original_lock = entry._lock_entry_tunnel
+    original_lock = resolve_tunnel
 
     def blocking_lock(**kwargs: Any) -> Tunnel:
         tunnel = original_lock(**kwargs)
@@ -243,7 +244,7 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
             assert release_entry.wait(timeout=15)
         return tunnel
 
-    monkeypatch.setattr(entry, "_lock_entry_tunnel", blocking_lock)
+    monkeypatch.setattr(entry, "resolve_tunnel", blocking_lock)
 
     def post_during_entry() -> Any:
         close_old_connections()
@@ -296,7 +297,7 @@ def test_entry_and_cycle_close_race_returns_a_consistent_state(
     release_entry = threading.Event()
     writer_started = threading.Event()
     writer_finished = threading.Event()
-    original_lock = entry._lock_entry_tunnel
+    original_lock = resolve_tunnel
 
     def blocking_lock(**kwargs: Any) -> Tunnel:
         tunnel = original_lock(**kwargs)
@@ -305,7 +306,7 @@ def test_entry_and_cycle_close_race_returns_a_consistent_state(
             assert release_entry.wait(timeout=15)
         return tunnel
 
-    monkeypatch.setattr(entry, "_lock_entry_tunnel", blocking_lock)
+    monkeypatch.setattr(entry, "resolve_tunnel", blocking_lock)
 
     def close_during_entry() -> None:
         close_old_connections()
