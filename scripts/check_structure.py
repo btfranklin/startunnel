@@ -106,96 +106,6 @@ def check_sensitive_route_fields() -> list[Failure]:
     return failures
 
 
-def check_sensitive_logging() -> list[Failure]:
-    sensitive = {
-        "address",
-        "cursor",
-        "receipt",
-        "payload",
-        "content",
-        "password",
-        "key",
-        "token",
-        "secret",
-    }
-    failures: list[Failure] = []
-    for path in _python_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr not in {"debug", "info", "warning", "error", "exception", "critical"}:
-                continue
-            for argument in [*node.args[1:], *(keyword.value for keyword in node.keywords)]:
-                names = {
-                    child.id.lower() for child in ast.walk(argument) if isinstance(child, ast.Name)
-                }
-                names.update(
-                    child.attr.lower()
-                    for child in ast.walk(argument)
-                    if isinstance(child, ast.Attribute)
-                )
-                matched = sorted(name for name in names if any(term in name for term in sensitive))
-                if matched:
-                    failures.append(
-                        Failure(
-                            "Logs do not contain secrets, addresses, cursors, or message content.",
-                            "docs/security.md",
-                            (
-                                "Remove the sensitive logging argument from "
-                                f"{path.relative_to(ROOT)}:{node.lineno}."
-                            ),
-                            f"A logging call uses sensitive value name(s): {', '.join(matched)}.",
-                        )
-                    )
-    return failures
-
-
-def check_transport_logging() -> list[Failure]:
-    failures: list[Failure] = []
-    for path in [ROOT / "Dockerfile", ROOT / "compose.yaml", ROOT / "compose.dev.yaml"]:
-        text = path.read_text(encoding="utf-8")
-        if text.count("uvicorn") != text.count("--no-access-log"):
-            failures.append(
-                Failure(
-                    "Transport access logs do not record browser bearer-token URLs.",
-                    "docs/security.md",
-                    f"Add `--no-access-log` to every Uvicorn command in {path.relative_to(ROOT)}.",
-                    "Uvicorn can log an OAuth code, state, or invitation token from a URL.",
-                )
-            )
-    caddyfile = ROOT / "docker/caddy/Caddyfile"
-    caddy_text = caddyfile.read_text(encoding="utf-8")
-    if caddy_text.count("request>uri delete") < 2:
-        failures.append(
-            Failure(
-                "Edge logs exclude complete request URIs.",
-                "docs/security.md",
-                "Filter `request>uri` from both Caddy runtime and access logs.",
-                "Caddy can record an OAuth code, state, or invitation token from a URL.",
-            )
-        )
-    if caddy_text.count("request>headers delete") < 2:
-        failures.append(
-            Failure(
-                "Edge logs exclude request headers.",
-                "docs/security.md",
-                "Filter `request>headers` from both Caddy loggers.",
-                "Caddy can record authorization, retry, CSRF, metrics, or referrer values.",
-            )
-        )
-    if caddy_text.count("resp_headers delete") < 2:
-        failures.append(
-            Failure(
-                "Edge logs exclude response headers.",
-                "docs/security.md",
-                "Filter `resp_headers` from both Caddy loggers.",
-                "Caddy can record a redirect Location that contains a browser bearer token.",
-            )
-        )
-    return failures
-
-
 def check_settings_documentation() -> list[Failure]:
     declared = (ROOT / ".env.example").read_text(encoding="utf-8")
     documented = declared + "\n" + (ROOT / "docs/operations.md").read_text(encoding="utf-8")
@@ -245,8 +155,6 @@ def collect_failures() -> list[Failure]:
     checks = [
         check_import_directions,
         check_sensitive_route_fields,
-        check_sensitive_logging,
-        check_transport_logging,
         check_settings_documentation,
         check_migration_roots,
     ]

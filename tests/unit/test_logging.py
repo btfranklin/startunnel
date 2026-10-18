@@ -1,4 +1,4 @@
-"""JSON logs keep fixed diagnostics and omit sensitive values."""
+"""JSON logs keep operational diagnostics and omit raw request and SQL values."""
 
 import json
 import logging
@@ -15,15 +15,22 @@ from core.metrics import API_REQUEST_SECONDS
 from core.middleware import RequestIdMiddleware
 
 
-def test_json_formatter_cannot_serialize_raw_tokens() -> None:
+@pytest.mark.parametrize(
+    "logger_name", ["django.request", "django.server", "django.security.DisallowedHost"]
+)
+def test_json_formatter_cannot_serialize_raw_http_tokens(logger_name: str) -> None:
     token = "raw-access-token"
     confirmation = "raw-authorization-code"
+    host = "synthetic-host-marker"
     record = logging.LogRecord(
-        name="django.request",
+        name=logger_name,
         level=logging.WARNING,
         pathname="/safe/source.py",
         lineno=42,
-        msg=(f"Request /continue/?token={token} failed after /continue/?code={confirmation}"),
+        msg=(
+            f"Request /continue/?token={token} failed after /continue/?code={confirmation}; "
+            f"Host: {host}"
+        ),
         args=(),
         exc_info=None,
     )
@@ -33,9 +40,40 @@ def test_json_formatter_cannot_serialize_raw_tokens() -> None:
     parsed = json.loads(output)
     assert token not in output
     assert confirmation not in output
+    assert host not in output
     assert "[REDACTED]" in parsed["message"]
     assert "request_path" not in parsed
     assert "request" not in parsed
+
+
+def test_operational_warning_survives_but_sql_query_text_does_not() -> None:
+    warning = logging.LogRecord(
+        name="django.db.backends",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg="Connection pool exhausted.",
+        args=(),
+        exc_info=None,
+    )
+    warning.untrusted_extra = "synthetic-secret-marker"
+    rendered_warning = SafeJsonFormatter().format(warning)
+    assert json.loads(rendered_warning)["message"] == "Connection pool exhausted."
+    assert "synthetic-secret-marker" not in rendered_warning
+
+    query = logging.LogRecord(
+        name="django.db.backends",
+        level=logging.DEBUG,
+        pathname=__file__,
+        lineno=1,
+        msg="SELECT * FROM messages WHERE content = 'synthetic-payload-marker'",
+        args=(),
+        exc_info=None,
+    )
+    query.sql = "SELECT * FROM messages WHERE content = 'synthetic-payload-marker'"
+    rendered_query = SafeJsonFormatter().format(query)
+    assert json.loads(rendered_query)["message"] == "[REDACTED]"
+    assert "synthetic-payload-marker" not in rendered_query
 
 
 def test_json_formatter_keeps_exception_type_and_location_without_values() -> None:

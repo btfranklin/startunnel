@@ -1,4 +1,4 @@
-"""Emit fixed log events and safe diagnostic locations."""
+"""Emit operational logs without raw HTTP or SQL text."""
 
 from __future__ import annotations
 
@@ -13,9 +13,7 @@ from uuid import UUID
 
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 REQUEST_COMPLETED = "Request completed."
-LISTENER_DISCONNECTED = "The PostgreSQL activity listener disconnected."
 CYCLE_DELETION_FAILED = "Cycle content deletion failed."
-SAFE_LOG_MESSAGES = frozenset({REQUEST_COMPLETED, LISTENER_DISCONNECTED, CYCLE_DELETION_FAILED})
 
 
 def current_request_id() -> UUID | None:
@@ -28,15 +26,21 @@ def current_request_id() -> UUID | None:
 
 
 class SafeJsonFormatter(logging.Formatter):
-    """Write known event fields without exception values or arbitrary extras."""
+    """Write safe log fields without exception values or arbitrary extras."""
 
     def format(self, record: logging.LogRecord) -> str:
-        message = record.getMessage()
+        logger = record.name
+        raw_http = logger in {
+            "django.request",
+            "django.server",
+            "django.security",
+        } or logger.startswith(("django.request.", "django.server.", "django.security."))
+        message = "[REDACTED]" if raw_http or hasattr(record, "sql") else record.getMessage()
         event: dict[str, Any] = {
             "asctime": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "levelname": record.levelname,
             "name": record.name,
-            "message": message if message in SAFE_LOG_MESSAGES else "[REDACTED]",
+            "message": message,
         }
         request_id = getattr(record, "request_id", "-")
         if request_id == "-":

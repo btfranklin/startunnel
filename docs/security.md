@@ -54,7 +54,13 @@ strings. Addresses do not use a hash or a separate lookup secret.
 The upgrade from digest storage performs a [one-time tunnel reset](setup/address-storage.md).
 It deletes old tunnels and their content; it does not convert old addresses.
 
-Glyph addresses never appear in URL paths or application logs. Request logs contain a fixed message and bounded route metadata. Fixed listener and maintenance events keep their event names. Exception logs contain the exception type and up to eight file, function, and line locations, without exception values. Message content, cursors, addresses, keys, passwords, and identity fields are not log fields.
+Glyph addresses never appear in URL paths or application logs. Request logs
+contain a fixed message and bounded route metadata. The log formatter removes
+raw Django HTTP messages and SQL query text. It keeps ordinary operational
+warnings, such as a database connection pool warning. Exception logs contain
+the exception type and up to eight file, function, and line locations, without
+exception values. Message content, cursors, addresses, keys, passwords, and
+identity fields are not log fields.
 
 ## Database roles
 
