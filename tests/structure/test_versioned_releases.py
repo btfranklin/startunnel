@@ -134,6 +134,8 @@ def test_release_workflow_promotes_evidence_without_rebuilding() -> None:
     assert "secrets: inherit" not in workflow + candidate
     assert "OPENAI" not in candidate
     assert candidate.count("docker/build-push-action") == 1
+    ci = (release_record.ROOT / ".github/workflows/ci.yml").read_text()
+    assert "if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in ci
 
 
 @pytest.mark.parametrize("summary", ["", "  \n", "  Generated release summary.\n"])

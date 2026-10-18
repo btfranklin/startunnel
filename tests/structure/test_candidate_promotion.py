@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -100,12 +101,12 @@ def test_retained_evidence_hashes_are_checked(tmp_path: Path) -> None:
         candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
 
 
-def test_ci_selection_requires_completed_main_push_for_exact_commit() -> None:
+def test_ci_selection_requires_completed_manual_main_run_for_exact_commit() -> None:
     valid = {
         "id": 42,
         "head_sha": COMMIT,
         "head_branch": "main",
-        "event": "push",
+        "event": "workflow_dispatch",
         "status": "completed",
         "conclusion": "success",
     }
@@ -113,12 +114,49 @@ def test_ci_selection_requires_completed_main_push_for_exact_commit() -> None:
     for field, value in (
         ("head_sha", "other"),
         ("head_branch", "feature"),
-        ("event", "workflow_dispatch"),
+        ("event", "push"),
         ("status", "in_progress"),
         ("conclusion", "failure"),
     ):
         with pytest.raises(ValueError, match="exact commit"):
             candidate.successful_run({"workflow_runs": [{**valid, field: value}]}, COMMIT)
+
+
+def test_promotion_queries_manual_ci_runs_for_the_exact_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
+    monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
+    monkeypatch.setattr(sys, "argv", ["release_candidate.py", "--find-run", "v0.1.0"])
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+
+    def github_runs(command: list[str], **kwargs: Any) -> str:
+        assert command == [
+            "gh",
+            "api",
+            "repos/owner/repository/actions/workflows/ci.yml/runs"
+            f"?branch=main&event=workflow_dispatch&head_sha={COMMIT}&status=success&per_page=100",
+        ]
+        return json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 42,
+                        "head_sha": COMMIT,
+                        "head_branch": "main",
+                        "event": "workflow_dispatch",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("scripts.release_candidate.subprocess.check_output", github_runs)
+    assert candidate.main() == 0
+    assert output.read_text() == "run_id=42\n"
 
 
 def test_promotion_must_preserve_registry_digest() -> None:

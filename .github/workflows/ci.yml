@@ -122,7 +122,7 @@ jobs:
 
   release-candidate:
     name: Validate the distribution image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: [canonical, postgres, external-proofs, browser]
     permissions:
       contents: read

@@ -41,8 +41,10 @@ If there are no tested predecessors, leave the list empty and document why.
    CI checks Markdown structure with the checksummed Perfect Doc native release.
    The existing route, example, template, and browser checks remain in place.
    Perfect Doc does not grade prose or execute documented commands.
-3. Wait for the complete `ci.yml` push run on that exact commit. After the normal
-   CI jobs pass, it builds one Linux amd64 `runtime` image and stores it under a
+3. Normal pushes run source, PostgreSQL, agent, example, and browser checks.
+   When the commit is ready for release, select **Run workflow** for `ci.yml`
+   on `main`, or run `gh workflow run ci.yml --ref main`. This manual run checks
+   the selected commit and builds one Linux amd64 `runtime` image under a
    unique candidate tag in `ghcr.io/btfranklin/startunnel`. Its source revision
    and planned version labels are set at this build.
 4. The candidate digest passes security scanning, the isolated clean-stack
@@ -52,7 +54,7 @@ If there are no tested predecessors, leave the list empty and document why.
    that web, migration, and maintenance services used the candidate image.
 5. CI retains `release-candidate` for 14 days. This artifact contains the image
    digest, exact source commit, planned version, safe validation reports, and
-   evidence checksums. Only a complete successful push run on `main` is eligible
+   evidence checksums. Only a complete successful manual run on `main` is eligible
    for promotion. A candidate from a failed or incomplete run is not a release.
 
 Candidate validation also runs through the manual release-validation workflow.
@@ -70,7 +72,7 @@ git push origin v0.1.0
 ```
 
 Replace `TESTED_COMMIT` with its full SHA. The release workflow checks the tag
-against `VERSION`, finds a completed successful `ci.yml` push run on `main` for
+against `VERSION`, finds a completed successful manual `ci.yml` run on `main` for
 that exact source commit, and downloads its retained `release-candidate`.
 It checks report status, candidate identity, runtime image IDs, cleanup, and
 retained evidence checksums before promotion.

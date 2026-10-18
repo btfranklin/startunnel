@@ -148,7 +148,9 @@ probe counts.
 
 ## Candidate image evidence
 
-The main-branch CI candidate uses the release image's immutable digest:
+A manual CI run on `main` builds and validates a distribution candidate.
+Normal pushes run the source and service checks. Candidate proof uses the
+release image's immutable digest:
 
 ```shell
 pdm run python scripts/run_isolated_test_lane.py system --candidate-image IMAGE_DIGEST

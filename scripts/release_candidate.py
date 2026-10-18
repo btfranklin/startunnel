@@ -37,12 +37,12 @@ def successful_run(response: dict[str, Any], commit: str) -> int:
         if (
             run.get("head_sha") == commit
             and run.get("head_branch") == "main"
-            and run.get("event") == "push"
+            and run.get("event") == "workflow_dispatch"
             and run.get("status") == "completed"
             and run.get("conclusion") == "success"
         ):
             return int(run["id"])
-    raise ValueError("No completed successful CI push run on main exists for this exact commit.")
+    raise ValueError("No completed successful manual CI run on main exists for this exact commit.")
 
 
 def one_report(directory: Path, pattern: str) -> tuple[Path, dict[str, Any]]:
@@ -147,7 +147,7 @@ def main() -> int:
                     "gh",
                     "api",
                     f"repos/{repository}/actions/workflows/ci.yml/runs"
-                    f"?branch=main&event=push&head_sha={commit}&status=success&per_page=100",
+                    f"?branch=main&event=workflow_dispatch&head_sha={commit}&status=success&per_page=100",
                 ],
                 text=True,
             )
