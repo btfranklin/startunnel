@@ -310,11 +310,7 @@ def _safe_server_error(error: HTTPError) -> CliError:
                     request_id = str(uuid.UUID(candidate_request_id))
                 except ValueError:
                     request_id = None
-    except OSError:
-        pass
-    except UnicodeDecodeError:
-        pass
-    except json.JSONDecodeError:
+    except (OSError, HTTPException, UnicodeDecodeError, json.JSONDecodeError):
         pass
     if isinstance(request_id, str):
         try:

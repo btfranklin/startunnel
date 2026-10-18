@@ -225,6 +225,8 @@ key conflicts.
 
 Admin commands make at most three attempts for transient failures and respect
 `Retry-After`. Agent message commands make one attempt.
+An interrupted error body still returns the HTTP status as a JSON error and
+uses the same retry rules.
 If the required admin retry wait exceeds ten seconds, the client returns control
 with `error.retry_after` instead of retrying early. Wait for that interval, then
 repeat the exact request with its existing idempotency key.

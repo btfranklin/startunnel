@@ -61,3 +61,9 @@ status `2`. This includes missing commands, invalid options, and invalid
 idempotency keys. Update callers that parse the old argument-error text.
 Request failures still exit with `1`. Successful commands exit with `0`;
 explicit `--help` returns text on stdout with exit status `0`.
+
+## Interrupted API responses
+
+An interrupted HTTP error body now returns a JSON error with the HTTP status.
+Admin commands apply their existing transient-failure retry rules. Agent
+commands still make one attempt.

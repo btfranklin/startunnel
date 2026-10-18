@@ -511,6 +511,44 @@ def test_api_error_discards_reflected_credentials_in_safe_fields() -> None:
     assert reflected_key not in result.stderr
 
 
+@pytest.mark.parametrize("admin", [False, True])
+def test_interrupted_api_error_returns_json_and_preserves_retry_request(admin: bool) -> None:
+    attempts = 3 if admin else 1
+    arguments = (
+        ("admin", "tunnels", "close", "--idempotency-key", "review-close-001") if admin else ("me",)
+    )
+    body = {"tunnel_id": "test-tunnel", "expected_cycle_id": "test-cycle"} if admin else None
+    responses = [
+        Response(
+            503,
+            raw=b'{"error":',
+            declared_content_length="80",
+            headers={"Retry-After": "0"},
+        )
+        for _ in range(attempts)
+    ]
+    with serve(*responses) as (base_url, scenario):
+        result = run_cli(
+            base_url,
+            *arguments,
+            body=body,
+            extra_env={"STARTUNNEL_ADMIN_KEY": "sta_test-admin-key"},
+        )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "http_error"
+    assert error["status"] == 503
+    assert error["retry_after"] == 0
+    assert len(scenario.requests) == attempts
+    assert all(request["body"] == body for request in scenario.requests)
+    if admin:
+        assert all(
+            request["headers"]["Idempotency-Key"] == "review-close-001"
+            for request in scenario.requests
+        )
+
+
 def test_malformed_api_error_does_not_print_response_data() -> None:
     response = {"error": {"code": "invalid_request", "message": ["private-visible-marker"]}}
     with serve(Response(400, response)) as (base_url, _scenario):
