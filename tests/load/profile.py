@@ -39,8 +39,6 @@ class LoadConfig:
     sends_per_second: float = 50.0
     concurrent_activity_readers: int = 100
     drain_seconds: float = 30.0
-    require_cleanup_lag: bool = True
-    seed: int = 20260810
 
     def validate(self) -> None:
         if not 1 <= self.duration_seconds <= 3600:
@@ -91,11 +89,9 @@ async def run_load_profile(
     *,
     base_url: str,
     host_header: str | None,
-    metrics_token: str | None,
     manifest: CredentialManifest,
     config: LoadConfig,
 ) -> dict[str, object]:
-    del metrics_token
     config.validate()
     common_headers = {"Host": host_header} if host_header else {}
     timings: list[float] = []
@@ -279,7 +275,6 @@ async def run_load_profile(
             ),
             "credential_count": len(manifest.credentials),
             "tunnel_count": tunnel_count,
-            "seed": config.seed,
         },
         "results": {
             "expected_sends": expected,

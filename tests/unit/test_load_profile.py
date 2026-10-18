@@ -95,7 +95,6 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
     report = await run_load_profile(
         base_url="http://fixture",
         host_header=None,
-        metrics_token=None,
         manifest=CredentialManifest(
             "fixture", 10, tuple(Credential(str(index), f"test-key-{index}") for index in range(10))
         ),

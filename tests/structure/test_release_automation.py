@@ -582,7 +582,7 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     monkeypatch.setattr(load_runner, "termination_signals", no_signals)
     monkeypatch.setattr(load_runner, "required_output", safe_output)
 
-    result = load_runner.main(["--project-name", "stload-focused-12345678", "--seed", "42"])
+    result = load_runner.main(["--project-name", "stload-focused-12345678"])
 
     assert result == 0
     assert events[0] == ("init", ("stload-focused-12345678", ("load",)))
@@ -590,7 +590,6 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     load_calls = [event for name, event in events if name == "run" and "load profile" in event[0]]
     assert len(load_calls) == 1
     load_environment = load_calls[0][2]
-    assert load_environment["STARTUNNEL_LOAD_SEED"] == "42"
     assert load_environment["STARTUNNEL_LOAD_DOCKER_VERSION"] == "29.0.0"
     assert load_environment["STARTUNNEL_LOAD_BUILD_MODE"] == "built-current-run"
     assert load_environment["STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE"] == "18"
@@ -675,7 +674,6 @@ def test_load_service_forwards_safe_provenance_fields() -> None:
         "STARTUNNEL_LOAD_DOCKER_VERSION",
         "STARTUNNEL_LOAD_IMAGE_DIGESTS",
         "STARTUNNEL_LOAD_BUILD_MODE",
-        "STARTUNNEL_LOAD_SEED",
     ):
         assert f"{name}: ${{{name}:-" in compose
     assert (

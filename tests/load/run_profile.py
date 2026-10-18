@@ -30,23 +30,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--base-url", default=os.getenv("STARTUNNEL_BASE_URL", ""))
     parser.add_argument("--host-header", default=os.getenv("STARTUNNEL_HTTP_HOST", ""))
-    parser.add_argument("--metrics-token", default=os.getenv("STARTUNNEL_METRICS_TOKEN", ""))
     parser.add_argument("--duration-seconds", type=float, default=300.0)
     parser.add_argument("--sends-per-second", type=float, default=50.0)
     parser.add_argument("--concurrent-activity-readers", type=int, default=100)
     parser.add_argument("--drain-seconds", type=float, default=30.0)
     parser.add_argument("--users", type=int, default=500)
     parser.add_argument("--credentials", type=int, default=500)
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=int(os.getenv("STARTUNNEL_LOAD_SEED", "20260810")),
-    )
-    parser.add_argument(
-        "--skip-cleanup-lag-check",
-        action="store_true",
-        help="Allow a small focused run without the internal cleanup-lag metric.",
-    )
     return parser
 
 
@@ -93,8 +82,6 @@ def _config(arguments: argparse.Namespace) -> LoadConfig:
         sends_per_second=arguments.sends_per_second,
         concurrent_activity_readers=arguments.concurrent_activity_readers,
         drain_seconds=arguments.drain_seconds,
-        require_cleanup_lag=not arguments.skip_cleanup_lag_check,
-        seed=arguments.seed,
     )
 
 
@@ -125,7 +112,6 @@ def main(raw_arguments: list[str] | None = None) -> int:
             run_load_profile(
                 base_url=arguments.base_url,
                 host_header=arguments.host_header or None,
-                metrics_token=arguments.metrics_token or None,
                 manifest=manifest,
                 config=config,
             )

@@ -38,7 +38,6 @@ def _parser() -> argparse.ArgumentParser:
         "--project-name",
         help="Use an unused disposable project name with an approved test prefix.",
     )
-    parser.add_argument("--seed", type=int, default=20260810)
     parser.add_argument("--candidate-image", help="Load-test the immutable release image.")
     parser.add_argument(
         "--reuse-current-images",
@@ -193,7 +192,6 @@ def main(argv: list[str] | None = None) -> int:
                         if arguments.reuse_current_images
                         else "built-current-run"
                     ),
-                    "STARTUNNEL_LOAD_SEED": str(arguments.seed),
                 }
             )
             stack.run(
