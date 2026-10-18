@@ -62,7 +62,7 @@ def test_login_limit_uses_the_client_address_from_a_trusted_proxy(monkeypatch: A
 
     sources: list[str] = []
     monkeypatch.setattr(
-        "api.rate_limits.consume_login_attempt",
+        "core.rate_limits.consume_login_attempt",
         lambda **kwargs: sources.append(kwargs["source_ip"]),
     )
     monkeypatch.setattr("django.contrib.auth.forms.authenticate", lambda *args, **kwargs: None)

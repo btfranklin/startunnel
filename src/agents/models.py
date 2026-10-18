@@ -10,6 +10,8 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
+
 
 class AgentCredentialQuerySet(models.QuerySet["AgentCredential"]):
     def available(self, *, at: datetime | None = None) -> AgentCredentialQuerySet:
@@ -28,7 +30,7 @@ class AgentCredential(models.Model):
         blank=True,
         related_name="created_agent_credentials",
     )
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=MAX_CREDENTIAL_NAME_CHARACTERS)
     display_prefix = models.CharField(max_length=12, db_index=True)
     key_digest = models.BinaryField(max_length=32, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from core.limits import MAX_IDEMPOTENCY_KEY_CHARACTERS, MIN_IDEMPOTENCY_KEY_CHARACTERS
 
 from .errors import IdempotencyConflict, InvalidRequest
 from .models import IdempotencyRecord
@@ -26,10 +27,13 @@ class IdempotencyResult:
 
 
 def validate_idempotency_key(key: str) -> None:
-    if not 8 <= len(key) <= 128 or any(
+    if not MIN_IDEMPOTENCY_KEY_CHARACTERS <= len(key) <= MAX_IDEMPOTENCY_KEY_CHARACTERS or any(
         ord(character) < 32 or ord(character) > 126 for character in key
     ):
-        raise InvalidRequest("Idempotency-Key must contain 8 to 128 printable ASCII characters.")
+        raise InvalidRequest(
+            f"Idempotency-Key must contain {MIN_IDEMPOTENCY_KEY_CHARACTERS} to "
+            f"{MAX_IDEMPOTENCY_KEY_CHARACTERS} printable ASCII characters."
+        )
 
 
 def _key_digest(key: str) -> bytes:

@@ -13,6 +13,7 @@ from uuid import UUID
 from django.db.models import Count, Max, Min, OuterRef, Subquery
 
 from agents.models import AgentCredential
+from core.limits import DEFAULT_LIMITS
 
 from .access import limits_for, resolve_tunnel, select_cycle
 from .errors import InvalidRequest
@@ -50,7 +51,7 @@ def list_participants(
     snapshot_sequence: int | None = None,
     after_first_sequence: int | None = None,
     after_credential_id: UUID | None = None,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
 ) -> ParticipantPage:
     """List recorded cycle participants in stable first-occurrence order."""
 

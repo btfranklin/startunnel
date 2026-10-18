@@ -12,7 +12,7 @@ from .models import User
 
 
 def _limit_login(form: AuthenticationForm) -> None:
-    from api.rate_limits import consume_login_attempt
+    from core.rate_limits import consume_login_attempt
     from tunnels.errors import RateLimited
 
     username = str(form.data.get("username", ""))

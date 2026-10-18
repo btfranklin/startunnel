@@ -39,7 +39,8 @@ from accounts.admin_services import (
 )
 from accounts.models import AdminCredential, AdminOperation, User
 from core import limits as instance_limits
-from core.rate_limits import _consume
+from core.limits import DEFAULT_LIMITS
+from core.rate_limits import consume_admin_auth_attempt
 from core.security import client_ip
 from tunnels.beacons import beacon_data, beacon_queryset
 from tunnels.errors import InvalidCredential, InvalidRequest
@@ -66,12 +67,7 @@ class AdminBearer(HttpBearer):
         try:
             credential = authenticate_admin_key(token)
         except InvalidCredential:
-            _consume(
-                key="admin-auth:" + client_ip(request),
-                limit=10,
-                window_seconds=300,
-                rule="admin authentication",
-            )
+            consume_admin_auth_attempt(source_ip=client_ip(request))
             raise
         return credential
 
@@ -317,7 +313,10 @@ def status(request: AdminRequest) -> InstanceStatus:
 
 @router.get("/accounts", response={200: AccountPage, **ADMIN_ERRORS})
 def accounts(
-    request: AdminRequest, limit: int = 100, cursor: str | None = None, state: str | None = None
+    request: AdminRequest,
+    limit: int = DEFAULT_LIMITS.default_list_page,
+    cursor: str | None = None,
+    state: str | None = None,
 ) -> AccountPage:
     page = list_admin_resources(
         "accounts", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
@@ -339,7 +338,7 @@ def account(request: AdminRequest, admin_id: UUID) -> AccountResource:
 @router.get("/keys", response={200: KeyPage, **ADMIN_ERRORS})
 def keys(
     request: AdminRequest,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     state: str | None = None,
     admin_id: UUID | None = None,
@@ -360,7 +359,10 @@ def keys(
 
 @router.get("/agents", response={200: AgentPage, **ADMIN_ERRORS})
 def agents(
-    request: AdminRequest, limit: int = 100, cursor: str | None = None, state: str | None = None
+    request: AdminRequest,
+    limit: int = DEFAULT_LIMITS.default_list_page,
+    cursor: str | None = None,
+    state: str | None = None,
 ) -> AgentPage:
     page = list_admin_resources(
         "agents", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
@@ -373,7 +375,10 @@ def agents(
 
 @router.get("/tunnels", response={200: TunnelPage, **ADMIN_ERRORS})
 def tunnels(
-    request: AdminRequest, limit: int = 100, cursor: str | None = None, state: str | None = None
+    request: AdminRequest,
+    limit: int = DEFAULT_LIMITS.default_list_page,
+    cursor: str | None = None,
+    state: str | None = None,
 ) -> TunnelPage:
     page = list_admin_resources(
         "tunnels", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
@@ -396,7 +401,7 @@ def tunnel(request: AdminRequest, tunnel_id: UUID) -> TunnelResource:
 def cycles(
     request: AdminRequest,
     tunnel_id: UUID,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     state: str | None = None,
 ) -> CyclePage:
@@ -417,7 +422,7 @@ def cycles(
 @router.get("/audit", response={200: AuditPage, **ADMIN_ERRORS})
 def audit(
     request: AdminRequest,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     action: str | None = None,
     actor_id: UUID | None = None,
@@ -570,7 +575,7 @@ def retire_tunnel(
 @router.get("/beacons", response={200: BeaconPage, **ADMIN_ERRORS})
 def beacons(
     request: AdminRequest,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     tunnel_id: UUID | None = None,
 ) -> BeaconPage:

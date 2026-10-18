@@ -9,11 +9,31 @@ from uuid import UUID
 from ninja import Field, HeaderEx, P, Schema
 from pydantic import ConfigDict
 
+from core.limits import (
+    DEFAULT_BOARD_LIMIT,
+    DEFAULT_LIMITS,
+    MAX_BEACON_CHARACTERS,
+    MAX_BEACON_SECONDS,
+    MAX_BOARD_LIMIT,
+    MAX_CONTEXT_REFERENCES,
+    MAX_CORRELATION_ID_CHARACTERS,
+    MAX_CYCLE_SECONDS,
+    MAX_IDEMPOTENCY_KEY_CHARACTERS,
+    MAX_LABEL_CHARACTERS,
+    MAX_SESSION_CHARACTERS,
+    MIN_CYCLE_SECONDS,
+    MIN_IDEMPOTENCY_KEY_CHARACTERS,
+)
 from tunnels.payloads import MessageContent
 
 IdempotencyKey = HeaderEx[
     str,
-    P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
+    P(
+        alias="Idempotency-Key",
+        min_length=MIN_IDEMPOTENCY_KEY_CHARACTERS,
+        max_length=MAX_IDEMPOTENCY_KEY_CHARACTERS,
+        pattern=r"^[\x20-\x7e]+$",
+    ),
 ]
 
 EXAMPLE_ADDRESS = "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
@@ -38,19 +58,29 @@ ActivityEventType = Literal[
 
 class RootMessageRequest(PublicSchema):
     content: MessageContent
-    session: str | None = Field(default=None, min_length=1, max_length=32, examples=["review-chat"])
-    mentions: list[UUID] = Field(default_factory=list, max_length=32)
-    correlation_id: str | None = Field(default=None, max_length=128, examples=["release-42"])
+    session: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SESSION_CHARACTERS, examples=["review-chat"]
+    )
+    mentions: list[UUID] = Field(
+        default_factory=list, max_length=DEFAULT_LIMITS.mentions_per_message
+    )
+    correlation_id: str | None = Field(
+        default=None, max_length=MAX_CORRELATION_ID_CHARACTERS, examples=["release-42"]
+    )
 
 
 class CycleCreateRequest(PublicSchema):
-    label: str = Field(default="", max_length=160, examples=["Initial release review"])
-    expires_in_seconds: int | None = Field(default=None, ge=300, le=604_800, examples=[86_400])
+    label: str = Field(
+        default="", max_length=MAX_LABEL_CHARACTERS, examples=["Initial release review"]
+    )
+    expires_in_seconds: int | None = Field(
+        default=None, ge=MIN_CYCLE_SECONDS, le=MAX_CYCLE_SECONDS, examples=[86_400]
+    )
     root: RootMessageRequest
 
 
 class CreateTunnelRequest(PublicSchema):
-    label: str = Field(default="", max_length=160, examples=["Release review"])
+    label: str = Field(default="", max_length=MAX_LABEL_CHARACTERS, examples=["Release review"])
     cycle: CycleCreateRequest
 
 
@@ -143,9 +173,15 @@ class PostReplyRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     parent_id: UUID
     content: MessageContent
-    session: str | None = Field(default=None, min_length=1, max_length=32, examples=["review-chat"])
-    mentions: list[UUID] = Field(default_factory=list, max_length=32)
-    correlation_id: str | None = Field(default=None, max_length=128, examples=["release-42"])
+    session: str | None = Field(
+        default=None, min_length=1, max_length=MAX_SESSION_CHARACTERS, examples=["review-chat"]
+    )
+    mentions: list[UUID] = Field(
+        default_factory=list, max_length=DEFAULT_LIMITS.mentions_per_message
+    )
+    correlation_id: str | None = Field(
+        default=None, max_length=MAX_CORRELATION_ID_CHARACTERS, examples=["release-42"]
+    )
 
 
 class PostedMessageSummaryResponse(PublicSchema):
@@ -167,7 +203,9 @@ class PostReplyResponse(PublicSchema):
 class TreeRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     cycle_id: UUID | None = None
-    limit: int = Field(default=1000, ge=1, le=1000)
+    limit: int = Field(
+        default=DEFAULT_LIMITS.maximum_list_page, ge=1, le=DEFAULT_LIMITS.maximum_list_page
+    )
     page_cursor: str | None = None
     snapshot_cursor: str | None = None
 
@@ -217,7 +255,9 @@ class RepliesRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     message_id: UUID
     cycle_id: UUID | None = None
-    limit: int = Field(default=100, ge=1, le=1000)
+    limit: int = Field(
+        default=DEFAULT_LIMITS.default_list_page, ge=1, le=DEFAULT_LIMITS.maximum_list_page
+    )
     snapshot_cursor: str | None = None
     page_cursor: str | None = None
 
@@ -233,8 +273,10 @@ class RepliesResponse(PublicSchema):
 class ActivityRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     after_cursor: str | None = None
-    wait_seconds: int = Field(default=0, ge=0, le=20)
-    limit: int = Field(default=100, ge=1, le=1000)
+    wait_seconds: int = Field(default=0, ge=0, le=DEFAULT_LIMITS.maximum_long_poll_seconds)
+    limit: int = Field(
+        default=DEFAULT_LIMITS.default_list_page, ge=1, le=DEFAULT_LIMITS.maximum_list_page
+    )
     event_types: list[ActivityEventType] | None = Field(default=None, max_length=8)
 
 
@@ -271,11 +313,17 @@ class ContextRequest(PublicSchema):
     include_branch: bool = True
     include_direct_replies: bool = True
     include_recent_activity: bool = True
-    referenced_message_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    referenced_message_ids: list[UUID] = Field(
+        default_factory=list, max_length=MAX_CONTEXT_REFERENCES
+    )
     after_cursor: str | None = None
     snapshot_cursor: str | None = None
-    max_items: int = Field(default=200, ge=1, le=200)
-    max_bytes: int = Field(default=1_048_576, ge=1, le=1_048_576)
+    max_items: int = Field(
+        default=DEFAULT_LIMITS.maximum_context_items, ge=1, le=DEFAULT_LIMITS.maximum_context_items
+    )
+    max_bytes: int = Field(
+        default=DEFAULT_LIMITS.maximum_context_bytes, ge=1, le=DEFAULT_LIMITS.maximum_context_bytes
+    )
 
 
 class ContextItemResponse(PublicSchema):
@@ -295,8 +343,8 @@ class ContextResponse(PublicSchema):
 
 class EnterRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
-    limit: int = Field(default=20, ge=1, le=1000)
-    max_bytes: int = Field(default=262_144, ge=1, le=1_048_576)
+    limit: int = Field(default=20, ge=1, le=DEFAULT_LIMITS.maximum_list_page)
+    max_bytes: int = Field(default=262_144, ge=1, le=DEFAULT_LIMITS.maximum_context_bytes)
 
 
 class EnterResponse(PublicSchema):
@@ -312,16 +360,20 @@ class EnterResponse(PublicSchema):
 
 class SearchRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
-    query: str | None = Field(default=None, max_length=512, examples=["database recovery"])
+    query: str | None = Field(
+        default=None,
+        max_length=DEFAULT_LIMITS.maximum_search_query_characters,
+        examples=["database recovery"],
+    )
     cycle_id: UUID | None = None
     sender_id: UUID | None = None
     mentioned_agent_id: UUID | None = None
-    correlation_id: str | None = Field(default=None, max_length=128)
+    correlation_id: str | None = Field(default=None, max_length=MAX_CORRELATION_ID_CHARACTERS)
     branch_root_id: UUID | None = None
     sequence_after: int | None = Field(default=None, ge=0)
     sequence_before: int | None = Field(default=None, ge=1)
     page_cursor: str | None = None
-    limit: int = Field(default=50, ge=1, le=100)
+    limit: int = Field(default=50, ge=1, le=DEFAULT_LIMITS.maximum_search_results)
 
 
 class SearchHitResponse(PublicSchema):
@@ -351,7 +403,9 @@ class ParticipantsRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     cycle_id: UUID | None = None
     page_cursor: str | None = None
-    limit: int = Field(default=100, ge=1, le=1000)
+    limit: int = Field(
+        default=DEFAULT_LIMITS.default_list_page, ge=1, le=DEFAULT_LIMITS.maximum_list_page
+    )
 
 
 class ParticipantResponse(PublicSchema):
@@ -377,8 +431,8 @@ class SubtreeRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     cycle_id: UUID | None = None
     message_id: UUID
-    max_depth: int = Field(default=8, ge=0, le=128)
-    limit: int = Field(default=200, ge=1, le=1000)
+    max_depth: int = Field(default=8, ge=0, le=DEFAULT_LIMITS.maximum_tree_depth)
+    limit: int = Field(default=200, ge=1, le=DEFAULT_LIMITS.maximum_list_page)
     page_cursor: str | None = None
     snapshot_cursor: str | None = None
 
@@ -395,7 +449,9 @@ class SubtreeResponse(PublicSchema):
 class LeavesRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     cycle_id: UUID | None = None
-    limit: int = Field(default=100, ge=1, le=1000)
+    limit: int = Field(
+        default=DEFAULT_LIMITS.default_list_page, ge=1, le=DEFAULT_LIMITS.maximum_list_page
+    )
     page_cursor: str | None = None
     snapshot_cursor: str | None = None
 
@@ -453,7 +509,7 @@ class CycleDirectoryItemResponse(PublicSchema):
 class CycleListRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     page_cursor: str | None = None
-    limit: int = Field(default=50, ge=1, le=1000)
+    limit: int = Field(default=50, ge=1, le=DEFAULT_LIMITS.maximum_list_page)
 
 
 class CycleListResponse(PublicSchema):
@@ -530,8 +586,8 @@ class ErrorResponse(PublicSchema):
 
 class BeaconPublishRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
-    text: str = Field(min_length=1, max_length=280)
-    lifetime_seconds: int | None = Field(default=None, ge=1, le=86_400)
+    text: str = Field(min_length=1, max_length=MAX_BEACON_CHARACTERS)
+    lifetime_seconds: int | None = Field(default=None, ge=1, le=MAX_BEACON_SECONDS)
 
 
 class BeaconWithdrawRequest(PublicSchema):
@@ -564,7 +620,7 @@ class BeaconWriteResponse(PublicSchema):
 
 
 class BeaconBoardRequest(PublicSchema):
-    limit: int = Field(default=20, ge=1, le=100)
+    limit: int = Field(default=DEFAULT_BOARD_LIMIT, ge=1, le=MAX_BOARD_LIMIT)
     page_cursor: str | None = None
 
 
@@ -578,7 +634,7 @@ class BeaconBoardResponse(PublicSchema):
 
 class BeaconWaitRequest(PublicSchema):
     after_cursor: str
-    wait_seconds: int = Field(default=20, ge=0, le=20)
+    wait_seconds: int = Field(default=20, ge=0, le=DEFAULT_LIMITS.maximum_long_poll_seconds)
 
 
 class BeaconWaitResponse(PublicSchema):

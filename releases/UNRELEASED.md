@@ -211,3 +211,6 @@ page construction. Each path keeps its authorization and cursor rules.
 
 Admin writes now use typed commands with explicit actions. Admin API responses
 use concrete response types. Existing retry fingerprints and JSON remain unchanged.
+
+Admin key reads now share one availability rule. Rate rules and fixed server
+bounds have shared core owners. Agent key format checks use `validate_key`.

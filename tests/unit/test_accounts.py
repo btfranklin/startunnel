@@ -74,7 +74,7 @@ def test_login_form_maps_rate_limit_to_generic_authentication_error(
         assert kwargs == {"source_ip": "192.0.2.4", "username": "Someone"}
         raise RateLimited()
 
-    monkeypatch.setattr("api.rate_limits.consume_login_attempt", limited)
+    monkeypatch.setattr("core.rate_limits.consume_login_attempt", limited)
     request = rf.post("/accounts/login/", REMOTE_ADDR="192.0.2.4")
     form = ThrottledAuthenticationForm(
         request=request,
@@ -187,7 +187,7 @@ def test_each_login_path_rejects_valid_credentials_after_the_limit(
     def limited(**kwargs: Any) -> None:
         raise RateLimited()
 
-    monkeypatch.setattr("api.rate_limits.consume_login_attempt", limited)
+    monkeypatch.setattr("core.rate_limits.consume_login_attempt", limited)
     response = client.post(login_path, {"username": user.username, "password": "test-password-42"})
     assert response.status_code == 200
     assert "_auth_user_id" not in client.session

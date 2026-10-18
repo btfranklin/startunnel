@@ -8,10 +8,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.limits import DEFAULT_LIMITS
+
 from .errors import InvalidRequest, PayloadTooLarge
 
 MAX_DEPTH = 32
-MAX_BYTES = 65_536
 
 
 class TextContent(BaseModel):
@@ -83,7 +84,7 @@ def _depth(value: Any, current: int = 0) -> int:
 
 
 def validate_content(
-    content: dict[str, Any], *, maximum_bytes: int = MAX_BYTES
+    content: dict[str, Any], *, maximum_bytes: int = DEFAULT_LIMITS.bytes_per_message
 ) -> ValidatedPayload:
     payload_type = content.get("type")
     if payload_type == "text":

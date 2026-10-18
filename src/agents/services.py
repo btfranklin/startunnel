@@ -15,6 +15,7 @@ from django.utils import timezone
 from accounts.models import User
 from core import limits as instance_limits
 from core.audit import record_event
+from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
 from tunnels.errors import InvalidRequest, QuotaExceeded
 
 from .models import AgentCredential
@@ -57,8 +58,10 @@ def create_credential(
     if active_count >= instance_limits.effective_limits().active_credentials:
         raise QuotaExceeded("This instance has reached its active agent credential limit.")
     normalized_name = name.strip()
-    if not normalized_name or len(normalized_name) > 100:
-        raise InvalidRequest("Give the agent credential a name of 1 to 100 characters.")
+    if not normalized_name or len(normalized_name) > MAX_CREDENTIAL_NAME_CHARACTERS:
+        raise InvalidRequest(
+            f"Give the agent credential a name of 1 to {MAX_CREDENTIAL_NAME_CHARACTERS} characters."
+        )
     key = key or _new_key()
     credential = AgentCredential.objects.create(
         created_by=actor,
@@ -77,7 +80,7 @@ def create_credential(
     return IssuedCredential(credential=credential, key=key)
 
 
-def parse_key(key: str) -> None:
+def validate_key(key: str) -> None:
     if not key.startswith("st_") or len(key) != 46:
         raise CredentialError("The agent credential is invalid.")
     encoded = key[3:]
@@ -90,7 +93,7 @@ def parse_key(key: str) -> None:
 
 
 def authenticate_key(key: str) -> AgentCredential:
-    parse_key(key)
+    validate_key(key)
     now = timezone.now()
     try:
         credential = AgentCredential.objects.available(at=now).get(key_digest=_digest(key))

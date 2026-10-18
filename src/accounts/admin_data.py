@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, NotRequired, TypedDict, cast
 
-from django.utils import timezone
-
 from agents.models import AgentCredential
 from tunnels.admin_actions import retirement_confirmation
 from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress
@@ -33,9 +31,7 @@ def key_resource(key: AdminCredential) -> dict[str, Any]:
         "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
         "expires_at": key.expires_at.isoformat() if key.expires_at else None,
         "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
-        "available": key.owner.is_active
-        and key.revoked_at is None
-        and (key.expires_at is None or key.expires_at > timezone.now()),
+        "available": key.is_available,
     }
 
 

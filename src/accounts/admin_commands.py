@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents.models import AgentCredential
 from agents.services import create_credential, revoke_credential
+from core.limits import MAX_SESSION_CHARACTERS
 from tunnels.admin_actions import (
     close_cycle_as_admin,
     retire_tunnel_as_admin,
@@ -234,7 +235,7 @@ class TunnelStart(TunnelCommand):
     operation = "tunnels.start"
     expected_address_generation: int
     root_content: MessageContent
-    root_session: str | None = Field(default=None, min_length=1, max_length=32)
+    root_session: str | None = Field(default=None, min_length=1, max_length=MAX_SESSION_CHARACTERS)
     cycle_label: str = ""
     expires_in_seconds: int | None = None
 

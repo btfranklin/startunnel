@@ -9,13 +9,14 @@ import pytest
 from django.db import DatabaseError, IntegrityError
 from django.utils import timezone
 
-from api.rate_limits import (
+from core.limits import Limits
+from core.models import RateLimitBucket
+from core.rate_limits import (
+    _consume,
+    consume_admin_auth_attempt,
     consume_api_operation,
     consume_login_attempt,
 )
-from core.limits import Limits
-from core.models import RateLimitBucket
-from core.rate_limits import _consume
 from tunnels.errors import DependencyUnavailable, RateLimited
 
 pytestmark = pytest.mark.django_db
@@ -162,3 +163,38 @@ def test_longer_burst_window_keeps_its_full_accepted_history(
             burst_limit=4,
             burst_window_seconds=30,
         )
+
+
+def test_admin_auth_attempts_keep_the_existing_source_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = timezone.now()
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
+    _consume(
+        key="admin-auth:192.0.2.44",
+        limit=10,
+        window_seconds=300,
+        rule="admin authentication",
+    )
+    for _ in range(9):
+        consume_admin_auth_attempt(source_ip="192.0.2.44")
+    with pytest.raises(RateLimited) as error:
+        consume_admin_auth_attempt(source_ip="192.0.2.44")
+    assert error.value.retry_after == 300  # type: ignore[attr-defined]
+    consume_admin_auth_attempt(source_ip="192.0.2.45")
+    consume_login_attempt(source_ip="192.0.2.44", username="Person")
+    assert RateLimitBucket.objects.count() == 3
+
+
+def test_login_attempts_share_casefolded_names_and_keep_sources_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = timezone.now()
+    monkeypatch.setattr("core.rate_limits._database_now", lambda: now)
+    for username in ["Person", "PERSON"] * 5:
+        consume_login_attempt(source_ip="192.0.2.44", username=username)
+    with pytest.raises(RateLimited):
+        consume_login_attempt(source_ip="192.0.2.44", username="person")
+    consume_login_attempt(source_ip="192.0.2.45", username="person")
+    consume_login_attempt(source_ip="192.0.2.44", username="other")
+    assert RateLimitBucket.objects.count() == 3

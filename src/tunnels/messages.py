@@ -12,6 +12,7 @@ from django.db.models import Count, Exists, OuterRef, Sum
 
 from agents.models import AgentCredential
 from core.audit import record_event
+from core.limits import DEFAULT_LIMITS, MAX_CORRELATION_ID_CHARACTERS, MAX_SESSION_CHARACTERS
 from core.logging import current_request_id
 from core.metrics import MESSAGES_SENT
 
@@ -95,8 +96,10 @@ class LeafPage:
 def _normalize_correlation_id(value: str | None) -> str:
     correlation = (value or "").strip()
     validate_storable_text(correlation, field="correlation_id")
-    if len(correlation) > 128:
-        raise InvalidRequest("correlation_id can contain at most 128 characters.")
+    if len(correlation) > MAX_CORRELATION_ID_CHARACTERS:
+        raise InvalidRequest(
+            f"correlation_id can contain at most {MAX_CORRELATION_ID_CHARACTERS} characters."
+        )
     return correlation
 
 
@@ -105,12 +108,13 @@ def _validate_session(value: str | None) -> str | None:
         return None
     validate_storable_text(value, field="session")
     if (
-        not 1 <= len(value) <= 32
+        not 1 <= len(value) <= MAX_SESSION_CHARACTERS
         or value != value.strip()
         or any(unicodedata.category(character) in {"Cc", "Cf"} for character in value)
     ):
         raise InvalidRequest(
-            "session must contain 1 to 32 characters with no outer whitespace "
+            f"session must contain 1 to {MAX_SESSION_CHARACTERS} characters "
+            "with no outer whitespace "
             "or control characters."
         )
     return value
@@ -301,7 +305,7 @@ def read_tree(
     credential: AgentCredential,
     address: str,
     cycle_id: UUID | None = None,
-    limit: int = 1_000,
+    limit: int = DEFAULT_LIMITS.maximum_list_page,
     after_sequence: int = 0,
     snapshot_sequence: int | None = None,
 ) -> TreePage:
@@ -395,7 +399,7 @@ def list_replies(
     address: str,
     message_id: UUID,
     cycle_id: UUID | None = None,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     after_sequence: int = 0,
     snapshot_sequence: int | None = None,
 ) -> ReplyPage:
@@ -671,7 +675,7 @@ def list_leaves(
     credential: AgentCredential,
     address: str,
     cycle_id: UUID | None = None,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     after_sequence: int = 0,
     snapshot_sequence: int | None = None,
 ) -> LeafPage:

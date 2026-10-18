@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from django.conf import settings
+
+MAX_CREDENTIAL_NAME_CHARACTERS = 100
+MAX_LABEL_CHARACTERS = 160
+MAX_SESSION_CHARACTERS = 32
+MAX_CORRELATION_ID_CHARACTERS = 128
+MAX_CONTEXT_REFERENCES = 100
+MIN_IDEMPOTENCY_KEY_CHARACTERS = 8
+MAX_IDEMPOTENCY_KEY_CHARACTERS = 128
+MIN_CYCLE_SECONDS = 300
+MAX_CYCLE_SECONDS = 604_800
+MAX_BEACON_CHARACTERS = 280
+MAX_BEACON_SECONDS = 86_400
+DEFAULT_BOARD_LIMIT = 20
+MAX_BOARD_LIMIT = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +43,10 @@ class Limits:
     api_burst: int = 30
 
 
+DEFAULT_LIMITS = Limits()
+
+
 def effective_limits() -> Limits:
     """Return the effective resource limits for this instance."""
 
-    return Limits(active_credentials=settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT)
+    return replace(DEFAULT_LIMITS, active_credentials=settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT)

@@ -24,6 +24,12 @@ from core.activity_listener import activity_listener
 from core.async_database import ASYNC_DATABASE_EXECUTOR
 from core.audit import record_event
 from core.cursors import cursor_int, decode_cursor, encode_cursor
+from core.limits import (
+    DEFAULT_BOARD_LIMIT,
+    MAX_BEACON_CHARACTERS,
+    MAX_BEACON_SECONDS,
+    MAX_BOARD_LIMIT,
+)
 from core.logging import current_request_id
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
 
@@ -51,9 +57,6 @@ from .models import (
 )
 
 DEFAULT_BEACON_SECONDS = 3_600
-MAX_BEACON_SECONDS = 86_400
-DEFAULT_BOARD_LIMIT = 20
-MAX_BOARD_LIMIT = 100
 BOARD_PAGE_CURSOR_KIND = "beacon_board_page"
 BOARD_WAIT_CURSOR_KIND = "beacon_board_wait"
 
@@ -187,8 +190,8 @@ def _next_visible_expiry(*, snapshot_position: int) -> datetime | None:
 
 
 def _validate_beacon_text(text: str) -> None:
-    if not isinstance(text, str) or not 1 <= len(text) <= 280:
-        raise InvalidRequest("Beacon text must contain 1 to 280 characters.")
+    if not isinstance(text, str) or not 1 <= len(text) <= MAX_BEACON_CHARACTERS:
+        raise InvalidRequest(f"Beacon text must contain 1 to {MAX_BEACON_CHARACTERS} characters.")
     if text != text.strip():
         raise InvalidRequest("Beacon text cannot start or end with whitespace.")
     if any(unicodedata.category(character) in {"Cc", "Cf"} for character in text):

@@ -13,6 +13,7 @@ from django.db.models import BigIntegerField, F, Q, QuerySet, TextField, Value
 from django.db.models.functions import Cast, Coalesce
 
 from agents.models import AgentCredential
+from core.limits import MAX_CORRELATION_ID_CHARACTERS
 
 from .access import limits_for, resolve_tunnel, select_cycle
 from .errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
@@ -128,8 +129,11 @@ def _validated_search_values(
     correlation = correlation_id.strip() if correlation_id is not None else None
     if correlation is not None:
         validate_storable_text(correlation, field="correlation_id")
-        if not correlation or len(correlation) > 128:
-            raise InvalidRequest("correlation_id must contain from 1 through 128 characters.")
+        if not correlation or len(correlation) > MAX_CORRELATION_ID_CHARACTERS:
+            raise InvalidRequest(
+                f"correlation_id must contain from 1 through {MAX_CORRELATION_ID_CHARACTERS} "
+                "characters."
+            )
     if sequence_after is not None and sequence_after < 0:
         raise InvalidRequest("sequence_after cannot be negative.")
     if sequence_before is not None and sequence_before < 1:

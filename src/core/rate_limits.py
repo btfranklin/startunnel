@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import math
 from datetime import datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from django.conf import settings
 from django.db import DatabaseError, IntegrityError, connection, transaction
@@ -15,7 +15,11 @@ from django.utils import timezone
 from core.metrics import RATE_LIMITED
 from tunnels.errors import DependencyUnavailable, RateLimited
 
+from .limits import Limits
 from .models import RateLimitBucket
+
+if TYPE_CHECKING:
+    from agents.models import AgentCredential
 
 
 def _database_now() -> datetime:
@@ -119,4 +123,34 @@ def consume_admin_operation(admin_id: object) -> None:
         window_seconds=60,
         burst_limit=limits.api_burst,
         rule="admin operation",
+    )
+
+
+def consume_api_operation(credential: AgentCredential, limits: Limits) -> None:
+    _consume(
+        key=f"api:{credential.id}",
+        limit=limits.api_operations_per_minute,
+        window_seconds=60,
+        rule="API operation",
+        burst_limit=limits.api_burst,
+    )
+
+
+def consume_login_attempt(*, source_ip: str, username: str) -> None:
+    source_digest = hashlib.sha256(source_ip.encode()).hexdigest()
+    username_digest = hashlib.sha256(username.casefold().encode()).hexdigest()
+    _consume(
+        key=f"login:{source_digest}:{username_digest}",
+        limit=10,
+        window_seconds=300,
+        rule="login attempt",
+    )
+
+
+def consume_admin_auth_attempt(*, source_ip: str) -> None:
+    _consume(
+        key="admin-auth:" + source_ip,
+        limit=10,
+        window_seconds=300,
+        rule="admin authentication",
     )

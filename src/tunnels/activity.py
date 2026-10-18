@@ -17,6 +17,7 @@ from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.activity_listener import activity_listener
 from core.async_database import ASYNC_DATABASE_EXECUTOR
+from core.limits import DEFAULT_LIMITS
 
 from .access import (
     active_credential_query,
@@ -294,7 +295,7 @@ async def read_activity_async(
     address: str,
     after_position: int | None = None,
     wait_seconds: int = 0,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     event_types: tuple[str, ...] | None = None,
 ) -> ActivityPage:
     """Read activity without holding a synchronous worker during the wait."""

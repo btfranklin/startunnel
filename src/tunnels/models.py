@@ -11,6 +11,13 @@ from django.db import models
 from django.db.models import Q
 
 from agents.models import AgentCredential
+from core.limits import (
+    DEFAULT_LIMITS,
+    MAX_BEACON_CHARACTERS,
+    MAX_CORRELATION_ID_CHARACTERS,
+    MAX_LABEL_CHARACTERS,
+    MAX_SESSION_CHARACTERS,
+)
 
 
 class Tunnel(models.Model):
@@ -23,7 +30,7 @@ class Tunnel(models.Model):
     creator = models.ForeignKey(
         AgentCredential, on_delete=models.PROTECT, related_name="created_tunnels"
     )
-    label = models.CharField(max_length=160, blank=True)
+    label = models.CharField(max_length=MAX_LABEL_CHARACTERS, blank=True)
     state = models.CharField(max_length=12, choices=State.choices, default=State.ACTIVE)
     next_cycle_number = models.PositiveIntegerField(default=1)
     next_event_position = models.PositiveBigIntegerField(default=1)
@@ -102,7 +109,7 @@ class Cycle(models.Model):
         AgentCredential, on_delete=models.PROTECT, related_name="created_cycles"
     )
     number = models.PositiveIntegerField()
-    label = models.CharField(max_length=160, blank=True)
+    label = models.CharField(max_length=MAX_LABEL_CHARACTERS, blank=True)
     state = models.CharField(max_length=24, choices=State.choices, default=State.ACTIVE)
     root_message = models.OneToOneField(
         "Message",
@@ -163,14 +170,14 @@ class Message(models.Model):
         AgentCredential, on_delete=models.PROTECT, related_name="sent_messages"
     )
     sender_name = models.CharField(max_length=120)
-    session = models.CharField(max_length=32, null=True, blank=True)  # noqa: DJ001
+    session = models.CharField(max_length=MAX_SESSION_CHARACTERS, null=True, blank=True)  # noqa: DJ001
     sequence = models.PositiveBigIntegerField()
     depth = models.PositiveIntegerField()
     payload_type = models.CharField(max_length=8, choices=PayloadType.choices)
     text_payload = models.TextField(null=True, blank=True)  # noqa: DJ001
     json_payload = models.TextField(null=True, blank=True)  # noqa: DJ001
     byte_count = models.PositiveIntegerField()
-    correlation_id = models.CharField(max_length=128, blank=True)
+    correlation_id = models.CharField(max_length=MAX_CORRELATION_ID_CHARACTERS, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -187,7 +194,8 @@ class Message(models.Model):
                 name="message_has_one_payload_type",
             ),
             models.CheckConstraint(
-                condition=Q(byte_count__lte=65_536), name="message_byte_count_at_most_64k"
+                condition=Q(byte_count__lte=DEFAULT_LIMITS.bytes_per_message),
+                name="message_byte_count_at_most_64k",
             ),
             models.UniqueConstraint(
                 fields=["cycle", "sequence"], name="unique_message_sequence_per_cycle"
@@ -199,7 +207,10 @@ class Message(models.Model):
                 condition=(Q(parent__isnull=True, depth=0) | Q(parent__isnull=False, depth__gt=0)),
                 name="message_root_depth_matches",
             ),
-            models.CheckConstraint(condition=Q(depth__lte=128), name="message_depth_at_most_128"),
+            models.CheckConstraint(
+                condition=Q(depth__lte=DEFAULT_LIMITS.maximum_tree_depth),
+                name="message_depth_at_most_128",
+            ),
         ]
         indexes = [
             models.Index(fields=["cycle", "parent", "sequence"], name="message_reply_order"),
@@ -291,7 +302,7 @@ class Beacon(models.Model):
     publisher = models.ForeignKey(
         AgentCredential, on_delete=models.PROTECT, related_name="published_beacons"
     )
-    text = models.CharField(max_length=280)
+    text = models.CharField(max_length=MAX_BEACON_CHARACTERS)
     publication_sequence = models.PositiveBigIntegerField()
     board_position = models.PositiveBigIntegerField(unique=True)
     published_at = models.DateTimeField()

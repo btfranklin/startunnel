@@ -10,9 +10,9 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
+from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
 from tunnels.errors import InvalidCredential, InvalidRequest, LifecycleConflict
 
 from .models import AdminCredential, User
@@ -32,11 +32,7 @@ def validate_actor(actor: User, credential: AdminCredential | None = None) -> Us
         raise InvalidCredential("The admin credential is not valid.")
     if (
         credential is not None
-        and not AdminCredential.objects.filter(
-            pk=credential.pk, owner=current, revoked_at__isnull=True
-        )
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
-        .exists()
+        and not AdminCredential.objects.available().filter(pk=credential.pk, owner=current).exists()
     ):
         raise InvalidCredential("The admin credential is not valid.")
     return current
@@ -53,9 +49,9 @@ def authenticate_admin_key(key: str) -> AdminCredential:
         raise InvalidCredential("The admin credential is not valid.")
     now = timezone.now()
     credential = (
-        AdminCredential.objects.select_related("owner")
-        .filter(key_digest=key_digest(key), owner__is_active=True, revoked_at__isnull=True)
-        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        AdminCredential.objects.available(at=now)
+        .select_related("owner")
+        .filter(key_digest=key_digest(key))
         .first()
     )
     if credential is None:
@@ -71,8 +67,10 @@ def issue_admin_key(
     *, owner: User, name: str, key: str | None = None, expires_at: datetime | None = None
 ) -> tuple[AdminCredential, str]:
     name = name.strip()
-    if not name or len(name) > 100:
-        raise InvalidRequest("Give the admin credential a name of 1 to 100 characters.")
+    if not name or len(name) > MAX_CREDENTIAL_NAME_CHARACTERS:
+        raise InvalidRequest(
+            f"Give the admin credential a name of 1 to {MAX_CREDENTIAL_NAME_CHARACTERS} characters."
+        )
     owner = User.objects.select_for_update(no_key=True).get(pk=owner.pk)
     if not owner.is_active:
         raise InvalidRequest("Activate this administrator before issuing a key.")

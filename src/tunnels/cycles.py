@@ -17,7 +17,7 @@ from django.utils import timezone
 from accounts.models import User
 from agents.models import AgentCredential
 from core.audit import record_event
-from core.limits import Limits
+from core.limits import MAX_CYCLE_SECONDS, MAX_LABEL_CHARACTERS, MIN_CYCLE_SECONDS, Limits
 from core.logging import current_request_id
 from core.metrics import TUNNELS_CREATED
 from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
@@ -66,8 +66,6 @@ from .models import (
 from .payloads import ValidatedPayload, validate_content, validate_storable_text
 
 DEFAULT_CYCLE_SECONDS = 3_600
-MAX_CYCLE_SECONDS = 604_800
-MIN_CYCLE_SECONDS = 300
 ADDRESS_ALLOCATION_ATTEMPTS = 8
 INSTANCE_TUNNEL_QUOTA_LOCK = 7_195_415_308_902
 
@@ -180,8 +178,8 @@ def agent_tunnel_status(*, credential: AgentCredential) -> AgentTunnelStatus:
 def _validate_label(value: str, *, field: str) -> str:
     normalized = value.strip()
     validate_storable_text(normalized, field=field)
-    if len(normalized) > 160:
-        raise InvalidRequest(f"{field} can contain at most 160 characters.")
+    if len(normalized) > MAX_LABEL_CHARACTERS:
+        raise InvalidRequest(f"{field} can contain at most {MAX_LABEL_CHARACTERS} characters.")
     return normalized
 
 

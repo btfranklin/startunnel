@@ -9,6 +9,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from agents.models import AgentCredential
+from core.limits import DEFAULT_LIMITS, MAX_CONTEXT_REFERENCES
 
 from .access import limits_for, resolve_tunnel, select_cycle
 from .errors import ContextBudgetTooSmall, CycleUnavailable, InvalidRequest
@@ -68,8 +69,8 @@ def get_context(
     include_recent_activity: bool = True,
     referenced_message_ids: tuple[UUID, ...] = (),
     after_activity_position: int | None = None,
-    max_items: int = 200,
-    max_bytes: int = 1_048_576,
+    max_items: int = DEFAULT_LIMITS.maximum_context_items,
+    max_bytes: int = DEFAULT_LIMITS.maximum_context_bytes,
 ) -> ContextView:
     """Select one required branch and optional messages within exact wire budgets."""
 
@@ -80,8 +81,10 @@ def get_context(
         raise InvalidRequest(f"max_bytes must be from 1 through {limits.maximum_context_bytes}.")
     if after_activity_position is not None and after_activity_position < 0:
         raise InvalidRequest("The activity position cannot be negative.")
-    if len(referenced_message_ids) > 100:
-        raise InvalidRequest("referenced_message_ids can contain at most 100 values.")
+    if len(referenced_message_ids) > MAX_CONTEXT_REFERENCES:
+        raise InvalidRequest(
+            f"referenced_message_ids can contain at most {MAX_CONTEXT_REFERENCES} values."
+        )
     if len(set(referenced_message_ids)) != len(referenced_message_ids):
         raise InvalidRequest("referenced_message_ids cannot contain a duplicate value.")
 

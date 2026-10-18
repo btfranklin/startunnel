@@ -29,12 +29,11 @@ from django.utils import timezone
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import create_credential
-from api.rate_limits import consume_login_attempt
 from core.activity_listener import ActivityListener
 from core.limits import Limits
 from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
-from core.rate_limits import _consume
+from core.rate_limits import _consume, consume_login_attempt
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import QuotaExceeded, RateLimited
 from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch

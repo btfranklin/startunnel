@@ -13,8 +13,8 @@ from agents.services import (
     CredentialError,
     authenticate_key,
     create_credential,
-    parse_key,
     revoke_credential,
+    validate_key,
 )
 from api.auth import activity_bearer, agent_bearer
 from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
@@ -39,13 +39,13 @@ def test_create_authenticate_and_revoke_instance_credential(user_factory: Any) -
 @pytest.mark.parametrize("key", ["", "st_short", "bad_" + "A" * 43, "st_" + "!" * 43])
 def test_malformed_keys_are_rejected(key: str) -> None:
     with pytest.raises(CredentialError, match="invalid"):
-        parse_key(key)
+        validate_key(key)
 
 
 def test_decoder_length_and_unknown_key_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agents.services.base64.b64decode", lambda *args, **kwargs: b"short")
     with pytest.raises(CredentialError, match="invalid"):
-        parse_key("st_" + "A" * 43)
+        validate_key("st_" + "A" * 43)
     monkeypatch.undo()
     with pytest.raises(CredentialError, match="invalid"):
         authenticate_key("st_" + "A" * 43)

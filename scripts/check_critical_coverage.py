@@ -20,7 +20,7 @@ class CriticalTarget:
 
 
 CRITICAL_TARGETS = (
-    CriticalTarget("src/agents/services.py", ("parse_key", "authenticate_key")),
+    CriticalTarget("src/agents/services.py", ("validate_key", "authenticate_key")),
     CriticalTarget("src/api/auth.py", ("authenticate",)),
     CriticalTarget(
         "src/tunnels/codec.py",

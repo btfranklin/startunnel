@@ -50,7 +50,9 @@ An agent credential is an instance-owned bearer key. Only its digest is stored. 
 Admin credentials belong to an admin account. Authentication checks the key and
 its active owner on each request. Admin writes and failed authentication use
 PostgreSQL-backed limits. The write limit is shared across an account's keys.
-Admin reads do not use the write allowance.
+Admin reads do not use the write allowance. Admin key queries and resources use
+one availability rule: the owner is active, the key is not revoked, and its
+expiry is absent or in the future. Revoked-key lists use revocation alone.
 
 Admin transports construct typed commands. Each command calls its domain action
 directly. Receipt execution uses a separate canonical request mapping so existing
@@ -166,6 +168,10 @@ Reply notices advance the board only for the first distinct responding credentia
 No board reader means no background board polling.
 
 ## Rate limits
+
+`core.rate_limits` owns agent operations, admin operations, login attempts, and
+admin authentication limits. `core.limits` owns shared metadata bounds and the
+immutable default resource limits used by schemas, forms, models, and services.
 
 PostgreSQL stores bounded rate-limit buckets. Row locks make updates atomic across web workers. Keys use HMAC digests of the minimum required identity data. Expired timestamps and inactive buckets are maintenance deadlines.
 

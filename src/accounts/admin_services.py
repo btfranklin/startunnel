@@ -21,6 +21,7 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
+from core.limits import DEFAULT_LIMITS
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
@@ -77,7 +78,7 @@ def list_admin_resources(
     kind: str,
     *,
     actor: User,
-    limit: int = 100,
+    limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     state: str | None = None,
     admin_id: UUID | None = None,
@@ -142,15 +143,11 @@ def list_admin_resources(
         elif kind in {"keys", "agents"}:
             if state not in {"available", "revoked"}:
                 raise InvalidRequest("Select available or revoked keys.")
-            queryset = queryset.filter(revoked_at__isnull=state == "available")
-            if state == "available":
-                from django.db.models import Q
-
-                queryset = queryset.filter(
-                    Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())
-                )
-                if kind == "keys":
-                    queryset = queryset.filter(owner__is_active=True)
+            queryset = (
+                queryset.available()
+                if state == "available"
+                else queryset.filter(revoked_at__isnull=False)
+            )
         else:
             queryset = queryset.filter(state=state)
     if admin_id and kind == "keys":
@@ -250,7 +247,7 @@ def _replay(receipt: AdminOperation) -> AdminOperationResult:
         if receipt.secret_kind == "admin_key":
             secret = derive_secret(receipt, receipt.secret_kind)
             row = AdminCredential.objects.filter(pk=receipt.secret_resource_id).first()
-            available = row is not None and key_resource(row)["available"]
+            available = row is not None and row.is_available
         elif receipt.secret_kind == "agent_key":
             secret = derive_secret(receipt, receipt.secret_kind)
             agent_row = AgentCredential.objects.filter(pk=receipt.secret_resource_id).first()

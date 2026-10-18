@@ -2,7 +2,7 @@
 
 from django.test import override_settings
 
-from core.limits import Limits
+from core.limits import DEFAULT_LIMITS, Limits
 
 
 def test_instance_limit_values_match_the_product_contract() -> None:
@@ -31,3 +31,7 @@ def test_effective_limits_use_the_configured_credential_limit() -> None:
     from core.limits import effective_limits
 
     assert effective_limits().active_credentials == 75
+    assert DEFAULT_LIMITS.active_credentials == 50
+    with override_settings(STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT=25):
+        assert effective_limits().active_credentials == 25
+        assert DEFAULT_LIMITS.active_credentials == 50
