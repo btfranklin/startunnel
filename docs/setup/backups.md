@@ -2,9 +2,9 @@
 
 [Setup index](README.md) · [Verification](verify.md) · [Maintenance](maintain.md)
 
-Keep a database backup, all eight secret files, the production configuration,
+Keep a database backup, all generated secret files, the production configuration,
 and the matching source commit and image. The database alone is not sufficient:
-the cryptographic secrets are required to use existing keys and addresses.
+the cryptographic secrets are required to authenticate existing keys and replay operations.
 Keep the image in its registry. A server snapshot is an additional recovery
 option, not a replacement for a verified database backup.
 
@@ -114,7 +114,7 @@ shasum -a 256 -c manifest.sha256
 
 On an Ubuntu workstation, use `sha256sum -c manifest.sha256` in place of the
 last `shasum` command. Expect `postgres.dump: OK`. The archive must contain `database.backup`,
-`source-commit`, `production.env`, and `secrets` with eight files. Never print
+`source-commit`, `production.env`, and `secrets` with all generated secret files. Never print
 the secret contents. Store the encrypted archive outside the production
 server, separately from the recovery key. Remove only this test's decrypted
 `recovered.tar` and `restore-check` directory after verification. Your

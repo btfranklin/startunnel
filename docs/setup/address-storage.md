@@ -47,13 +47,13 @@ replaces its immutable-address trigger with the direct-address rule.
 
 Test the conversion on a restored database first. During the normal
 [update procedure](maintain.md#update-the-application), keep writers stopped
-and select the reviewed new image in `.env.prod`. With PostgreSQL running,
+and select the reviewed new image in `production.env`. With PostgreSQL running,
 run the migration service with the private file mounted:
 
 ```shell
 sudo chown 10001:10001 /srv/startunnel/address-conversion.json
 sudo chmod 0600 /srv/startunnel/address-conversion.json
-docker compose --env-file .env.prod -f compose.yaml -f compose.prod.yaml run --rm --no-deps --volume /srv/startunnel/address-conversion.json:/run/startunnel-addresses.json:ro --env STARTUNNEL_ADDRESS_MIGRATION_FILE=/run/startunnel-addresses.json migrate
+docker compose --env-file production.env -f compose.yaml -f compose.prod.yaml run --rm --no-deps --volume /srv/startunnel/address-conversion.json:/run/startunnel-addresses.json:ro --env STARTUNNEL_ADDRESS_MIGRATION_FILE=/run/startunnel-addresses.json migrate
 ```
 
 Use the actual private host path for the left side of the volume mount.
