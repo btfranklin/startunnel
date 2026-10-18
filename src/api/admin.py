@@ -22,7 +22,7 @@ from accounts.admin_services import (
     tunnel_resource,
 )
 from accounts.models import AdminCredential, AdminOperation, User
-from core.limits import provider
+from core import limits as instance_limits
 from core.rate_limits import _consume
 from core.security import client_ip
 from tunnels.errors import InvalidCredential, InvalidRequest
@@ -310,7 +310,7 @@ def capabilities(request: AdminRequest) -> dict[str, Any]:
     return {
         "authority": "instance_admin",
         "operations": list(ADMIN_OPERATION_TARGETS),
-        "limits": asdict(provider.for_instance()),
+        "limits": asdict(instance_limits.effective_limits()),
         "idempotency_window_seconds": 86400,
     }
 

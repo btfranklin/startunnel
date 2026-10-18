@@ -9,7 +9,8 @@ from django.db.models import Exists, Q, QuerySet
 from django.utils import timezone
 
 from agents.models import AgentCredential
-from core.limits import Limits, provider
+from core import limits as instance_limits
+from core.limits import Limits
 
 from .codec import InvalidAddress, canonical_address
 from .errors import CycleClosed, CycleUnavailable, InvalidCredential, TunnelUnavailable
@@ -30,7 +31,7 @@ def credential_is_active(credential: AgentCredential) -> bool:
 def limits_for(credential: AgentCredential) -> Limits:
     if not credential_is_active(credential):
         raise InvalidCredential()
-    return provider.for_instance()
+    return instance_limits.effective_limits()
 
 
 def address_query(*, address: str) -> QuerySet[TunnelAddress]:

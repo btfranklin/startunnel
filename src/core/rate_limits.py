@@ -110,9 +110,9 @@ def _consume(
 
 def consume_admin_operation(admin_id: object) -> None:
     """Share an administrator's write quota across all interfaces and keys."""
-    from .limits import provider
+    from . import limits as instance_limits
 
-    limits = provider.for_instance()
+    limits = instance_limits.effective_limits()
     _consume(
         key=f"admin:{admin_id}",
         limit=limits.api_operations_per_minute,

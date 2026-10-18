@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
-from core.limits import Limits
+from core import limits as instance_limits
 from core.maintenance_status import read_maintenance_status
 
 
@@ -42,7 +42,7 @@ class Command(BaseCommand):
                 maintenance_state = "ready"
         except Exception:
             maintenance_state = "unavailable"
-        limits = Limits()
+        limits = instance_limits.effective_limits()
         output = {
             "environment": settings.SETTINGS_MODULE,
             "debug": settings.DEBUG,
@@ -60,6 +60,7 @@ class Command(BaseCommand):
             "maintenance": maintenance_state,
             "identity": {"provider": "local"},
             "limits": {
+                "active_credentials": limits.active_credentials,
                 "api_operations_per_minute": limits.api_operations_per_minute,
                 "messages_per_cycle": limits.messages_per_cycle,
             },

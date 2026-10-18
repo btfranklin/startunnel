@@ -13,6 +13,7 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from accounts.models import User
+from core import limits as instance_limits
 from core.audit import record_event
 
 from .models import AgentCredential
@@ -52,7 +53,7 @@ def create_credential(
         raise CredentialError("This account cannot create an agent credential.")
     _lock_credential_quota()
     active_count = AgentCredential.objects.available().count()
-    if active_count >= settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT:
+    if active_count >= instance_limits.effective_limits().active_credentials:
         raise CredentialError("This instance has reached its active agent credential limit.")
     normalized_name = name.strip()
     if not normalized_name or len(normalized_name) > 100:

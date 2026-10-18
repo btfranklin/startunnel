@@ -1,6 +1,8 @@
 """The instance has one explicit resource limit contract."""
 
-from core.limits import InstanceLimitProvider, Limits
+from django.test import override_settings
+
+from core.limits import Limits
 
 
 def test_instance_limit_values_match_the_product_contract() -> None:
@@ -24,6 +26,8 @@ def test_instance_limit_values_match_the_product_contract() -> None:
     assert limits.api_burst == 30
 
 
-def test_instance_limit_provider_returns_instance_limits() -> None:
-    provider = InstanceLimitProvider()
-    assert provider.for_instance() == Limits()
+@override_settings(STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT=75)
+def test_effective_limits_use_the_configured_credential_limit() -> None:
+    from core.limits import effective_limits
+
+    assert effective_limits().active_credentials == 75

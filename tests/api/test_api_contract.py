@@ -201,12 +201,12 @@ def test_creation_uses_each_agents_normal_request_limit(
     client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from api.rate_limits import consume_api_operation
-    from core.limits import provider
+    from core import limits as instance_limits
 
     _, first_key = credential_factory()
     _, second_key = credential_factory()
-    limits = replace(provider.for_instance(), api_operations_per_minute=1, api_burst=1)
-    monkeypatch.setattr(provider, "for_instance", lambda: limits)
+    limits = replace(instance_limits.effective_limits(), api_operations_per_minute=1, api_burst=1)
+    monkeypatch.setattr(instance_limits, "effective_limits", lambda: limits)
     monkeypatch.setattr("api.auth.consume_api_operation", consume_api_operation)
 
     _create_global(client, first_key, "normal-limit-first")
@@ -227,7 +227,7 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
     client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from api.rate_limits import consume_api_operation
-    from core.limits import provider
+    from core import limits as instance_limits
     from tunnels.services import create_tunnel, rotate_address_as_operator
 
     first, first_key = credential_factory()
@@ -244,8 +244,10 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
     )
     absent_address = encode_token(bytes(16))
     assert absent_address != created.address
-    limits = replace(provider.for_instance(), api_operations_per_minute=35, api_burst=100)
-    monkeypatch.setattr(provider, "for_instance", lambda: limits)
+    limits = replace(
+        instance_limits.effective_limits(), api_operations_per_minute=35, api_burst=100
+    )
+    monkeypatch.setattr(instance_limits, "effective_limits", lambda: limits)
     monkeypatch.setattr("api.auth.consume_api_operation", consume_api_operation)
 
     for index in range(35):

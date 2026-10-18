@@ -74,6 +74,9 @@ Important settings:
 | `STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE` | `4` | Maintenance pool limit |
 | `STARTUNNEL_METRICS_TOKEN` | required in production | Metrics bearer token |
 
+Admin status and capabilities, plus `inspect_runtime`, report the effective
+active credential limit from this setting.
+
 Use a PostgreSQL URL for `DATABASE_URL` and `DATABASE_ADMIN_URL`. Production settings reject other engines.
 
 ## Health

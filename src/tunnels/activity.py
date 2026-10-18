@@ -15,8 +15,8 @@ from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Prefetch, QuerySet, prefetch_related_objects
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.activity_listener import activity_listener
-from core.limits import provider
 
 from .access import (
     active_credential_query,
@@ -393,7 +393,7 @@ async def read_activity_async(
 
     sqlite_backend = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
     executor = None if sqlite_backend else _ASYNC_DATABASE_EXECUTOR
-    limits = provider.for_instance()
+    limits = instance_limits.effective_limits()
     if wait_seconds < 0 or wait_seconds > limits.maximum_long_poll_seconds:
         raise InvalidRequest(
             f"wait_seconds must be from 0 through {limits.maximum_long_poll_seconds}."

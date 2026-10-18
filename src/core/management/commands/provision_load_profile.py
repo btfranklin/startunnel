@@ -17,6 +17,7 @@ from django.utils import timezone
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import create_credential
+from core import limits as instance_limits
 from tunnels.services import retire_tunnels_for_credentials
 
 _FIXTURE_PREFIX = "load-profile"
@@ -157,7 +158,7 @@ def _validate_counts(*, users: int, credentials: int) -> None:
         raise CommandError("--users must be from 1 through 5000.")
     if not 1 <= credentials <= 5_000:
         raise CommandError("--credentials must be from 1 through 5000.")
-    if credentials > settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT:
+    if credentials > instance_limits.effective_limits().active_credentials:
         raise CommandError("--credentials exceeds the instance credential limit.")
 
 

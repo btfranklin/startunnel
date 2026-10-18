@@ -14,6 +14,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.limits import Limits
 from tunnels.codec import parse_address
 from tunnels.context import get_context
@@ -31,14 +32,6 @@ from tunnels.services import (
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
-
-
-class FixedProvider:
-    def __init__(self, limits: Limits) -> None:
-        self.limits = limits
-
-    def for_instance(self) -> Limits:
-        return self.limits
 
 
 @pytest.fixture(autouse=True)
@@ -404,7 +397,7 @@ def test_concurrent_posts_cannot_cross_the_message_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     limits = replace(Limits(), messages_per_cycle=2)
-    monkeypatch.setattr("tunnels.access.provider", FixedProvider(limits))
+    monkeypatch.setattr(instance_limits, "effective_limits", lambda: limits)
     creator, _ = credential_factory(name="Quota creator")
     workers = [credential_factory(name=f"Quota worker {index}")[0] for index in range(10)]
     created = create_tunnel(

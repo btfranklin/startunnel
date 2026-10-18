@@ -14,11 +14,11 @@ from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.cursors import cursor_int as _cursor_int
 from core.cursors import cursor_uuid as _cursor_uuid
 from core.cursors import decode_cursor as _decoded_cursor
 from core.cursors import encode_cursor as _cursor
-from core.limits import provider
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.codec import InvalidAddress, address_transcription
 from tunnels.context import get_context
@@ -386,7 +386,7 @@ def _cycle_directory_item(cycle: Cycle) -> dict[str, Any]:
 )
 def me(request: HttpRequest) -> dict[str, Any]:
     credential = _credential(request)
-    limits = provider.for_instance()
+    limits = instance_limits.effective_limits()
     status = agent_tunnel_status(credential=credential)
     return {
         "agent": {

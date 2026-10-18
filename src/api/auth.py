@@ -7,7 +7,7 @@ from ninja.security import HttpBearer
 
 from agents.models import AgentCredential
 from agents.services import CredentialError, authenticate_key
-from core.limits import provider
+from core import limits as instance_limits
 from tunnels.errors import InvalidCredential
 
 from .rate_limits import consume_api_operation
@@ -27,7 +27,7 @@ class AgentBearer(HttpBearer):
                 credential = authenticate_key(token)
             except CredentialError as error:
                 raise InvalidCredential() from error
-            limits = provider.for_instance()
+            limits = instance_limits.effective_limits()
             consume_api_operation(credential, limits)
             return credential
         finally:

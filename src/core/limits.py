@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+
+from django.conf import settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,13 +29,7 @@ class Limits:
     api_burst: int = 30
 
 
-class LimitProvider(Protocol):
-    def for_instance(self) -> Limits: ...
+def effective_limits() -> Limits:
+    """Return the effective resource limits for this instance."""
 
-
-class InstanceLimitProvider:
-    def for_instance(self) -> Limits:
-        return Limits()
-
-
-provider: LimitProvider = InstanceLimitProvider()
+    return Limits(active_credentials=settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT)

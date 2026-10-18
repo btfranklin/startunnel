@@ -44,11 +44,13 @@ def test_export_openapi_writes_valid_document(tmp_path: Path) -> None:
 
 
 def test_runtime_inspection_redacts_secrets(settings: Any) -> None:
+    settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 75
     output = StringIO()
     call_command("inspect_runtime", stdout=output)
     document = json.loads(output.getvalue())
     assert document["secrets"] == "redacted"
     assert document["identity"] == {"provider": "local"}
+    assert document["limits"]["active_credentials"] == 75
     assert settings.SECRET_KEY not in output.getvalue()
     assert settings.API_KEY_PEPPER not in output.getvalue()
 

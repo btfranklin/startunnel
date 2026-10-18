@@ -44,6 +44,22 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     assert rotated.address not in str(list(AuditEvent.objects.values_list("metadata", flat=True)))
 
 
+def test_admin_reports_configured_credential_limit(
+    client: Any, user_factory: Any, settings: Any
+) -> None:
+    settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 75
+    actor = user_factory()
+    _, secret = issue_admin_key(owner=actor, name="limit inspection")
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+
+    status = client.get("/api/v1/admin/status", **headers)
+    capabilities = client.get("/api/v1/admin/capabilities", **headers)
+
+    assert status.json()["capacity"]["active_credential_limit"] == 75
+    assert status.json()["limits"]["active_credentials"] == 75
+    assert capabilities.json()["limits"]["active_credentials"] == 75
+
+
 def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
     client: Any, user_factory: Any, tmp_path: Path
 ) -> None:
@@ -193,13 +209,13 @@ def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
 ) -> None:
     from dataclasses import replace
 
-    from core.limits import provider
+    from core import limits as instance_limits
 
     actor = user_factory()
     _, first = issue_admin_key(owner=actor, name="first")
     _, second = issue_admin_key(owner=actor, name="second")
-    limits = replace(provider.for_instance(), api_operations_per_minute=1)
-    monkeypatch.setattr(provider, "for_instance", lambda: limits)
+    limits = replace(instance_limits.effective_limits(), api_operations_per_minute=1)
+    monkeypatch.setattr(instance_limits, "effective_limits", lambda: limits)
     for secret in (first, second):
         assert (
             client.get("/api/v1/admin/me", HTTP_AUTHORIZATION="Bearer " + secret).status_code == 200

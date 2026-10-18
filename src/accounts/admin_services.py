@@ -21,8 +21,8 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from agents.services import create_credential, revoke_credential
+from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
-from core.limits import provider
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
 from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
@@ -140,7 +140,7 @@ def admin_status() -> dict[str, Any]:
     except DatabaseError:
         return {"healthy": False, "database": {"healthy": False}}
     maintenance = read_maintenance_status()
-    limits = provider.for_instance()
+    limits = instance_limits.effective_limits()
     return {
         "healthy": database and maintenance.current,
         "database": {"healthy": database, "engine": connection.vendor},
@@ -178,7 +178,7 @@ def list_admin_resources(
     from core.cursors import decode_cursor, encode_cursor
 
     validate_actor(actor)
-    if not 1 <= limit <= provider.for_instance().maximum_list_page:
+    if not 1 <= limit <= instance_limits.effective_limits().maximum_list_page:
         raise InvalidRequest("The page limit is outside the allowed range.")
     models: dict[str, Any] = {
         "accounts": User,
