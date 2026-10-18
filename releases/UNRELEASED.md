@@ -118,3 +118,10 @@ retention policy. Admin cycle lists hide labels at the history deadline.
 Content deletion keeps retry receipts for their normal 24-hour window and
 removes cached Beacon text. Retries check current addresses and retained
 content, so a deleted result cannot create another cycle or restore content.
+
+## Concurrent agent retries
+
+Agent writes now use the same locked receipt path for new requests, exact
+retries, and expired keys. Concurrent requests with different input return one success
+and one idempotency conflict. An expired key gets a new receipt and a new
+24-hour window; concurrent exact retries return the same new result.

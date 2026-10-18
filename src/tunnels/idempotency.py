@@ -10,7 +10,7 @@ from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from agents.models import AgentCredential
@@ -76,43 +76,26 @@ def find_replay(
 def begin(
     *, credential: AgentCredential, operation: str, key: str, request_data: dict[str, Any]
 ) -> IdempotencyResult:
-    existing = find_replay(
-        credential=credential,
-        operation=operation,
-        key=key,
-        request_data=request_data,
-    )
-    if existing:
-        return existing
+    validate_idempotency_key(key)
     now = timezone.now()
     key_hash = _key_digest(key)
     request_hash = _request_digest(request_data)
-    try:
-        with transaction.atomic():
-            record = IdempotencyRecord.objects.create(
-                credential=credential,
-                operation=operation,
-                key_digest=key_hash,
-                request_digest=request_hash,
-                expires_at=now + timedelta(hours=24),
-            )
-    except IntegrityError:
-        record = IdempotencyRecord.objects.select_for_update().get(
-            credential=credential, operation=operation, key_digest=key_hash
-        )
-        if record.expires_at <= now:
-            record.delete()
-            record = IdempotencyRecord.objects.create(
-                credential=credential,
-                operation=operation,
-                key_digest=key_hash,
-                request_digest=request_hash,
-                expires_at=now + timedelta(hours=24),
-            )
-            return IdempotencyResult(record=record, replay=False)
+    defaults = {
+        "request_digest": request_hash,
+        "expires_at": now + timedelta(hours=24),
+    }
+    record, created = IdempotencyRecord.objects.select_for_update().get_or_create(
+        credential=credential, operation=operation, key_digest=key_hash, defaults=defaults
+    )
+    if not created and record.expires_at > now:
         if not hmac.compare_digest(bytes(record.request_digest), request_hash):
-            raise IdempotencyConflict() from None
+            raise IdempotencyConflict()
         return IdempotencyResult(record=record, replay=True)
+    if not created:
+        record.delete()
+        record = IdempotencyRecord.objects.create(
+            credential=credential, operation=operation, key_digest=key_hash, **defaults
+        )
     return IdempotencyResult(record=record, replay=False)
 
 

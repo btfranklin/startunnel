@@ -117,6 +117,8 @@ their request fingerprints for the normal 24-hour window. Agent receipts also
 keep their resource IDs.
 Deletion removes cached Beacon text from agent and admin receipts. A retry
 cannot create another cycle or return deleted content through an old receipt.
+Concurrent retries use one locked receipt. When a retry key expires, a new
+request replaces its receipt and starts a new 24-hour window.
 Maintenance keeps a minimal cycle tombstone with lifecycle timestamps, close
 reason, and final sequence. It clears the label, message count, and content
 size. A redacted event spine remains so activity positions and checkpoints stay
