@@ -19,9 +19,10 @@ from accounts.admin_access import (
 )
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminOperation, User
+from tunnels.admin_actions import close_cycle_as_admin
+from tunnels.cycles import create_tunnel
 from tunnels.errors import IdempotencyConflict, InvalidCredential
 from tunnels.models import AuditEvent, Cycle
-from tunnels.services import close_cycle_as_admin, create_tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 

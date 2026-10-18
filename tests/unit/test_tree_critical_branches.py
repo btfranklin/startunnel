@@ -12,6 +12,12 @@ from django.utils import timezone
 
 from core.limits import Limits
 from tunnels.access import cycle_is_readable, resolve_tunnel
+from tunnels.admin_actions import (
+    close_cycle_as_admin,
+    rollover_cycle_as_admin,
+    start_cycle_as_admin,
+)
+from tunnels.cycles import _close_locked_cycle, close_cycle, create_tunnel
 from tunnels.errors import (
     CycleUnavailable,
     InvalidCredential,
@@ -20,19 +26,8 @@ from tunnels.errors import (
     QuotaExceeded,
     TunnelUnavailable,
 )
+from tunnels.messages import get_message, list_replies, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel
-from tunnels.services import (
-    _close_locked_cycle,
-    close_cycle,
-    close_cycle_as_admin,
-    create_tunnel,
-    get_message,
-    list_replies,
-    post_reply,
-    read_tree,
-    rollover_cycle_as_admin,
-    start_cycle_as_admin,
-)
 
 pytestmark = pytest.mark.django_db
 
@@ -65,7 +60,7 @@ def test_create_rejects_long_correlation_and_instance_quota(
             root_correlation_id="x" * 129,
         )
     monkeypatch.setattr(
-        "tunnels.services.limits_for",
+        "tunnels.cycles.limits_for",
         lambda value: replace(Limits(), non_retired_tunnels=0),
     )
     with pytest.raises(QuotaExceeded):
@@ -203,7 +198,7 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             correlation_id="x" * 129,
         )
     monkeypatch.setattr(
-        "tunnels.services.limits_for",
+        "tunnels.messages.limits_for",
         lambda value: replace(Limits(), maximum_tree_depth=0),
     )
     with pytest.raises(QuotaExceeded, match="depth"):
@@ -215,7 +210,7 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             content={"type": "text", "text": "Reply."},
         )
     monkeypatch.setattr(
-        "tunnels.services.limits_for",
+        "tunnels.messages.limits_for",
         lambda value: replace(Limits(), messages_per_cycle=1),
     )
     with pytest.raises(QuotaExceeded, match="message limit"):
@@ -227,7 +222,7 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             content={"type": "text", "text": "Reply."},
         )
     monkeypatch.setattr(
-        "tunnels.services.limits_for",
+        "tunnels.messages.limits_for",
         lambda value: replace(Limits(), content_bytes_per_cycle=1),
     )
     with pytest.raises(QuotaExceeded, match="content-byte"):
@@ -277,9 +272,9 @@ def test_close_conflict_replay_race_and_inactive_noop(
             address=created.address,
             expected_cycle_id=uuid4(),
         )
-    monkeypatch.setattr("tunnels.services.find_idempotency_replay", lambda **kwargs: None)
+    monkeypatch.setattr("tunnels.cycles.find_idempotency_replay", lambda **kwargs: None)
     monkeypatch.setattr(
-        "tunnels.services.begin_idempotency",
+        "tunnels.cycles.begin_idempotency",
         lambda **kwargs: SimpleNamespace(replay=True, record=SimpleNamespace()),
     )
     close_cycle(

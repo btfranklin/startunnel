@@ -8,10 +8,12 @@ import pytest
 import time_machine
 from django.utils import timezone
 
+from tunnels.admin_actions import start_cycle_as_admin
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.entry import enter_tunnel
 from tunnels.errors import InvalidCredential, InvalidRequest, TunnelUnavailable
+from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint, Cycle
-from tunnels.services import close_cycle, create_tunnel, post_reply, start_cycle_as_admin
 
 pytestmark = pytest.mark.django_db
 

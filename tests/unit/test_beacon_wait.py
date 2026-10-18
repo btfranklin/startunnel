@@ -12,9 +12,9 @@ from django.utils import timezone
 
 from core.cursors import decode_cursor, encode_cursor
 from tunnels.beacons import BOARD_WAIT_CURSOR_KIND, publish_beacon, read_board, wait_for_board
+from tunnels.cycles import create_tunnel
 from tunnels.errors import InvalidCredential, InvalidCursor, InvalidRequest
 from tunnels.models import ActivityCheckpoint, Beacon, BoardState
-from tunnels.services import create_tunnel
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

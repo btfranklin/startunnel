@@ -228,7 +228,8 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
 ) -> None:
     from api.rate_limits import consume_api_operation
     from core import limits as instance_limits
-    from tunnels.services import create_tunnel, rotate_address_as_admin
+    from tunnels.admin_actions import rotate_address_as_admin
+    from tunnels.cycles import create_tunnel
 
     first, first_key = credential_factory()
     _, second_key = credential_factory()

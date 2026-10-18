@@ -14,12 +14,13 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_services import list_admin_resources
-from tunnels import services
+from tunnels import admin_actions, cycles, messages
 from tunnels.access import cycle_is_readable
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import CycleUnavailable, TunnelUnavailable
+from tunnels.messages import post_reply, read_tree
 from tunnels.models import Cycle, IdempotencyRecord, Message, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
-from tunnels.services import close_cycle, create_tunnel, post_reply, read_tree
 
 pytestmark = pytest.mark.django_db
 
@@ -196,7 +197,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
         )
 
         def start() -> Any:
-            return services.start_cycle(
+            return cycles.start_cycle(
                 credential=credential,
                 idempotency_key="retention-retry-start",
                 address=first.address,
@@ -209,7 +210,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
     elif operation == "rollover":
 
         def rollover() -> Any:
-            return services.rollover_cycle(
+            return cycles.rollover_cycle(
                 credential=credential,
                 idempotency_key="retention-retry-rollover",
                 address=first.address,
@@ -264,15 +265,15 @@ def test_admin_actions_do_not_extend_expired_history(
     actor = created.tunnel.creator.created_by
     with time_machine.travel(expiry + timedelta(seconds=61), tick=False):
         if action == "close":
-            services.close_cycle_as_admin(
+            admin_actions.close_cycle_as_admin(
                 actor=actor, tunnel_id=created.tunnel.id, expected_cycle_id=created.cycle.id
             )
         else:
-            services.retire_tunnel_as_admin(
+            admin_actions.retire_tunnel_as_admin(
                 actor=actor,
                 tunnel_id=created.tunnel.id,
                 expected_address_generation=1,
-                confirmation=services.retirement_confirmation(created.tunnel),
+                confirmation=admin_actions.retirement_confirmation(created.tunnel),
             )
         created.cycle.refresh_from_db()
         assert created.cycle.close_reason == "expired"
@@ -287,15 +288,15 @@ def test_reply_replay_checks_current_tunnel_access(credential_factory: Any, acti
     created, _ = _conversation(credential_factory, f"reply-access-{action}")
     actor = created.tunnel.creator.created_by
     if action == "rotate":
-        services.rotate_address_as_admin(
+        admin_actions.rotate_address_as_admin(
             actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
         )
     else:
-        services.retire_tunnel_as_admin(
+        admin_actions.retire_tunnel_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,
-            confirmation=services.retirement_confirmation(created.tunnel),
+            confirmation=admin_actions.retirement_confirmation(created.tunnel),
         )
     with pytest.raises(TunnelUnavailable):
         post_reply(
@@ -368,21 +369,21 @@ def test_cycle_control_replays_check_current_address(
             "root_content": {"type": "text", "text": "Next root."},
         }
         if operation == "start":
-            return services.start_cycle(**common)
-        return services.rollover_cycle(**common, expected_cycle_id=created.cycle.id)
+            return cycles.start_cycle(**common)
+        return cycles.rollover_cycle(**common, expected_cycle_id=created.cycle.id)
 
     retry()
     retry()
     if access_change == "rotate":
-        services.rotate_address_as_admin(
+        admin_actions.rotate_address_as_admin(
             actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
         )
     else:
-        services.retire_tunnel_as_admin(
+        admin_actions.retire_tunnel_as_admin(
             actor=actor,
             tunnel_id=created.tunnel.id,
             expected_address_generation=1,
-            confirmation=services.retirement_confirmation(created.tunnel),
+            confirmation=admin_actions.retirement_confirmation(created.tunnel),
         )
     count = Cycle.objects.count()
     with pytest.raises(TunnelUnavailable):
@@ -434,7 +435,7 @@ def test_branch_assembly_handles_history_deleted_after_focus_read(
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    focus = services.get_message(
+    focus = messages.get_message(
         credential=credential,
         address=created.address,
         message_id=reply.message.id,
@@ -445,7 +446,7 @@ def test_branch_assembly_handles_history_deleted_after_focus_read(
     assert deadline is not None
     assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
     with pytest.raises(CycleUnavailable):
-        services.load_branch(focus)
+        messages.load_branch(focus)
 
 
 def test_subtree_hydration_rejects_missing_selected_messages(credential_factory: Any) -> None:
@@ -462,13 +463,13 @@ def test_subtree_hydration_rejects_missing_selected_messages(credential_factory:
     assert deadline is not None
     assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
     with pytest.raises(CycleUnavailable):
-        services._messages_by_id_in_order(selected_ids)
+        messages._messages_by_id_in_order(selected_ids)
 
 
 def test_message_hydration_does_not_return_a_partial_page(credential_factory: Any) -> None:
     created, _ = _conversation(credential_factory, "partial-page")
     with pytest.raises(CycleUnavailable):
-        services._messages_by_id_in_order([created.root.id, uuid4()])
+        messages._messages_by_id_in_order([created.root.id, uuid4()])
 
 
 def test_branch_assembly_handles_a_deleted_uncached_ancestor(credential_factory: Any) -> None:
@@ -481,7 +482,7 @@ def test_branch_assembly_handles_a_deleted_uncached_ancestor(credential_factory:
         parent_id=reply.message.id,
         content={"type": "text", "text": "Descendant content."},
     )
-    focus = services.get_message(
+    focus = messages.get_message(
         credential=credential,
         address=created.address,
         message_id=descendant.message.id,
@@ -498,4 +499,4 @@ def test_branch_assembly_handles_a_deleted_uncached_ancestor(credential_factory:
     assert deadline is not None
     assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
     with pytest.raises(CycleUnavailable):
-        services.load_branch(focus)
+        messages.load_branch(focus)

@@ -10,9 +10,10 @@ import pytest
 from django.db import IntegrityError
 from django.utils import timezone
 
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import CycleClosed, IdempotencyConflict, InvalidRequest, TunnelUnavailable
+from tunnels.messages import _resolve_mentions, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
-from tunnels.services import _resolve_mentions, close_cycle, create_tunnel, post_reply, read_tree
 
 pytestmark = pytest.mark.django_db
 
@@ -118,7 +119,7 @@ def test_failed_root_creation_rolls_back_every_resource(
         del message, mentions
         raise RuntimeError("injected root failure")
 
-    monkeypatch.setattr("tunnels.services._store_mentions", fail_store)
+    monkeypatch.setattr("tunnels.cycles._store_mentions", fail_store)
     with pytest.raises(RuntimeError, match="injected root failure"):
         _create(creator, key="create-rollback-0001")
 
@@ -364,7 +365,7 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
 def test_lifecycle_rechecks_replay_after_initial_miss(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
-    from tunnels import services
+    from tunnels import cycles
 
     creator, _ = credential_factory()
     created = _create(creator, "replay-race-create")
@@ -379,9 +380,9 @@ def test_lifecycle_rechecks_replay_after_initial_miss(
             expected_address_generation=1,
             root_content={"type": "text", "text": "Next root."},
         )
-    action = services.close_cycle if operation == "close" else services.rollover_cycle
+    action = cycles.close_cycle if operation == "close" else cycles.rollover_cycle
     first = action(**arguments)
-    monkeypatch.setattr(services, "find_idempotency_replay", lambda **kwargs: None)
+    monkeypatch.setattr(cycles, "find_idempotency_replay", lambda **kwargs: None)
     second = action(**arguments)
     if operation == "rollover":
         assert first is not None
@@ -401,7 +402,7 @@ def test_lifecycle_rechecks_replay_after_initial_miss(
 def test_close_replay_checks_current_creator_authority(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tunnels import services
+    from tunnels import cycles
 
     creator, _ = credential_factory()
     created = _create(creator, "close-replay-authority")
@@ -411,10 +412,10 @@ def test_close_replay_checks_current_creator_authority(
         "expected_cycle_id": created.cycle.id,
         "idempotency_key": "close-replay-authority-operation",
     }
-    services.close_cycle(**arguments)
-    monkeypatch.setattr(services, "_can_control_with_credential", lambda **kwargs: False)
+    cycles.close_cycle(**arguments)
+    monkeypatch.setattr(cycles, "_can_control_with_credential", lambda **kwargs: False)
     with pytest.raises(TunnelUnavailable):
-        services.close_cycle(**arguments)
+        cycles.close_cycle(**arguments)
 
 
 def test_all_mentions_are_resolved_in_one_query(

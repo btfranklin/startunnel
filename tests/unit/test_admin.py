@@ -11,8 +11,9 @@ from django.urls import reverse
 
 from accounts.models import User
 from agents.models import AgentCredential
+from tunnels.admin_actions import rotate_address_as_admin
+from tunnels.cycles import create_tunnel
 from tunnels.models import TunnelAddress
-from tunnels.services import create_tunnel, rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 

@@ -20,6 +20,7 @@ from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import CredentialError, authenticate_key
 from core.management.commands import provision_live_agent_proof, provision_load_profile
+from tunnels.cycles import create_tunnel
 from tunnels.management.commands.maintenance_loop import (
     Command as MaintenanceCommand,
 )
@@ -30,7 +31,6 @@ from tunnels.management.commands.maintenance_loop import (
     _should_report_cycle,
 )
 from tunnels.models import Tunnel
-from tunnels.services import create_tunnel
 
 pytestmark = pytest.mark.django_db
 

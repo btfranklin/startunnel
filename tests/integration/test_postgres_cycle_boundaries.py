@@ -13,7 +13,7 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from agents.models import AgentCredential
-from tunnels import maintenance, services
+from tunnels import cycles, maintenance, messages
 from tunnels.access import resolve_tunnel
 from tunnels.errors import CycleClosed
 from tunnels.models import Cycle, IdempotencyRecord, Message, Tunnel, TunnelEvent
@@ -44,7 +44,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
 ) -> None:
     creator, _ = credential_factory()
     writer, _ = credential_factory()
-    created = services.create_tunnel(
+    created = cycles.create_tunnel(
         credential=creator,
         idempotency_key="pg-forced-boundary-create",
         root_content={"type": "text", "text": "Record the write boundary."},
@@ -59,7 +59,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
     worker_state = threading.local()
     pids: dict[str, int] = {}
     original_resolve = resolve_tunnel
-    original_close = services._close_locked_cycle
+    original_close = cycles._close_locked_cycle
 
     def pause_first_operation() -> None:
         if worker_state.operation == first and not owner_locked.is_set():
@@ -77,8 +77,9 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
         pause_first_operation()
         original_close(**kwargs)
 
-    monkeypatch.setattr(services, "resolve_tunnel", resolve_then_pause)
-    monkeypatch.setattr(services, "_close_locked_cycle", close_after_pause)
+    monkeypatch.setattr(cycles, "resolve_tunnel", resolve_then_pause)
+    monkeypatch.setattr(messages, "resolve_tunnel", resolve_then_pause)
+    monkeypatch.setattr(cycles, "_close_locked_cycle", close_after_pause)
     monkeypatch.setattr(maintenance, "_close_locked_cycle", close_after_pause)
 
     def operate(operation: str) -> str:
@@ -94,7 +95,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
             if operation == "post":
                 credential = AgentCredential.objects.get(pk=writer.id)
                 try:
-                    services.post_reply(
+                    messages.post_reply(
                         credential=credential,
                         idempotency_key="pg-forced-boundary-reply",
                         address=created.address,
@@ -108,7 +109,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
                 assert maintenance._close_expired_cycles(now=timezone.now()) == (1, 1)
             else:
                 credential = AgentCredential.objects.get(pk=creator.id)
-                services.close_cycle(
+                cycles.close_cycle(
                     credential=credential,
                     idempotency_key="pg-forced-boundary-close",
                     address=created.address,
@@ -137,13 +138,13 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
     assert outcomes == {"close": "closed", "post": "posted" if posted else "rejected"}
     cycle = Cycle.objects.get(pk=created.cycle.id)
     tunnel = Tunnel.objects.get(pk=created.tunnel.id)
-    messages = list(Message.objects.filter(cycle=cycle).order_by("sequence"))
+    stored_messages = list(Message.objects.filter(cycle=cycle).order_by("sequence"))
     events = list(TunnelEvent.objects.filter(tunnel=tunnel).order_by("position"))
     assert cycle.state == Cycle.State.CLOSED
     assert tunnel.state == Tunnel.State.DORMANT
-    assert len(messages) == (2 if posted else 1)
-    assert cycle.final_sequence == cycle.message_count == len(messages)
-    assert cycle.content_bytes == sum(message.byte_count for message in messages)
+    assert len(stored_messages) == (2 if posted else 1)
+    assert cycle.final_sequence == cycle.message_count == len(stored_messages)
+    assert cycle.content_bytes == sum(message.byte_count for message in stored_messages)
     assert [event.position for event in events] == list(range(1, len(events) + 1))
     assert [event.event_type for event in events[-2:]] == [
         TunnelEvent.Type.CYCLE_CLOSED,

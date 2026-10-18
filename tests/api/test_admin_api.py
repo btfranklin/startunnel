@@ -88,7 +88,8 @@ def test_account_creation_rejects_case_only_username_collision(
 def test_admin_tunnel_reads_return_the_stored_current_address(
     client: Any, user_factory: Any, credential_factory: Any
 ) -> None:
-    from tunnels.services import create_tunnel, rotate_address_as_admin
+    from tunnels.admin_actions import rotate_address_as_admin
+    from tunnels.cycles import create_tunnel
 
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -113,7 +114,7 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
 def test_admin_tunnel_list_batches_address_and_active_cycle_reads(
     client: Any, user_factory: Any, credential_factory: Any
 ) -> None:
-    from tunnels.services import create_tunnel
+    from tunnels.cycles import create_tunnel
 
     actor = user_factory()
     credential, _ = credential_factory(user=actor)

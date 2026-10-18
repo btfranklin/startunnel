@@ -17,9 +17,10 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from site_app.views import _authenticated_user
+from tunnels.admin_actions import rollover_cycle_as_admin
+from tunnels.cycles import create_tunnel
 from tunnels.errors import InvalidRequest, QuotaExceeded, TunnelUnavailable
 from tunnels.models import Tunnel
-from tunnels.services import create_tunnel, rollover_cycle_as_admin
 
 pytestmark = pytest.mark.django_db
 

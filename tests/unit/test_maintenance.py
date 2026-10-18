@@ -18,6 +18,7 @@ from accounts.models import AdminOperation
 from core.logging import SafeJsonFormatter
 from core.maintenance_status import read_maintenance_status
 from core.models import MaintenanceState, RateLimitBucket
+from tunnels.cycles import create_tunnel
 from tunnels.maintenance import (
     _delete_batch,
     _delete_due_cycles,
@@ -28,8 +29,8 @@ from tunnels.maintenance import (
     record_notification_wake,
 )
 from tunnels.management.commands.maintenance_loop import Command as MaintenanceCommand
+from tunnels.messages import post_reply
 from tunnels.models import AuditEvent, Cycle, IdempotencyRecord, Message
-from tunnels.services import create_tunnel, post_reply
 
 pytestmark = pytest.mark.django_db
 

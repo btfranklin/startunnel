@@ -20,9 +20,9 @@ from accounts.admin_services import admin_status, execute_admin_operation, list_
 from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
 from agents.models import AgentCredential
+from tunnels.admin_actions import retirement_confirmation
 from tunnels.errors import InvalidRequest, TunnelDomainError, TunnelUnavailable
 from tunnels.models import Cycle, Tunnel, TunnelAddress
-from tunnels.services import retirement_confirmation
 
 from .admin_views import private_download
 from .docs import DOCUMENTATION_PAGES, render_documentation

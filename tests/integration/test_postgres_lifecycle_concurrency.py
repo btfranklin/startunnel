@@ -12,17 +12,11 @@ from django.db import close_old_connections
 
 from accounts.models import User
 from agents.models import AgentCredential
+from tunnels.admin_actions import retire_tunnel_as_admin, rotate_address_as_admin
+from tunnels.cycles import close_cycle, create_tunnel, rollover_cycle, start_cycle
 from tunnels.errors import CycleClosed, LifecycleConflict, TunnelUnavailable
+from tunnels.messages import post_reply
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
-from tunnels.services import (
-    close_cycle,
-    create_tunnel,
-    post_reply,
-    retire_tunnel_as_admin,
-    rollover_cycle,
-    rotate_address_as_admin,
-    start_cycle,
-)
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -339,7 +333,7 @@ def test_concurrent_identical_lifecycle_retries_replay_success(
         barrier.wait(timeout=15)
         return found
 
-    monkeypatch.setattr("tunnels.services.find_idempotency_replay", synchronized_initial_replay)
+    monkeypatch.setattr("tunnels.cycles.find_idempotency_replay", synchronized_initial_replay)
 
     def attempt(_: int) -> UUID | None:
         close_old_connections()

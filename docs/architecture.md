@@ -19,10 +19,16 @@ LISTEN/NOTIFY ---- maintenance deadlines
 - `site_app` owns browser transport and templates.
 - `api` owns the authenticated JSON transport and schemas.
 - Domain services in `accounts`, `agents`, and `tunnels` own business rules.
+- `tunnels.messages` owns message creation and tree reads.
+- `tunnels.cycles` owns tunnel creation, cycle lifecycle, and cycle status reads.
+- `tunnels.admin_actions` owns admin lifecycle controls and address changes.
 - Models own persisted structure and database constraints.
 - `core` owns cross-cutting limits, notifications, rate limits, health, and maintenance state.
 
 Views and API routers call domain services. Models do not import views or API schemas. Domain services do not depend on HTTP requests or templates.
+Admin actions call cycle services. Cycle services use message primitives.
+These modules share the access rules and persisted models below them. Beacon
+operations stay in `tunnels.beacons`.
 
 ## Identity
 

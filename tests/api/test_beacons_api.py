@@ -138,7 +138,7 @@ def test_beacon_routes_require_an_active_agent_and_preserve_publication_on_revoc
 ) -> None:
     from django.utils import timezone
 
-    from tunnels.services import create_tunnel
+    from tunnels.cycles import create_tunnel
 
     creator, key = credential_factory()
     _, reader_key = credential_factory()
@@ -290,8 +290,8 @@ def test_board_wait_observes_expiry_without_maintenance(
     client: Any, credential_factory: Any
 ) -> None:
     from tunnels.beacons import publish_beacon
+    from tunnels.cycles import create_tunnel
     from tunnels.models import Beacon
-    from tunnels.services import create_tunnel
 
     creator, key = credential_factory()
     created = create_tunnel(

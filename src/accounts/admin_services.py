@@ -27,11 +27,7 @@ from core.audit import admin_audit_context, record_event
 from core.maintenance_status import read_maintenance_status
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
-from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_admin
-from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
-from tunnels.idempotency import validate_idempotency_key
-from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
-from tunnels.services import (
+from tunnels.admin_actions import (
     close_cycle_as_admin,
     retire_tunnel_as_admin,
     retirement_confirmation,
@@ -39,6 +35,10 @@ from tunnels.services import (
     rotate_address_as_admin,
     start_cycle_as_admin,
 )
+from tunnels.beacons import beacon_data, beacon_queryset, withdraw_beacon_as_admin
+from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
+from tunnels.idempotency import validate_idempotency_key
+from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
 
 from .admin_access import (
     change_admin_state,

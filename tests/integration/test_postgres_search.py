@@ -12,8 +12,9 @@ from django.db import connection
 from django.test import Client
 
 from core.limits import effective_limits
+from tunnels.cycles import create_tunnel
+from tunnels.messages import post_reply
 from tunnels.search import SearchHit, search_hit_payload, search_messages
-from tunnels.services import create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 

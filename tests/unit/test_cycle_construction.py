@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
+from tunnels.cycles import CreatedTunnel, StartedCycle, close_cycle, create_tunnel, start_cycle
 from tunnels.errors import TunnelUnavailable
 from tunnels.models import AuditEvent, Cycle, MessageMention, TunnelEvent
-from tunnels.services import CreatedTunnel, StartedCycle, close_cycle, create_tunnel, start_cycle
 
 pytestmark = pytest.mark.django_db
 

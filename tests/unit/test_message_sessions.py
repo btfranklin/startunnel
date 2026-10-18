@@ -12,18 +12,12 @@ from asgiref.sync import async_to_sync
 from tunnels.activity import read_activity_async
 from tunnels.codec import canonical_address
 from tunnels.context import context_item_payload, get_context
+from tunnels.cycles import close_cycle, create_tunnel, rollover_cycle, start_cycle
 from tunnels.entry import enter_tunnel, entry_payload
 from tunnels.errors import IdempotencyConflict, InvalidRequest
 from tunnels.message_data import message_payload
+from tunnels.messages import post_reply, read_tree
 from tunnels.participants import list_participants
-from tunnels.services import (
-    close_cycle,
-    create_tunnel,
-    post_reply,
-    read_tree,
-    rollover_cycle,
-    start_cycle,
-)
 
 pytestmark = pytest.mark.django_db
 

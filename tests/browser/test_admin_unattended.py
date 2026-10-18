@@ -378,7 +378,7 @@ from django.utils import timezone
 from accounts.models import User
 from agents.services import create_credential
 from tunnels.models import Tunnel
-from tunnels.services import create_tunnel
+from tunnels.cycles import create_tunnel
 actor = User.objects.create_user(username={username!r}, password={password!r})
 credential = create_credential(actor=actor, name={credential_name!r}).credential
 created_at = timezone.now()
@@ -414,7 +414,7 @@ for index in range(201):
         _database_shell(
             f"""
 from agents.models import AgentCredential
-from tunnels.services import retire_tunnels_for_credentials
+from tunnels.admin_actions import retire_tunnels_for_credentials
 credential = AgentCredential.objects.filter(name={credential_name!r}).first()
 if credential:
     retire_tunnels_for_credentials(

@@ -256,6 +256,7 @@ def upgraded(snapshot_path: Path) -> None:
     from agents.models import AgentCredential
     from agents.services import authenticate_key
     from tunnels.access import resolve_tunnel
+    from tunnels.cycles import create_tunnel
     from tunnels.errors import TunnelUnavailable
     from tunnels.models import (
         ActivityCheckpoint,
@@ -268,7 +269,6 @@ def upgraded(snapshot_path: Path) -> None:
         TunnelAddress,
         TunnelEvent,
     )
-    from tunnels.services import create_tunnel
 
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)

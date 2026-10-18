@@ -14,7 +14,14 @@ from django.utils import timezone
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminOperation
 from core.cursors import decode_cursor, encode_cursor
+from tunnels.admin_actions import (
+    retire_tunnel_as_admin,
+    retirement_confirmation,
+    rotate_address_as_admin,
+    start_cycle_as_admin,
+)
 from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import (
     IdempotencyConflict,
     InvalidCursor,
@@ -23,17 +30,9 @@ from tunnels.errors import (
     TunnelUnavailable,
 )
 from tunnels.maintenance import cleanup_once
+from tunnels.messages import post_reply
 from tunnels.models import Beacon, BoardState, Cycle, IdempotencyRecord, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
-from tunnels.services import (
-    close_cycle,
-    create_tunnel,
-    post_reply,
-    retire_tunnel_as_admin,
-    retirement_confirmation,
-    rotate_address_as_admin,
-    start_cycle_as_admin,
-)
 
 pytestmark = pytest.mark.django_db
 

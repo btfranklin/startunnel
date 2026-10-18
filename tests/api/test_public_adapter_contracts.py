@@ -15,8 +15,8 @@ from api.router import api
 from core.models import RateLimitBucket
 from site_app.forms import TunnelCycleForm
 from tunnels.codec import encode_token
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.models import Cycle
-from tunnels.services import close_cycle, create_tunnel
 
 
 @pytest.mark.django_db(transaction=True)

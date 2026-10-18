@@ -13,8 +13,8 @@ from agents.models import AgentCredential
 from .access import limits_for, resolve_tunnel, select_cycle
 from .errors import ContextBudgetTooSmall, CycleUnavailable, InvalidRequest
 from .message_data import message_payload
+from .messages import load_branch
 from .models import ActivityCheckpoint, Message, Tunnel, TunnelEvent
-from .services import load_branch
 
 ContextReason = Literal["ancestor", "focus", "direct_reply", "reference", "recent_activity"]
 

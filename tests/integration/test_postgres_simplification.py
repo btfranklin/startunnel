@@ -35,11 +35,11 @@ from core.limits import Limits
 from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
 from core.rate_limits import _consume
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import QuotaExceeded, RateLimited
 from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch
 from tunnels.migrations.sql.guards import revoke_runtime_history_delete
 from tunnels.models import Cycle, Tunnel
-from tunnels.services import close_cycle, create_tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -178,7 +178,7 @@ def test_instance_tunnel_quota_cannot_be_exceeded_concurrently(
 ) -> None:
     credentials = [credential_factory(name=f"Quota agent {index}")[0] for index in range(4)]
     limits = replace(Limits(), non_retired_tunnels=1)
-    monkeypatch.setattr("tunnels.services.limits_for", lambda credential: limits)
+    monkeypatch.setattr("tunnels.cycles.limits_for", lambda credential: limits)
     barrier = threading.Barrier(len(credentials))
     with ThreadPoolExecutor(max_workers=len(credentials)) as executor:
         results = list(

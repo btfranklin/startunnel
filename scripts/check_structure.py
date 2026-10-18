@@ -66,8 +66,11 @@ def check_import_directions() -> list[Failure]:
             and path.name
             in {
                 "access.py",
+                "admin_actions.py",
+                "cycles.py",
                 "idempotency.py",
                 "maintenance.py",
+                "messages.py",
             }
         ):
             forbidden = sorted(name for name in imports if name.startswith(service_forbidden))

@@ -16,20 +16,13 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.limits import Limits
+from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.codec import parse_address
 from tunnels.context import get_context
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
+from tunnels.messages import PostedReply, get_subtree, list_leaves, list_replies, post_reply
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
-from tunnels.services import (
-    PostedReply,
-    close_cycle,
-    create_tunnel,
-    get_subtree,
-    list_leaves,
-    list_replies,
-    post_reply,
-    rotate_address_as_admin,
-)
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -232,7 +225,7 @@ def test_address_rotation_retries_one_database_collision(
         root_content={"type": "text", "text": "Rotate after one collision."},
     )
     generated_tokens = iter((parse_address(created.address), b"\xff" * 16))
-    monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: next(generated_tokens))
+    monkeypatch.setattr("tunnels.cycles.secrets.token_bytes", lambda size: next(generated_tokens))
 
     rotated = rotate_address_as_admin(
         actor=credential.created_by,
@@ -260,7 +253,7 @@ def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
     colliding_token = parse_address(first.address)
     fresh_token = b"\xfe" * 16
     generated_tokens = iter((colliding_token, fresh_token))
-    monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: next(generated_tokens))
+    monkeypatch.setattr("tunnels.cycles.secrets.token_bytes", lambda size: next(generated_tokens))
     second = create_tunnel(
         credential=credential,
         idempotency_key="create-collision-retry",
@@ -269,7 +262,7 @@ def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
     assert second.address != first.address
     assert second.tunnel.addresses.get().address == second.address
 
-    monkeypatch.setattr("tunnels.services.secrets.token_bytes", lambda size: colliding_token)
+    monkeypatch.setattr("tunnels.cycles.secrets.token_bytes", lambda size: colliding_token)
     with pytest.raises(InvalidRequest, match="could not allocate"):
         create_tunnel(
             credential=credential,
@@ -420,8 +413,8 @@ def test_subtree_rejects_root_deleted_before_recursive_read(
     credential_factory: Any, after_sequence: int
 ) -> None:
     from tunnels.errors import CycleUnavailable
+    from tunnels.messages import _postgresql_subtree_page
     from tunnels.retention import delete_due_cycle_content
-    from tunnels.services import _postgresql_subtree_page
 
     credential, _ = credential_factory()
     created = create_tunnel(

@@ -15,9 +15,9 @@ from accounts.models import AdminOperation
 from core.maintenance_liveness import publish_local_maintenance_heartbeat
 from core.models import MaintenanceState, RateLimitBucket
 
+from .cycles import _close_locked_cycle
 from .models import AuditEvent, Beacon, Cycle, IdempotencyRecord, Tunnel
 from .retention import delete_due_cycle_content
-from .services import _close_locked_cycle
 
 ADVISORY_LOCK_ID = 7_195_415_308_821
 MAINTENANCE_BATCH_SIZE = 100

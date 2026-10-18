@@ -15,9 +15,10 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from tunnels.cycles import create_tunnel
 from tunnels.errors import IdempotencyConflict
+from tunnels.messages import post_reply
 from tunnels.models import IdempotencyRecord, Message
-from tunnels.services import create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 

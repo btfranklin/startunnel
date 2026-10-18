@@ -12,8 +12,9 @@ from django.db import DatabaseError, close_old_connections, connection, transact
 
 from agents.models import AgentCredential
 from tunnels.access import resolve_tunnel
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
+from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint, Cycle, Message, Tunnel, TunnelEvent
-from tunnels.services import CreatedTunnel, close_cycle, create_tunnel, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 

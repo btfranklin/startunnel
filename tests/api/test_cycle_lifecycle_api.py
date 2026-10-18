@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 from django.test import Client
 
-from tunnels.services import rotate_address_as_admin
+from tunnels.admin_actions import rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 

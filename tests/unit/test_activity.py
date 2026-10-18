@@ -20,14 +20,16 @@ from tunnels.activity import (
     commit_checkpoint,
     read_activity_async,
 )
+from tunnels.admin_actions import rotate_address_as_admin
+from tunnels.cycles import create_tunnel
 from tunnels.errors import (
     CheckpointRegression,
     InvalidCredential,
     InvalidRequest,
     TunnelUnavailable,
 )
+from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
-from tunnels.services import create_tunnel, post_reply, rotate_address_as_admin
 
 pytestmark = pytest.mark.django_db
 

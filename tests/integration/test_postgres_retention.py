@@ -9,10 +9,11 @@ from django.utils import timezone
 
 from tunnels.activity import commit_checkpoint
 from tunnels.beacons import beacon_data, beacon_queryset, publish_beacon
+from tunnels.cycles import close_cycle, create_tunnel, start_cycle
 from tunnels.errors import CycleUnavailable, TunnelUnavailable
+from tunnels.messages import post_reply, read_tree
 from tunnels.models import Beacon, Cycle, IdempotencyRecord, Message, MessageMention, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
-from tunnels.services import close_cycle, create_tunnel, post_reply, read_tree, start_cycle
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 

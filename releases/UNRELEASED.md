@@ -196,5 +196,9 @@ and rollover retries use the same typed snapshot validation. Admin domain
 functions use consistent `as_admin` names. Admin cycle and address actions share
 a tunnel lock check.
 
+Message creation and tree reads, cycle lifecycle, and admin actions now have
+separate domain modules. Application code and tests import each function from
+its owner.
+
 The cycle directory now returns only its usable page cursor. The unused
 `snapshot_cursor` field is removed.

@@ -7,8 +7,9 @@ from uuid import uuid4
 
 import pytest
 
+from tunnels.cycles import create_tunnel
 from tunnels.errors import CycleUnavailable, InvalidRequest
-from tunnels.services import create_tunnel, get_subtree, list_leaves, list_replies, post_reply
+from tunnels.messages import get_subtree, list_leaves, list_replies, post_reply
 
 pytestmark = pytest.mark.django_db
 

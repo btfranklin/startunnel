@@ -34,7 +34,7 @@ def run(
 def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
     user_factory: Any, credential_factory: Any
 ) -> None:
-    from tunnels.services import create_tunnel
+    from tunnels.cycles import create_tunnel
 
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -244,7 +244,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     user_factory: Any, credential_factory: Any
 ) -> None:
     from accounts.admin_services import tunnel_resource
-    from tunnels.services import create_tunnel
+    from tunnels.cycles import create_tunnel
 
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -322,7 +322,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
 def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
     user_factory: Any, credential_factory: Any, inactive_reason: str
 ) -> None:
-    from tunnels.services import create_tunnel
+    from tunnels.cycles import create_tunnel
 
     creator_user = user_factory()
     actor = user_factory()

@@ -9,8 +9,9 @@ import pytest
 from django.test import Client
 
 from core.cursors import encode_cursor
+from tunnels.cycles import create_tunnel
+from tunnels.messages import post_reply
 from tunnels.search import SearchHit, SearchPage
-from tunnels.services import create_tunnel, post_reply
 
 pytestmark = pytest.mark.django_db
 

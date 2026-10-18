@@ -10,15 +10,14 @@ import pytest
 import time_machine
 from django.test import Client
 
-from tunnels.models import Message
-from tunnels.services import (
-    close_cycle,
-    create_tunnel,
-    post_reply,
+from tunnels.admin_actions import (
     retire_tunnel_as_admin,
     retirement_confirmation,
     rotate_address_as_admin,
 )
+from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.messages import post_reply
+from tunnels.models import Message
 
 pytestmark = pytest.mark.django_db
 

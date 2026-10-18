@@ -11,9 +11,10 @@ from django.test.utils import CaptureQueriesContext
 
 from tunnels.activity import commit_checkpoint
 from tunnels.context import context_item_payload, get_context
+from tunnels.cycles import create_tunnel
 from tunnels.errors import ContextBudgetTooSmall, CycleUnavailable
+from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint
-from tunnels.services import create_tunnel, post_reply
 
 pytestmark = pytest.mark.django_db
 

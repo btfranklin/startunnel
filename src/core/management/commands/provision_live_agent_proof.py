@@ -15,7 +15,7 @@ from django.utils import timezone
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import create_credential
-from tunnels.services import retire_tunnels_for_credentials
+from tunnels.admin_actions import retire_tunnels_for_credentials
 
 _PROOF_USERNAME = "live-agent-proof"
 _CREDENTIAL_NAMES = (

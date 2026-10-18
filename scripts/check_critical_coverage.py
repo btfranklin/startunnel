@@ -38,20 +38,25 @@ CRITICAL_TARGETS = (
         ("credential_is_active", "resolve_tunnel", "cycle_is_readable"),
     ),
     CriticalTarget(
-        "src/tunnels/services.py",
+        "src/tunnels/cycles.py",
         (
-            "_normalize_correlation_id",
             "_open_cycle",
             "_read_cycle_snapshot",
             "create_tunnel",
+            "close_cycle",
+            "_close_locked_cycle",
+        ),
+    ),
+    CriticalTarget(
+        "src/tunnels/messages.py",
+        (
+            "_normalize_correlation_id",
             "post_reply",
             "read_tree",
             "get_message",
             "get_branch",
             "load_branch",
             "list_replies",
-            "close_cycle",
-            "_close_locked_cycle",
         ),
     ),
     CriticalTarget("src/tunnels/retention.py", ("delete_due_cycle_content",)),
@@ -59,7 +64,7 @@ CRITICAL_TARGETS = (
     CriticalTarget("src/tunnels/maintenance.py", ("cleanup_once",)),
 )
 
-POSTGRES_TARGETS = (CriticalTarget("src/tunnels/services.py", ("_postgresql_subtree_page",)),)
+POSTGRES_TARGETS = (CriticalTarget("src/tunnels/messages.py", ("_postgresql_subtree_page",)),)
 
 
 def _line_range(source_path: Path, function_name: str) -> range:

@@ -20,6 +20,7 @@ from core.activity_listener import ActivityListener
 from core.activity_listener import _connection_kwargs as listener_connection_kwargs
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify
 from tunnels.activity import read_activity_async
+from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.beacons import (
     _advance_board_position,
     publish_beacon,
@@ -27,13 +28,9 @@ from tunnels.beacons import (
     wait_for_board,
     withdraw_beacon,
 )
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.errors import InvalidCredential
-from tunnels.services import (
-    CreatedTunnel,
-    create_tunnel,
-    post_reply,
-    rotate_address_as_admin,
-)
+from tunnels.messages import post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
