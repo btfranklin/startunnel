@@ -134,6 +134,20 @@ def test_production_secret_preflight_accepts_only_complete_safe_sources(
     validate_production_secret_files(tmp_path)
 
 
+def test_production_secret_preflight_preserves_operator_text_formats(tmp_path: Path) -> None:
+    values = {
+        "startunnel_api_key_pepper": "0123456789abcdef" * 4,
+        "startunnel_idempotency_secret": "operator secret / with spaces and punctuation!",
+        "startunnel_metrics_token": "f" * 64,
+    }
+    for name in PRODUCTION_SECRET_NAMES:
+        _write_secret(tmp_path / name, values.get(name, "safe-test-secret"))
+
+    validate_production_secret_files(tmp_path)
+    for name, value in values.items():
+        assert read_validated_secret_file(tmp_path / name) == value
+
+
 def test_production_secret_preflight_inventory_matches_compose() -> None:
     compose_source = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
     compose_secret_names = set(

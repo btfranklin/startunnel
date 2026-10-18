@@ -52,6 +52,15 @@ The release scan checks candidate source files, the current security reports,
 and the runtime image and its history. It does not scan unrelated ignored
 local reports or private input files. A Git-free source export is also checked.
 
+## Production application secrets
+
+`STARTUNNEL_API_KEY_PEPPER`, `STARTUNNEL_IDEMPOTENCY_SECRET`, and
+`STARTUNNEL_METRICS_TOKEN` each require at least 32 printable, single-line ASCII
+characters. They must have different values. Operators can use hex, base64,
+spaces, and punctuation. Base64 is not required. This rule applies to
+application secret values. Agent keys still use the `st_` format, and admin
+keys still use the `sta_` format.
+
 ## Addresses and logs
 
 StarTunnel stores full glyph addresses directly in PostgreSQL. Current and

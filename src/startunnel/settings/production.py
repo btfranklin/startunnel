@@ -1,7 +1,5 @@
 """Production settings for the Docker deployment."""
 
-import base64
-import binascii
 from urllib.parse import urlparse
 
 from .base import *  # noqa: F403
@@ -11,24 +9,20 @@ if len(SECRET_KEY) < 50:
     raise RuntimeError("STARTUNNEL_SECRET_KEY must contain at least 50 characters.")
 
 
-def required_32_byte_secret(name: str) -> str:
+def required_text_secret(name: str) -> str:
+    """Require one printable ASCII value for production secret settings."""
+
     value = env(name, required=True)  # noqa: F405
-    try:
-        decoded = base64.b64decode(
-            value + "=" * (-len(value) % 4),
-            altchars=b"-_",
-            validate=True,
-        )
-    except (binascii.Error, ValueError) as error:
-        raise RuntimeError(f"{name} must be URL-safe base64 without padding.") from error
-    if len(decoded) != 32:
-        raise RuntimeError(f"{name} must encode exactly 32 random bytes.")
+    if len(value) < 32:
+        raise RuntimeError(f"{name} must contain at least 32 characters.")
+    if not value.isascii() or not value.isprintable():
+        raise RuntimeError(f"{name} must contain printable single-line ASCII text.")
     return value
 
 
-API_KEY_PEPPER = required_32_byte_secret("STARTUNNEL_API_KEY_PEPPER")
-IDEMPOTENCY_SECRET = required_32_byte_secret("STARTUNNEL_IDEMPOTENCY_SECRET")
-METRICS_TOKEN = required_32_byte_secret("STARTUNNEL_METRICS_TOKEN")
+API_KEY_PEPPER = required_text_secret("STARTUNNEL_API_KEY_PEPPER")
+IDEMPOTENCY_SECRET = required_text_secret("STARTUNNEL_IDEMPOTENCY_SECRET")
+METRICS_TOKEN = required_text_secret("STARTUNNEL_METRICS_TOKEN")
 if (
     len(
         {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -31,9 +32,11 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _import_production(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _import_production(
+    environment: dict[str, str], code: str = "import startunnel.settings.production"
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-c", "import startunnel.settings.production"],
+        [sys.executable, "-c", code],
         cwd=ROOT,
         env=environment,
         text=True,
@@ -65,6 +68,46 @@ def test_metrics_token_must_be_distinct_from_cryptographic_secrets() -> None:
     result = _import_production(environment)
     assert result.returncode != 0
     assert "Each StarTunnel cryptographic secret must be different." in result.stderr
+
+
+def test_production_preserves_printable_text_secrets_without_decoding() -> None:
+    environment = _environment()
+    values = {
+        "STARTUNNEL_API_KEY_PEPPER": "0123456789abcdef" * 4,
+        "STARTUNNEL_IDEMPOTENCY_SECRET": base64.urlsafe_b64encode(b"x" * 64)
+        .decode("ascii")
+        .rstrip("="),
+        "STARTUNNEL_METRICS_TOKEN": "operator token / with spaces and punctuation!",
+    }
+    environment.update(values)
+    code = (
+        "from startunnel.settings import production as p; "
+        "assert p.API_KEY_PEPPER == "
+        + repr(values["STARTUNNEL_API_KEY_PEPPER"])
+        + "; assert p.IDEMPOTENCY_SECRET == "
+        + repr(values["STARTUNNEL_IDEMPOTENCY_SECRET"])
+        + "; assert p.METRICS_TOKEN == "
+        + repr(values["STARTUNNEL_METRICS_TOKEN"])
+    )
+    result = _import_production(environment, code)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("x" * 31, "at least 32 characters"),
+        ("x" * 31 + "é", "printable single-line ASCII"),
+        ("x" * 31 + "\x7f", "printable single-line ASCII"),
+        ("x" * 31 + "\t", "printable single-line ASCII"),
+    ],
+)
+def test_production_rejects_short_or_nonprintable_secret_values(value: str, message: str) -> None:
+    environment = _environment()
+    environment["STARTUNNEL_API_KEY_PEPPER"] = value
+    result = _import_production(environment)
+    assert result.returncode != 0
+    assert message in result.stderr
 
 
 @pytest.mark.parametrize(

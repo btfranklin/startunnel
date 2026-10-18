@@ -183,6 +183,10 @@ The revision label must match the recorded source commit. If a supplied image
 has no label, obtain its build record before you proceed. The generator creates
 independent secret files. It refuses to replace existing files. Do not
 regenerate secrets for a running instance.
+The generator uses URL-safe base64 for the three application secrets. You can
+provide another format: each value must contain at least 32 printable,
+single-line ASCII characters, and the three values must be different. Base64 is
+not required. See [security](../security.md#production-application-secrets).
 
 The default application image runs with UID `10001`. On Linux, Compose mounts
 these files with their host ownership. The ownership step lets the application
