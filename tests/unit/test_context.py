@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from tunnels.activity import commit_checkpoint
 from tunnels.context import context_item_payload, get_context
@@ -58,6 +60,21 @@ def test_context_reports_exact_canonical_utf8_bytes(credential_factory: Any) -> 
     )
     assert view.used_bytes == sum(_canonical_size(item) for item in view.items)
     assert view.used_items == len(view.items) == 2
+
+
+def test_root_context_stays_within_its_query_budget(credential_factory: Any) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator)
+    with CaptureQueriesContext(connection) as queries:
+        view = get_context(
+            credential=creator,
+            address=created.address,
+            focus_message_id=created.root.id,
+            include_direct_replies=False,
+            include_recent_activity=False,
+        )
+    assert [item.message.id for item in view.items] == [created.root.id]
+    assert len(queries) <= 7
 
 
 def test_context_requires_the_complete_root_to_focus_branch(credential_factory: Any) -> None:
@@ -151,7 +168,8 @@ def test_context_uses_deterministic_greedy_truncation(credential_factory: Any) -
     assert limited.truncated is True
 
 
-def test_context_rejects_wrong_cycle(credential_factory: Any) -> None:
+@pytest.mark.parametrize("foreign_cycle", [True, False])
+def test_context_rejects_wrong_cycle(credential_factory: Any, foreign_cycle: bool) -> None:
     creator, _ = credential_factory(name="Creator")
     other, _ = credential_factory(name="Other")
     first = _create(creator)
@@ -160,8 +178,8 @@ def test_context_rejects_wrong_cycle(credential_factory: Any) -> None:
         get_context(
             credential=creator,
             address=first.address,
-            focus_message_id=first.root.id,
-            cycle_id=second.cycle.id,
+            focus_message_id=first.root.id if foreign_cycle else second.root.id,
+            cycle_id=second.cycle.id if foreign_cycle else first.cycle.id,
         )
 
 

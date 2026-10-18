@@ -11,10 +11,10 @@ from uuid import UUID
 from agents.models import AgentCredential
 
 from .access import limits_for, resolve_tunnel, select_cycle
-from .errors import ContextBudgetTooSmall, InvalidRequest
+from .errors import ContextBudgetTooSmall, CycleUnavailable, InvalidRequest
 from .message_data import message_payload
 from .models import ActivityCheckpoint, Message, Tunnel, TunnelEvent
-from .services import get_message, load_branch
+from .services import load_branch
 
 ContextReason = Literal["ancestor", "focus", "direct_reply", "reference", "recent_activity"]
 
@@ -94,12 +94,14 @@ def get_context(
             or 0
         )
     cycle = select_cycle(tunnel=tunnel, cycle_id=cycle_id)
-    focus = get_message(
-        credential=credential,
-        address=address,
-        message_id=focus_message_id,
-        cycle_id=cycle.id,
+    focus = (
+        Message.objects.select_related("sender", "parent", "cycle")
+        .prefetch_related("mentions__credential")
+        .filter(pk=focus_message_id, tunnel=tunnel, cycle=cycle)
+        .first()
     )
+    if focus is None:
+        raise CycleUnavailable()
     current_sequence = max(cycle.next_sequence - 1, 0)
     sequence_high_water = current_sequence if snapshot_sequence is None else snapshot_sequence
     if sequence_high_water < focus.sequence or sequence_high_water > current_sequence:
@@ -113,7 +115,7 @@ def get_context(
 
     if not include_branch and focus.parent_id is not None:
         raise InvalidRequest("A non-root context must include its complete branch.")
-    branch = load_branch(focus) if include_branch else (focus,)
+    branch = load_branch(focus) if include_branch and focus.parent_id is not None else (focus,)
     required: list[ContextItem] = []
     for message in branch:
         reason: ContextReason = "focus" if message.id == focus.id else "ancestor"

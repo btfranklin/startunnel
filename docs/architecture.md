@@ -66,6 +66,10 @@ string. An active agent credential is also required to use a tunnel.
 
 A tunnel contains ordered cycles. A cycle has one root message. Every later message has one parent in the same cycle. Database triggers and transactions preserve sequence, ancestry, immutability, and lifecycle rules under concurrent writes.
 
+Context reads select the tunnel and cycle once, then load the focus message
+within that scope. A final access check applies credential revocation and
+address changes before the assembled result is returned.
+
 ## Lifecycle and retention
 
 An active cycle has `expires_at` and a retention-policy snapshot. Explicit close uses database time. Automatic close uses `expires_at`, so delayed maintenance does not extend history.

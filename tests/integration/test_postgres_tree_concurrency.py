@@ -12,12 +12,13 @@ from uuid import UUID, uuid4
 import pytest
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
 from agents.models import AgentCredential
 from core.limits import Limits
 from tunnels.codec import parse_address
 from tunnels.context import get_context
-from tunnels.errors import CycleClosed, InvalidRequest, QuotaExceeded
+from tunnels.errors import CycleClosed, InvalidCredential, InvalidRequest, QuotaExceeded
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 from tunnels.services import (
     PostedReply,
@@ -529,4 +530,31 @@ def test_subtree_rejects_root_deleted_before_recursive_read(
             limit=100,
             after_sequence=after_sequence,
             high_water=1,
+        )
+
+
+def test_context_checks_revocation_before_returning_assembled_messages(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tunnels.context import _wire_bytes
+
+    credential, _ = credential_factory()
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="context-revocation-create",
+        root_content={"type": "text", "text": "Context root."},
+    )
+
+    def revoke_during_assembly(message: Message, reason: Any) -> int:
+        AgentCredential.objects.filter(pk=credential.pk).update(revoked_at=timezone.now())
+        return _wire_bytes(message, reason)
+
+    monkeypatch.setattr("tunnels.context._wire_bytes", revoke_during_assembly)
+    with pytest.raises(InvalidCredential):
+        get_context(
+            credential=credential,
+            address=created.address,
+            focus_message_id=created.root.id,
+            include_direct_replies=False,
+            include_recent_activity=False,
         )
