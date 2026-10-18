@@ -30,6 +30,8 @@ class Response:
     value: dict[str, Any] | None = None
     headers: dict[str, str] = field(default_factory=dict)
     raw: bytes | None = None
+    declared_content_length: str | None = None
+    omit_content_length: bool = False
 
 
 @dataclass
@@ -72,7 +74,11 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
             )
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(encoded)))
+            if not response.omit_content_length:
+                self.send_header(
+                    "Content-Length",
+                    response.declared_content_length or str(len(encoded)),
+                )
             for name, value in response.headers.items():
                 self.send_header(name, value)
             self.end_headers()
@@ -933,15 +939,40 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
         Response(200, raw=b"<html>Not a client</html>"),
         Response(200, raw=b"#!/usr/bin/env python3\ndef main(:\n"),
         Response(200, raw=CLI.read_bytes().split(b'if __name__ == "__main__":')[0]),
+        Response(
+            200,
+            raw=CLI.read_bytes().rsplit(b"raise SystemExit", 1)[0] + b"raise SystemExit",
+            declared_content_length=str(len(CLI.read_bytes())),
+        ),
+        Response(200, raw=CLI.read_bytes(), declared_content_length="invalid"),
         Response(200, raw=b"x" * (2 * 1024 * 1024 + 1)),
     ],
-    ids=["http-error", "redirect", "html", "syntax", "truncated", "too-large"],
+    ids=[
+        "http-error",
+        "redirect",
+        "html",
+        "syntax",
+        "truncated-structure",
+        "premature-eof",
+        "invalid-content-length",
+        "too-large",
+    ],
 )
 def test_failed_update_preserves_the_installed_command(
     executable_dir: Path, response: Response
 ) -> None:
     command = executable_dir / "startunnel"
     original = CLI.read_bytes()
+    if response.declared_content_length == str(len(original)):
+        assert response.raw is not None
+        module = ast.parse(response.raw)
+        compile(module, "star_tunnel.py", "exec")
+        assert any(
+            isinstance(statement, ast.FunctionDef) and statement.name == "main"
+            for statement in module.body
+        )
+        assert isinstance(module.body[-1], ast.If)
+        assert len(response.raw) < len(original)
     command.write_bytes(original)
     command.chmod(0o700)
     with serve(response) as (base_url, scenario):
@@ -962,6 +993,35 @@ def test_failed_update_preserves_the_installed_command(
     assert "Authorization" not in scenario.requests[0]["headers"]
     assert command.read_bytes() == original
     assert command.stat().st_mode & 0o777 == 0o700
+    assert list(executable_dir.iterdir()) == [command]
+
+
+def test_update_succeeds_without_content_length(executable_dir: Path) -> None:
+    command = executable_dir / "startunnel"
+    original = CLI.read_bytes()
+    command.write_bytes(original)
+    command.chmod(0o700)
+    with serve(Response(200, raw=original, omit_content_length=True)) as (
+        base_url,
+        _scenario,
+    ):
+        environment = {
+            **os.environ,
+            "STARTUNNEL_BASE_URL": base_url,
+            "STARTTUNNEL_AGENT_KEY": "st_test-agent-key",
+        }
+        result = subprocess.run(
+            [str(command), "update"], capture_output=True, text=True, env=environment, check=False
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "command_path": str(command),
+        "source_instance": base_url,
+    }
+    assert command.read_bytes() == original
+    assert command.stat().st_mode & 0o777 == 0o755
     assert list(executable_dir.iterdir()) == [command]
 
 

@@ -165,8 +165,14 @@ def update_command() -> dict[str, Any]:
         ) as response:
             if response.status != 200:
                 raise CliError("update_failed")
+            content_length = response.headers.get("Content-Length")
+            declared_length = int(content_length) if content_length is not None else None
             content = response.read(MAX_INPUT_BYTES + 1)
-        if len(content) > MAX_INPUT_BYTES or not content.startswith(b"#!/usr/bin/env python3\n"):
+        if (
+            len(content) > MAX_INPUT_BYTES
+            or (declared_length is not None and len(content) != declared_length)
+            or not content.startswith(b"#!/usr/bin/env python3\n")
+        ):
             raise CliError("update_failed")
         module = ast.parse(content)
         compile(module, "star_tunnel.py", "exec")

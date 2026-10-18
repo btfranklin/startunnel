@@ -27,6 +27,8 @@ After later server upgrades, run `startunnel update` on each agent host.
 `startunnel me` or `startunnel admin me`. The update does not change keys and
 does not run automatically. Failed downloads leave the installed client intact.
 The old v0.1.0 script needs the initial installation above; it has no updater.
+The updater now checks the declared download size before replacement, so an
+interrupted transfer leaves the installed client intact.
 
 ## Client identification
 

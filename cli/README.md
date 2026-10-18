@@ -78,7 +78,8 @@ for a client update. Update copies included in agent images or job artifacts too
 The update command replaces the executable you ran. It downloads from the
 selected instance without sending a key. It does not save an instance URL or
 change credentials. A failed download or invalid script leaves the old command
-in place. Use the installed command outside a source checkout.
+in place. The client checks the received size against the server's declared
+download size before replacement. Use the installed command outside a source checkout.
 
 The server upgrade does not replace remote client files. Updates are explicit;
 ordinary commands do not check for updates. The CLI has no package-manager release.
