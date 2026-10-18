@@ -92,3 +92,38 @@ def test_security_artifact_upload_runs_after_gate_failure() -> None:
     assert "        if: always()\n" in upload
     assert "          path: artifacts/security/\n" in upload
     assert "          if-no-files-found: warn\n" in upload
+
+
+@pytest.mark.parametrize("image_scan_fails", [False, True])
+def test_runtime_scan_controls_candidate_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image_scan_fails: bool
+) -> None:
+    image = "registry.example/startunnel@sha256:" + "a" * 64
+    commands: dict[str, list[str]] = {}
+    monkeypatch.setattr(run_security_release, "ROOT", tmp_path)
+    monkeypatch.setattr(run_security_release, "_candidate_tree", lambda path: None)
+    monkeypatch.setattr(run_security_release, "_validate_runtime_image", lambda value: None)
+
+    def scan_secrets(source: Path, report: Path, *, archive_depth: int = 0) -> None:
+        report.write_text("[]")
+
+    def run(label: str, command: list[str], *, output: Path | None = None) -> None:
+        commands[label] = command
+        if label == "Application image vulnerability scan" and image_scan_fails:
+            raise run_security_release.SecurityGateError("Runtime image vulnerability found.")
+        if output:
+            output.write_text("Safe test report")
+
+    monkeypatch.setattr(run_security_release, "_scan_secrets", scan_secrets)
+    monkeypatch.setattr(run_security_release, "_run", run)
+    result = run_security_release.main(["--skip-build", "--image", image])
+
+    assert result == (1 if image_scan_fails else 0)
+    scan = commands["Application image vulnerability scan"]
+    assert scan[-1] == image
+    assert scan[scan.index("--image-src") + 1] == "remote"
+    assert scan[scan.index("--severity") + 1] == "CRITICAL,HIGH"
+    assert scan[scan.index("--exit-code") + 1] == "1"
+    assert commands["Application image SBOM"][-1] == image
+    evidence = list((tmp_path / "artifacts" / "security").glob("*/validated-image.json"))
+    assert bool(evidence) is not image_scan_fails

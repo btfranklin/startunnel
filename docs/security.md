@@ -99,6 +99,22 @@ PostgreSQL is required. API operations that need it fail closed. Activity waits 
 
 Back up PostgreSQL with the supplied script. There is no separate cache or archive store to coordinate. Store backup files on encrypted operator-managed storage and test restoration regularly.
 
+## Dependency audits
+
+Release promotion scans the exact application image. Its CycloneDX SBOM
+includes installed system and Python packages. Trivy blocks high and critical
+vulnerabilities in that image. The release lane also checks shipped npm assets,
+source code, and secrets.
+
+Development and optional live-agent packages are outside the application image.
+Audit the local development environment separately when required:
+
+```shell
+pdm run pip-audit --strict
+```
+
+This local audit does not control promotion of the application image.
+
 ## Candidate validation: 2026-10-09
 
 [Exact-commit CI](https://github.com/btfranklin/startunnel/actions/runs/38003471206)

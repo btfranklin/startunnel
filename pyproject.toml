@@ -30,7 +30,6 @@ dev = [
     "playwright>=1.62.0",
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
-    "cyclonedx-bom>=7.3.1",
     "linkbust>=0.1.0",
 ]
 live-agents = [

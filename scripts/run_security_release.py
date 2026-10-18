@@ -130,39 +130,9 @@ def main(argv: list[str] | None = None) -> int:
             ],
         )
         _run(
-            "Python dependency audit",
-            [
-                "pdm",
-                "run",
-                "pip-audit",
-                "--strict",
-                "--format",
-                "json",
-                "--output",
-                str(report_directory / "pip-audit.json"),
-            ],
-        )
-        _run(
             "npm dependency audit",
             ["npm", "audit", "--audit-level=high", "--json"],
             output=report_directory / "npm-audit.json",
-        )
-        _run(
-            "Python SBOM",
-            [
-                "pdm",
-                "run",
-                "cyclonedx-py",
-                "environment",
-                ".venv/bin/python",
-                "--pyproject",
-                "pyproject.toml",
-                "--output-reproducible",
-                "--output-format",
-                "JSON",
-                "--output-file",
-                str(report_directory / "python-sbom.cdx.json"),
-            ],
         )
         with tempfile.TemporaryDirectory(prefix="startunnel-security-") as temporary_name:
             temporary = Path(temporary_name)
