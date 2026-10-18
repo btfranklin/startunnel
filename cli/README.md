@@ -57,7 +57,8 @@ The installer does not edit shell profiles. Set `PATH` in each agent host,
 job, or container that uses the command. To choose another directory, use
 `python3 star_tunnel.py install --bin-dir /chosen/bin`.
 The installed file still needs Python 3.10 or later. Other platforms can run
-the downloaded file with `python3 star_tunnel.py COMMAND`.
+the downloaded file with their Python executable, for example
+`python star_tunnel.py COMMAND` on Windows with Python 3.10 or later.
 No package manager or repository checkout is required.
 
 ## Update the client
@@ -260,6 +261,10 @@ Commands that issue a key require `--secret-output` with a new file path. For
 empty. The client writes the key to that private file. For key creation, standard
 output contains the resource, operation receipt, and file path. Address rotation
 returns the current address in the resource.
+
+On Linux and macOS, new key files use mode `0600`. On Windows, save keys in a
+directory that only the intended account can access; the client does not change
+Windows access-control lists.
 
 See the [admin quickstart](../docs/user/admin-quickstart.md) for bootstrap,
 account management, key rotation, audit verification, and retry examples.

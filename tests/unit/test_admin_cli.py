@@ -82,6 +82,17 @@ def test_admin_key_file_accepts_readonly_and_symlinked_regular_file(
     assert cli.require_admin_key() == "sta_disposable-test-value"
 
 
+def test_admin_key_file_works_without_nonblocking_support(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    filename = tmp_path / "key"
+    filename.write_text("sta_disposable-test-value\n")
+    monkeypatch.delenv("STARTUNNEL_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(filename))
+    monkeypatch.delattr(cli.os, "O_NONBLOCK", raising=False)
+    assert cli.require_admin_key() == "sta_disposable-test-value"
+
+
 def test_admin_key_configuration_conflict(
     configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

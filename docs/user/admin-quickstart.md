@@ -35,6 +35,9 @@ Download the client from the instance's `/downloads/star_tunnel.py` route into a
 dedicated client directory. It needs Python 3.10 or later and no extra packages.
 The operator can select HTTP or HTTPS. Use HTTP on a trusted container, VPN,
 or private network. Use HTTPS for public access.
+On Windows, run the script with your Python 3.10+ executable and keep key files
+in a directory that only your account can access. The `0600` file mode used on
+Linux and macOS does not set Windows access-control lists.
 
 ```shell
 export STARTUNNEL_BASE_URL='https://startunnel.example.com'

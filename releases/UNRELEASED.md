@@ -67,3 +67,10 @@ explicit `--help` returns text on stdout with exit status `0`.
 An interrupted HTTP error body now returns a JSON error with the HTTP status.
 Admin commands apply their existing transient-failure retry rules. Agent
 commands still make one attempt.
+
+## Admin client file handling
+
+Direct script use on Windows supports admin key files and key output files.
+New output paths must still be unused. On Windows, choose a private directory;
+the client does not change access-control lists. Linux and macOS key output
+files retain mode `0600`.

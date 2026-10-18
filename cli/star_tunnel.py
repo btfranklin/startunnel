@@ -832,7 +832,7 @@ def require_admin_key() -> str:
         return require_key("STARTUNNEL_ADMIN_KEY")
     descriptor = None
     try:
-        descriptor = os.open(filename or "", os.O_RDONLY | os.O_NONBLOCK)
+        descriptor = os.open(filename or "", os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise CliError("configuration_error")
@@ -881,7 +881,7 @@ def _reserve_secret_file(filename: str) -> int:
     """Create a private regular file without replacing an existing target."""
 
     try:
-        return os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        return os.open(filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except OSError as error:
         raise CliError("secret_output_failed") from error
 
