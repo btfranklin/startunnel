@@ -6,8 +6,13 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from ninja import Field, Schema
+from ninja import Field, HeaderEx, P, Schema
 from pydantic import ConfigDict
+
+IdempotencyKey = HeaderEx[
+    str,
+    P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
+]
 
 EXAMPLE_ADDRESS = "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
 EXAMPLE_DISPLAY_ADDRESS = "🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜦🝡"

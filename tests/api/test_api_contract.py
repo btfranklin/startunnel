@@ -151,7 +151,6 @@ def test_missing_malformed_and_unavailable_credentials_use_safe_errors(
 def test_create_is_atomic_rooted_and_idempotent(client: Client, credential_factory: Any) -> None:
     credential, key = credential_factory(name="Coordinator")
     created = _create_global(client, key, "api-create-rooted")
-    assert "scope" not in created["tunnel"]
     assert created["tunnel"]["state"] == "active"
     assert len(created["tunnel"]["address"]) == 24
     assert created["cycle"]["number"] == 1

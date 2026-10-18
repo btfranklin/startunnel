@@ -202,3 +202,6 @@ its owner.
 
 The cycle directory now returns only its usable page cursor. The unused
 `snapshot_cursor` field is removed.
+
+Agent API routes now construct typed responses directly. Tree traversal uses
+one cursor parser with the same request bindings and error codes.

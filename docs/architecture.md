@@ -17,7 +17,9 @@ LISTEN/NOTIFY ---- maintenance deadlines
 ## Ownership
 
 - `site_app` owns browser transport and templates.
-- `api` owns the authenticated JSON transport and schemas.
+- `api` owns the authenticated JSON transport and schemas. Agent routes construct
+  typed responses from domain results. Shared message, cycle, Beacon, and entry
+  payloads keep their canonical serialization for byte accounting and retries.
 - Domain services in `accounts`, `agents`, and `tunnels` own business rules.
 - `tunnels.messages` owns message creation and tree reads.
 - `tunnels.cycles` owns tunnel creation, cycle lifecycle, and cycle status reads.

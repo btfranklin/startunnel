@@ -4,21 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Literal, cast
 from uuid import UUID
 
 from django.db import InterfaceError, OperationalError
 from django.http import HttpRequest, HttpResponse
-from ninja import HeaderEx, NinjaAPI, P, Router, Status
+from ninja import NinjaAPI, Router, Status
 from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from agents.models import AgentCredential
+from core import cursors
 from core import limits as instance_limits
-from core.cursors import cursor_int as _cursor_int
-from core.cursors import cursor_uuid as _cursor_uuid
-from core.cursors import decode_cursor as _decoded_cursor
-from core.cursors import encode_cursor as _cursor
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.beacons import publish_beacon, read_board, wait_for_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
@@ -51,19 +48,24 @@ from tunnels.messages import (
     post_reply,
     read_tree,
 )
-from tunnels.models import Cycle, Message, Tunnel
+from tunnels.models import Cycle, Message, Tunnel, TunnelEvent
 from tunnels.participants import list_participants
-from tunnels.search import search_hit_payload, search_messages
+from tunnels.search import SearchHit, search_messages
 
 from .admin import router as admin_router
 from .auth import activity_bearer, agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
 from .schemas import (
+    ActivityEventResponse,
+    ActivityEventType,
     ActivityRequest,
     ActivityResponse,
+    AgentIdentityResponse,
+    BeaconBoardItem,
     BeaconBoardRequest,
     BeaconBoardResponse,
     BeaconPublishRequest,
+    BeaconResponse,
     BeaconWaitRequest,
     BeaconWaitResponse,
     BeaconWithdrawRequest,
@@ -73,37 +75,53 @@ from .schemas import (
     CheckpointRequest,
     CheckpointResponse,
     CloseCycleRequest,
+    ContextItemResponse,
     ContextRequest,
     ContextResponse,
+    CreatedTunnelDetailsResponse,
     CreateTunnelRequest,
     CreateTunnelResponse,
+    CycleDirectoryItemResponse,
+    CycleDirectoryRootResponse,
     CycleListRequest,
     CycleListResponse,
+    CycleSummaryResponse,
+    DirectoryCycleResponse,
     EnterRequest,
     EnterResponse,
     ErrorResponse,
+    IdempotencyKey,
     LeavesRequest,
     LeavesResponse,
+    LimitsResponse,
     MeResponse,
     MessageReadRequest,
     MessageReadResponse,
+    MessageResponse,
+    ParticipantResponse,
     ParticipantsRequest,
     ParticipantsResponse,
+    PostedMessageSummaryResponse,
     PostReplyRequest,
     PostReplyResponse,
     RepliesRequest,
     RepliesResponse,
     RolloverCycleRequest,
+    RootSummaryResponse,
+    SearchHitResponse,
     SearchRequest,
     SearchResponse,
+    SenderResponse,
     StartCycleRequest,
     StartedCycleResponse,
     SubtreeRequest,
     SubtreeResponse,
     TreeRequest,
     TreeResponse,
+    TreeStatsResponse,
     TunnelStatusRequest,
     TunnelStatusResponse,
+    UsageResponse,
 )
 
 api = NinjaAPI(
@@ -223,22 +241,16 @@ def _credential(request: HttpRequest) -> AgentCredential:
 
 
 def _activity_cursor(tunnel: Tunnel, position: int) -> str:
-    return _cursor(
+    return cursors.encode_cursor(
         "activity",
         tunnel_id=str(tunnel.id),
         position=position,
     )
 
 
-def _cursor_binding(decoded: dict[str, Any]) -> UUID:
-    if "scope" in decoded or "team_id" in decoded:
-        raise InvalidCursor()
-    return _cursor_uuid(decoded, "tunnel_id")
-
-
 def _activity_cursor_values(value: str) -> tuple[UUID, int]:
-    decoded = _decoded_cursor(value, kind="activity")
-    return _cursor_binding(decoded), _cursor_int(decoded, "position")
+    decoded = cursors.decode_cursor(value, kind="activity")
+    return cursors.cursor_uuid(decoded, "tunnel_id"), cursors.cursor_int(decoded, "position")
 
 
 def _require_cursor_tunnel(
@@ -252,110 +264,79 @@ def _require_cursor_tunnel(
         raise TunnelUnavailable()
 
 
-def _created_tunnel_response(created: CreatedTunnel) -> dict[str, Any]:
+def _created_tunnel_response(created: CreatedTunnel) -> CreateTunnelResponse:
     tunnel = created.tunnel
     cycle = created.cycle
     root = created.root
-    return {
-        "tunnel": {
-            "id": tunnel.id,
-            "label": tunnel.label,
-            "address": created.address,
-            "display_address": created.display_address,
-            "address_transcription": address_transcription(created.address),
-            "created_at": tunnel.created_at,
-            "state": created.tunnel_state,
-        },
-        "cycle": {
-            "id": cycle.id,
-            "number": cycle.number,
-            "label": cycle.label,
-            "state": created.cycle_state,
-            "created_at": cycle.created_at,
-            "expires_at": cycle.expires_at,
-            "root": {
-                "id": root.id,
-                "parent_id": None,
-                "sequence": root.sequence,
-                "depth": root.depth,
-            },
-            "message_count": created.message_count,
-            "content_bytes": created.content_bytes,
-        },
-        "activity_cursor": _activity_cursor(
-            tunnel,
-            created.event_position,
+    return CreateTunnelResponse(
+        tunnel=CreatedTunnelDetailsResponse(
+            id=tunnel.id,
+            label=tunnel.label,
+            address=created.address,
+            display_address=created.display_address,
+            address_transcription=address_transcription(created.address),
+            created_at=tunnel.created_at,
+            state=cast(Literal["active", "dormant", "retired"], created.tunnel_state),
         ),
-        "trust_notice": (
+        cycle=CycleSummaryResponse(
+            id=cycle.id,
+            number=cycle.number,
+            label=cycle.label,
+            state=created.cycle_state,
+            created_at=cycle.created_at,
+            expires_at=cycle.expires_at,
+            root=RootSummaryResponse(
+                id=root.id, parent_id=None, sequence=root.sequence, depth=root.depth
+            ),
+            message_count=created.message_count,
+            content_bytes=created.content_bytes,
+        ),
+        activity_cursor=_activity_cursor(tunnel, created.event_position),
+        trust_notice=(
             "Tunnels should not be treated as confidential. "
             "A tunnel address is a long-lived bearer capability."
         ),
-        "idempotent_replay": created.replay,
-    }
-
-
-def _tunnel_metadata(tunnel: Tunnel) -> dict[str, Any]:
-    active_cycle = (
-        tunnel.cycles.select_related("root_message").filter(state=Cycle.State.ACTIVE).first()
+        idempotent_replay=created.replay,
     )
-    data: dict[str, Any] = {
-        "id": tunnel.id,
-        "label": tunnel.label,
-        "state": tunnel.state,
-        "created_at": tunnel.created_at,
-        "current_cycle": cycle_payload(active_cycle) if active_cycle else None,
-    }
-    return data
 
 
-def _posted_reply_response(posted: PostedReply) -> dict[str, Any]:
+def _posted_reply_response(posted: PostedReply) -> PostReplyResponse:
     message = posted.message
-    if message.parent_id is None:
-        raise InvalidRequest("A reply must have a parent.")
-    return {
-        "message": {
-            "id": message.id,
-            "cycle_id": message.cycle_id,
-            "cycle_number": message.cycle.number,
-            "parent_id": message.parent_id,
-            "sequence": message.sequence,
-            "depth": message.depth,
-            "created_at": message.created_at,
-        },
-        "activity_cursor": _activity_cursor(
-            message.tunnel,
-            posted.event_position,
+    return PostReplyResponse(
+        message=PostedMessageSummaryResponse(
+            id=message.id,
+            cycle_id=message.cycle_id,
+            cycle_number=message.cycle.number,
+            parent_id=cast(UUID, message.parent_id),
+            sequence=message.sequence,
+            depth=message.depth,
+            created_at=message.created_at,
         ),
-        "idempotent_replay": posted.replay,
-    }
+        activity_cursor=_activity_cursor(message.tunnel, posted.event_position),
+        idempotent_replay=posted.replay,
+    )
 
 
-def _started_cycle_response(started: StartedCycle) -> dict[str, Any]:
+def _started_cycle_response(started: StartedCycle) -> StartedCycleResponse:
     cycle = started.cycle
     root = started.root
-    return {
-        "cycle": {
-            "id": cycle.id,
-            "number": cycle.number,
-            "label": cycle.label,
-            "state": started.cycle_state,
-            "created_at": cycle.created_at,
-            "expires_at": cycle.expires_at,
-            "root": {
-                "id": root.id,
-                "parent_id": None,
-                "sequence": root.sequence,
-                "depth": root.depth,
-            },
-            "message_count": started.message_count,
-            "content_bytes": started.content_bytes,
-        },
-        "activity_cursor": _activity_cursor(
-            started.tunnel,
-            started.event_position,
+    return StartedCycleResponse(
+        cycle=CycleSummaryResponse(
+            id=cycle.id,
+            number=cycle.number,
+            label=cycle.label,
+            state=started.cycle_state,
+            created_at=cycle.created_at,
+            expires_at=cycle.expires_at,
+            root=RootSummaryResponse(
+                id=root.id, parent_id=None, sequence=root.sequence, depth=root.depth
+            ),
+            message_count=started.message_count,
+            content_bytes=started.content_bytes,
         ),
-        "idempotent_replay": started.replay,
-    }
+        activity_cursor=_activity_cursor(started.tunnel, started.event_position),
+        idempotent_replay=started.replay,
+    )
 
 
 def _cycle_content_preview(message: Message) -> str:
@@ -366,82 +347,58 @@ def _cycle_content_preview(message: Message) -> str:
     return value if len(value) <= 280 else f"{value[:279]}…"
 
 
-def _cycle_directory_item(cycle: Cycle) -> dict[str, Any]:
+def _cycle_directory_item(cycle: Cycle) -> CycleDirectoryItemResponse:
     root = cycle.root_message
     if root is None:
         raise InvalidRequest("The cycle root is not available.")
-    return {
-        "id": cycle.id,
-        "number": cycle.number,
-        "label": cycle.label,
-        "state": cycle.state,
-        "root": {
-            "id": root.id,
-            "sender": {"id": root.sender_id, "name": root.sender_name, "session": root.session},
-            "correlation_id": root.correlation_id or None,
-            "content_preview": _cycle_content_preview(root),
-        },
-        "message_count": cycle.message_count,
-        "content_bytes": cycle.content_bytes,
-        "created_at": cycle.created_at,
-        "expires_at": cycle.expires_at,
-        "closed_at": cycle.closed_at,
-        "delete_after": cycle.delete_after,
-    }
+    return CycleDirectoryItemResponse(
+        id=cycle.id,
+        number=cycle.number,
+        label=cycle.label,
+        state=cycle.state,
+        root=CycleDirectoryRootResponse(
+            id=root.id,
+            sender=SenderResponse(id=root.sender_id, name=root.sender_name, session=root.session),
+            correlation_id=root.correlation_id or None,
+            content_preview=_cycle_content_preview(root),
+        ),
+        message_count=cycle.message_count,
+        content_bytes=cycle.content_bytes,
+        created_at=cycle.created_at,
+        expires_at=cycle.expires_at,
+        closed_at=cycle.closed_at,
+        delete_after=cycle.delete_after,
+    )
 
 
 @router.get(
     "/me",
     response={200: MeResponse, **AUTHENTICATED_ERRORS},
 )
-def me(request: HttpRequest) -> dict[str, Any]:
+def me(request: HttpRequest) -> MeResponse:
     credential = _credential(request)
     limits = instance_limits.effective_limits()
     status = agent_tunnel_status(credential=credential)
-    return {
-        "agent": {
-            "id": credential.id,
-            "name": credential.name,
-        },
-        "limits": {
-            "message_bytes": limits.bytes_per_message,
-            "messages_per_cycle": limits.messages_per_cycle,
-            "content_bytes_per_cycle": limits.content_bytes_per_cycle,
-            "maximum_tree_depth": limits.maximum_tree_depth,
-            "mentions_per_message": limits.mentions_per_message,
-            "maximum_list_page": limits.maximum_list_page,
-            "maximum_activity_wait_seconds": limits.maximum_long_poll_seconds,
-            "maximum_context_items": limits.maximum_context_items,
-            "maximum_context_bytes": limits.maximum_context_bytes,
-            "maximum_search_results": limits.maximum_search_results,
-            "maximum_search_query_characters": limits.maximum_search_query_characters,
-            "maximum_search_response_bytes": limits.maximum_search_response_bytes,
-            "api_operations_per_minute": limits.api_operations_per_minute,
-            "api_burst": limits.api_burst,
-        },
-        "usage": {"tunnels": status.tunnels},
-    }
-
-
-def _create(
-    request: HttpRequest,
-    payload: CreateTunnelRequest,
-    idempotency_key: str,
-) -> dict[str, Any]:
-    credential = _credential(request)
-    root = payload.cycle.root
-    created = create_tunnel(
-        credential=credential,
-        idempotency_key=idempotency_key,
-        label=payload.label,
-        cycle_label=payload.cycle.label,
-        expires_in_seconds=payload.cycle.expires_in_seconds,
-        root_content=root.content.model_dump(mode="json"),
-        root_mentions=root.mentions,
-        root_correlation_id=root.correlation_id,
-        root_session=root.session,
+    return MeResponse(
+        agent=AgentIdentityResponse(id=credential.id, name=credential.name),
+        limits=LimitsResponse(
+            message_bytes=limits.bytes_per_message,
+            messages_per_cycle=limits.messages_per_cycle,
+            content_bytes_per_cycle=limits.content_bytes_per_cycle,
+            maximum_tree_depth=limits.maximum_tree_depth,
+            mentions_per_message=limits.mentions_per_message,
+            maximum_list_page=limits.maximum_list_page,
+            maximum_activity_wait_seconds=limits.maximum_long_poll_seconds,
+            maximum_context_items=limits.maximum_context_items,
+            maximum_context_bytes=limits.maximum_context_bytes,
+            maximum_search_results=limits.maximum_search_results,
+            maximum_search_query_characters=limits.maximum_search_query_characters,
+            maximum_search_response_bytes=limits.maximum_search_response_bytes,
+            api_operations_per_minute=limits.api_operations_per_minute,
+            api_burst=limits.api_burst,
+        ),
+        usage=UsageResponse(tunnels=status.tunnels),
     )
-    return _created_tunnel_response(created)
 
 
 @router.post(
@@ -458,31 +415,22 @@ def _create(
 def create_tunnel_route(
     request: HttpRequest,
     payload: CreateTunnelRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> Status[dict[str, Any]]:
-    return Status(201, _create(request, payload, idempotency_key))
-
-
-def _post_reply(
-    request: HttpRequest,
-    payload: PostReplyRequest,
-    idempotency_key: str,
-) -> dict[str, Any]:
+    idempotency_key: IdempotencyKey,
+) -> Status[CreateTunnelResponse]:
     credential = _credential(request)
-    posted = post_reply(
+    root = payload.cycle.root
+    created = create_tunnel(
         credential=credential,
         idempotency_key=idempotency_key,
-        address=payload.address,
-        parent_id=payload.parent_id,
-        content=payload.content.model_dump(mode="json"),
-        mentions=payload.mentions,
-        correlation_id=payload.correlation_id,
-        session=payload.session,
+        label=payload.label,
+        cycle_label=payload.cycle.label,
+        expires_in_seconds=payload.cycle.expires_in_seconds,
+        root_content=root.content.model_dump(mode="json"),
+        root_mentions=root.mentions,
+        root_correlation_id=root.correlation_id,
+        root_session=root.session,
     )
-    return _posted_reply_response(posted)
+    return Status(201, _created_tunnel_response(created))
 
 
 @router.post(
@@ -499,43 +447,63 @@ def _post_reply(
 def post_tunnel_reply(
     request: HttpRequest,
     payload: PostReplyRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> Status[dict[str, Any]]:
-    return Status(201, _post_reply(request, payload, idempotency_key))
+    idempotency_key: IdempotencyKey,
+) -> Status[PostReplyResponse]:
+    credential = _credential(request)
+    posted = post_reply(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        parent_id=payload.parent_id,
+        content=payload.content.model_dump(mode="json"),
+        mentions=payload.mentions,
+        correlation_id=payload.correlation_id,
+        session=payload.session,
+    )
+    return Status(201, _posted_reply_response(posted))
 
 
-def _tree_cursor_values(payload: TreeRequest) -> PageCursor:
+def _page_cursor_values(
+    payload: TreeRequest | RepliesRequest | SubtreeRequest | LeavesRequest,
+) -> PageCursor:
+    if isinstance(payload, RepliesRequest):
+        kind = "replies"
+    elif isinstance(payload, SubtreeRequest):
+        kind = "subtree"
+    elif isinstance(payload, LeavesRequest):
+        kind = "leaves"
+    else:
+        kind = "tree"
     cycle_id = payload.cycle_id
     after_sequence = 0
     snapshot_sequence: int | None = None
     expected_tunnel_id: UUID | None = None
-    decoded_snapshot: dict[str, Any] | None = None
-    if payload.snapshot_cursor:
-        decoded_snapshot = _decoded_cursor(payload.snapshot_cursor, kind="tree-snapshot")
-        cursor_cycle = _cursor_uuid(decoded_snapshot, "cycle_id")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and snapshot cursor do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = _cursor_int(decoded_snapshot, "snapshot_sequence")
-        expected_tunnel_id = _cursor_binding(decoded_snapshot)
-    if payload.page_cursor:
-        decoded_page = _decoded_cursor(payload.page_cursor, kind="tree-page")
-        cursor_cycle = _cursor_uuid(decoded_page, "cycle_id")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and page cursor do not match.")
-        cycle_id = cursor_cycle
-        page_snapshot = _cursor_int(decoded_page, "snapshot_sequence")
-        if snapshot_sequence is not None and snapshot_sequence != page_snapshot:
+    for stage, value in (("snapshot", payload.snapshot_cursor), ("page", payload.page_cursor)):
+        if not value:
+            continue
+        decoded = cursors.decode_cursor(value, kind=f"{kind}-{stage}")
+        cursor_cycle = cursors.cursor_uuid(decoded, "cycle_id")
+        if cycle_id is not None and cycle_id != cursor_cycle:
+            raise InvalidRequest(f"The cycle and {stage} cursor do not match.")
+        if isinstance(payload, RepliesRequest):
+            if payload.message_id != cursors.cursor_uuid(decoded, "parent_id"):
+                raise InvalidRequest(f"The parent and {stage} cursor do not match.")
+        elif isinstance(payload, SubtreeRequest):
+            cursor_message = cursors.cursor_uuid(decoded, "message_id")
+            cursor_depth = cursors.cursor_int(decoded, "max_depth")
+            if payload.message_id != cursor_message or payload.max_depth != cursor_depth:
+                raise InvalidRequest(f"The subtree request and {stage} cursor do not match.")
+        cursor_snapshot = cursors.cursor_int(decoded, "snapshot_sequence")
+        if snapshot_sequence is not None and snapshot_sequence != cursor_snapshot:
             raise InvalidRequest("The page and snapshot cursors do not match.")
-        snapshot_sequence = page_snapshot
-        after_sequence = _cursor_int(decoded_page, "after_sequence")
-        page_binding = _cursor_binding(decoded_page)
-        if expected_tunnel_id is not None and page_binding != expected_tunnel_id:
+        cycle_id = cursor_cycle
+        snapshot_sequence = cursor_snapshot
+        if stage == "page":
+            after_sequence = cursors.cursor_int(decoded, "after_sequence")
+        binding = cursors.cursor_uuid(decoded, "tunnel_id")
+        if expected_tunnel_id is not None and binding != expected_tunnel_id:
             raise InvalidCursor()
-        expected_tunnel_id = page_binding
+        expected_tunnel_id = binding
     return PageCursor(
         cycle_id=cycle_id,
         after_sequence=after_sequence,
@@ -544,9 +512,44 @@ def _tree_cursor_values(payload: TreeRequest) -> PageCursor:
     )
 
 
-def _tree(request: HttpRequest, payload: TreeRequest) -> dict[str, Any]:
+def _tree_response(page: TreePage) -> TreeResponse:
+    snapshot_cursor = cursors.encode_cursor(
+        "tree-snapshot",
+        tunnel_id=str(page.tunnel.id),
+        cycle_id=str(page.cycle.id),
+        snapshot_sequence=page.snapshot_sequence,
+    )
+    next_page_cursor = None
+    if page.next_after_sequence is not None:
+        next_page_cursor = cursors.encode_cursor(
+            "tree-page",
+            tunnel_id=str(page.tunnel.id),
+            cycle_id=str(page.cycle.id),
+            snapshot_sequence=page.snapshot_sequence,
+            after_sequence=page.next_after_sequence,
+        )
+    if page.cycle.root_message_id is None:
+        raise InvalidRequest("The cycle root is not available.")
+    return TreeResponse(
+        cycle=DirectoryCycleResponse.model_validate(cycle_payload(page.cycle)),
+        root_id=page.cycle.root_message_id,
+        nodes=[
+            MessageResponse.model_validate(message_payload(message)) for message in page.messages
+        ],
+        snapshot_cursor=snapshot_cursor,
+        next_page_cursor=next_page_cursor,
+        complete=page.complete,
+        stats=TreeStatsResponse(messages=page.message_count, content_bytes=page.content_bytes),
+    )
+
+
+@router.post(
+    "/tree",
+    response={200: TreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def read_tunnel_tree(request: HttpRequest, payload: TreeRequest) -> TreeResponse:
     credential = _credential(request)
-    cursor = _tree_cursor_values(payload)
+    cursor = _page_cursor_values(payload)
     page = read_tree(
         credential=credential,
         address=payload.address,
@@ -562,58 +565,6 @@ def _tree(request: HttpRequest, payload: TreeRequest) -> dict[str, Any]:
     return _tree_response(page)
 
 
-def _tree_response(page: TreePage) -> dict[str, Any]:
-    snapshot_cursor = _cursor(
-        "tree-snapshot",
-        tunnel_id=str(page.tunnel.id),
-        cycle_id=str(page.cycle.id),
-        snapshot_sequence=page.snapshot_sequence,
-    )
-    next_page_cursor = None
-    if page.next_after_sequence is not None:
-        next_page_cursor = _cursor(
-            "tree-page",
-            tunnel_id=str(page.tunnel.id),
-            cycle_id=str(page.cycle.id),
-            snapshot_sequence=page.snapshot_sequence,
-            after_sequence=page.next_after_sequence,
-        )
-    if page.cycle.root_message_id is None:
-        raise InvalidRequest("The cycle root is not available.")
-    return {
-        "cycle": cycle_payload(page.cycle),
-        "root_id": page.cycle.root_message_id,
-        "nodes": [message_payload(message) for message in page.messages],
-        "snapshot_cursor": snapshot_cursor,
-        "next_page_cursor": next_page_cursor,
-        "complete": page.complete,
-        "stats": {"messages": page.message_count, "content_bytes": page.content_bytes},
-    }
-
-
-@router.post(
-    "/tree",
-    response={200: TreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
-)
-def read_tunnel_tree(request: HttpRequest, payload: TreeRequest) -> dict[str, Any]:
-    return _tree(request, payload)
-
-
-def _message_read(request: HttpRequest, payload: MessageReadRequest) -> dict[str, Any]:
-    credential = _credential(request)
-    message = get_message(
-        credential=credential,
-        address=payload.address,
-        message_id=payload.message_id,
-        cycle_id=payload.cycle_id,
-    )
-    return {
-        "message": message_payload(message),
-        "child_count": message.replies.count(),
-        "cycle": cycle_payload(message.cycle),
-    }
-
-
 @router.post(
     "/tree/message",
     response={
@@ -623,11 +574,26 @@ def _message_read(request: HttpRequest, payload: MessageReadRequest) -> dict[str
         **AUTHENTICATED_ERRORS,
     },
 )
-def read_tunnel_message(request: HttpRequest, payload: MessageReadRequest) -> dict[str, Any]:
-    return _message_read(request, payload)
+def read_tunnel_message(request: HttpRequest, payload: MessageReadRequest) -> MessageReadResponse:
+    credential = _credential(request)
+    message = get_message(
+        credential=credential,
+        address=payload.address,
+        message_id=payload.message_id,
+        cycle_id=payload.cycle_id,
+    )
+    return MessageReadResponse(
+        message=MessageResponse.model_validate(message_payload(message)),
+        child_count=message.replies.count(),
+        cycle=DirectoryCycleResponse.model_validate(cycle_payload(message.cycle)),
+    )
 
 
-def _branch(request: HttpRequest, payload: BranchRequest) -> dict[str, Any]:
+@router.post(
+    "/tree/branch",
+    response={200: BranchResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def read_tunnel_branch(request: HttpRequest, payload: BranchRequest) -> BranchResponse:
     credential = _credential(request)
     messages = get_branch(
         credential=credential,
@@ -637,66 +603,16 @@ def _branch(request: HttpRequest, payload: BranchRequest) -> dict[str, Any]:
     )
     if not messages:
         raise InvalidRequest("The branch is not available.")
-    return {
-        "root_id": messages[0].id,
-        "leaf_id": messages[-1].id,
-        "messages": [message_payload(message) for message in messages],
-        "complete": True,
-        "content_bytes": sum(message.byte_count for message in messages),
-    }
-
-
-@router.post(
-    "/tree/branch",
-    response={200: BranchResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
-)
-def read_tunnel_branch(request: HttpRequest, payload: BranchRequest) -> dict[str, Any]:
-    return _branch(request, payload)
-
-
-def _reply_cursor_values(payload: RepliesRequest) -> PageCursor:
-    cycle_id = payload.cycle_id
-    after_sequence = 0
-    snapshot_sequence: int | None = None
-    expected_tunnel_id: UUID | None = None
-    if payload.snapshot_cursor:
-        decoded = _decoded_cursor(payload.snapshot_cursor, kind="replies-snapshot")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        cursor_parent = _cursor_uuid(decoded, "parent_id")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and snapshot cursor do not match.")
-        if payload.message_id != cursor_parent:
-            raise InvalidRequest("The parent and snapshot cursor do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = _cursor_int(decoded, "snapshot_sequence")
-        expected_tunnel_id = _cursor_binding(decoded)
-    if payload.page_cursor:
-        decoded = _decoded_cursor(payload.page_cursor, kind="replies-page")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        cursor_parent = _cursor_uuid(decoded, "parent_id")
-        page_snapshot = _cursor_int(decoded, "snapshot_sequence")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and page cursor do not match.")
-        if payload.message_id != cursor_parent:
-            raise InvalidRequest("The parent and page cursor do not match.")
-        if snapshot_sequence is not None and snapshot_sequence != page_snapshot:
-            raise InvalidRequest("The page and snapshot cursors do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = page_snapshot
-        after_sequence = _cursor_int(decoded, "after_sequence")
-        page_binding = _cursor_binding(decoded)
-        if expected_tunnel_id is not None and page_binding != expected_tunnel_id:
-            raise InvalidCursor()
-        expected_tunnel_id = page_binding
-    return PageCursor(
-        cycle_id=cycle_id,
-        after_sequence=after_sequence,
-        snapshot_sequence=snapshot_sequence,
-        expected_tunnel_id=expected_tunnel_id,
+    return BranchResponse(
+        root_id=messages[0].id,
+        leaf_id=messages[-1].id,
+        messages=[MessageResponse.model_validate(message_payload(message)) for message in messages],
+        complete=True,
+        content_bytes=sum(message.byte_count for message in messages),
     )
 
 
-def _reply_page_response(page: ReplyPage) -> dict[str, Any]:
+def _reply_page_response(page: ReplyPage) -> RepliesResponse:
     cursor_values = {
         "tunnel_id": str(page.tunnel.id),
         "cycle_id": str(page.cycle.id),
@@ -705,23 +621,27 @@ def _reply_page_response(page: ReplyPage) -> dict[str, Any]:
     }
     next_page_cursor = None
     if page.next_after_sequence is not None:
-        next_page_cursor = _cursor(
+        next_page_cursor = cursors.encode_cursor(
             "replies-page",
             **cursor_values,
             after_sequence=page.next_after_sequence,
         )
-    return {
-        "parent_id": page.parent.id,
-        "messages": [message_payload(item) for item in page.messages],
-        "snapshot_cursor": _cursor("replies-snapshot", **cursor_values),
-        "next_page_cursor": next_page_cursor,
-        "complete": page.complete,
-    }
+    return RepliesResponse(
+        parent_id=page.parent.id,
+        messages=[MessageResponse.model_validate(message_payload(item)) for item in page.messages],
+        snapshot_cursor=cursors.encode_cursor("replies-snapshot", **cursor_values),
+        next_page_cursor=next_page_cursor,
+        complete=page.complete,
+    )
 
 
-def _replies(request: HttpRequest, payload: RepliesRequest) -> dict[str, Any]:
+@router.post(
+    "/tree/replies",
+    response={200: RepliesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def read_tunnel_replies(request: HttpRequest, payload: RepliesRequest) -> RepliesResponse:
     credential = _credential(request)
-    cursor = _reply_cursor_values(payload)
+    cursor = _page_cursor_values(payload)
     page = list_replies(
         credential=credential,
         address=payload.address,
@@ -738,62 +658,8 @@ def _replies(request: HttpRequest, payload: RepliesRequest) -> dict[str, Any]:
     return _reply_page_response(page)
 
 
-@router.post(
-    "/tree/replies",
-    response={200: RepliesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
-)
-def read_tunnel_replies(request: HttpRequest, payload: RepliesRequest) -> dict[str, Any]:
-    return _replies(request, payload)
-
-
-def _subtree_cursor_values(payload: SubtreeRequest) -> PageCursor:
-    cycle_id = payload.cycle_id
-    message_id = payload.message_id
-    max_depth = payload.max_depth
-    after_sequence = 0
-    snapshot_sequence: int | None = None
-    expected_tunnel_id: UUID | None = None
-    if payload.snapshot_cursor:
-        decoded = _decoded_cursor(payload.snapshot_cursor, kind="subtree-snapshot")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        cursor_message = _cursor_uuid(decoded, "message_id")
-        cursor_depth = _cursor_int(decoded, "max_depth")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and snapshot cursor do not match.")
-        if message_id != cursor_message or max_depth != cursor_depth:
-            raise InvalidRequest("The subtree request and snapshot cursor do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = _cursor_int(decoded, "snapshot_sequence")
-        expected_tunnel_id = _cursor_binding(decoded)
-    if payload.page_cursor:
-        decoded = _decoded_cursor(payload.page_cursor, kind="subtree-page")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        cursor_message = _cursor_uuid(decoded, "message_id")
-        cursor_depth = _cursor_int(decoded, "max_depth")
-        page_snapshot = _cursor_int(decoded, "snapshot_sequence")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and page cursor do not match.")
-        if message_id != cursor_message or max_depth != cursor_depth:
-            raise InvalidRequest("The subtree request and page cursor do not match.")
-        if snapshot_sequence is not None and snapshot_sequence != page_snapshot:
-            raise InvalidRequest("The page and snapshot cursors do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = page_snapshot
-        after_sequence = _cursor_int(decoded, "after_sequence")
-        page_binding = _cursor_binding(decoded)
-        if expected_tunnel_id is not None and page_binding != expected_tunnel_id:
-            raise InvalidCursor()
-        expected_tunnel_id = page_binding
-    return PageCursor(
-        cycle_id=cycle_id,
-        after_sequence=after_sequence,
-        snapshot_sequence=snapshot_sequence,
-        expected_tunnel_id=expected_tunnel_id,
-    )
-
-
-def _subtree_response(page: SubtreePage, *, max_depth: int) -> dict[str, Any]:
-    snapshot_cursor = _cursor(
+def _subtree_response(page: SubtreePage, *, max_depth: int) -> SubtreeResponse:
+    snapshot_cursor = cursors.encode_cursor(
         "subtree-snapshot",
         tunnel_id=str(page.tunnel.id),
         cycle_id=str(page.cycle.id),
@@ -803,7 +669,7 @@ def _subtree_response(page: SubtreePage, *, max_depth: int) -> dict[str, Any]:
     )
     next_page_cursor = None
     if page.next_after_sequence is not None:
-        next_page_cursor = _cursor(
+        next_page_cursor = cursors.encode_cursor(
             "subtree-page",
             tunnel_id=str(page.tunnel.id),
             cycle_id=str(page.cycle.id),
@@ -812,19 +678,25 @@ def _subtree_response(page: SubtreePage, *, max_depth: int) -> dict[str, Any]:
             snapshot_sequence=page.snapshot_sequence,
             after_sequence=page.next_after_sequence,
         )
-    return {
-        "cycle_id": page.cycle.id,
-        "root_id": page.root.id,
-        "nodes": [message_payload(message) for message in page.messages],
-        "snapshot_cursor": snapshot_cursor,
-        "next_page_cursor": next_page_cursor,
-        "truncated": page.truncated,
-    }
+    return SubtreeResponse(
+        cycle_id=page.cycle.id,
+        root_id=page.root.id,
+        nodes=[
+            MessageResponse.model_validate(message_payload(message)) for message in page.messages
+        ],
+        snapshot_cursor=snapshot_cursor,
+        next_page_cursor=next_page_cursor,
+        truncated=page.truncated,
+    )
 
 
-def _subtree(request: HttpRequest, payload: SubtreeRequest) -> dict[str, Any]:
+@router.post(
+    "/tree/subtree",
+    response={200: SubtreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def read_tunnel_subtree(request: HttpRequest, payload: SubtreeRequest) -> SubtreeResponse:
     credential = _credential(request)
-    cursor = _subtree_cursor_values(payload)
+    cursor = _page_cursor_values(payload)
     page = get_subtree(
         credential=credential,
         address=payload.address,
@@ -842,52 +714,8 @@ def _subtree(request: HttpRequest, payload: SubtreeRequest) -> dict[str, Any]:
     return _subtree_response(page, max_depth=payload.max_depth)
 
 
-@router.post(
-    "/tree/subtree",
-    response={200: SubtreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
-)
-def read_tunnel_subtree(request: HttpRequest, payload: SubtreeRequest) -> dict[str, Any]:
-    return _subtree(request, payload)
-
-
-def _leaves_cursor_values(payload: LeavesRequest) -> PageCursor:
-    cycle_id = payload.cycle_id
-    after_sequence = 0
-    snapshot_sequence: int | None = None
-    expected_tunnel_id: UUID | None = None
-    if payload.snapshot_cursor:
-        decoded = _decoded_cursor(payload.snapshot_cursor, kind="leaves-snapshot")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and snapshot cursor do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = _cursor_int(decoded, "snapshot_sequence")
-        expected_tunnel_id = _cursor_binding(decoded)
-    if payload.page_cursor:
-        decoded = _decoded_cursor(payload.page_cursor, kind="leaves-page")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
-        page_snapshot = _cursor_int(decoded, "snapshot_sequence")
-        if cycle_id and cycle_id != cursor_cycle:
-            raise InvalidRequest("The cycle and page cursor do not match.")
-        if snapshot_sequence is not None and snapshot_sequence != page_snapshot:
-            raise InvalidRequest("The page and snapshot cursors do not match.")
-        cycle_id = cursor_cycle
-        snapshot_sequence = page_snapshot
-        after_sequence = _cursor_int(decoded, "after_sequence")
-        page_binding = _cursor_binding(decoded)
-        if expected_tunnel_id is not None and page_binding != expected_tunnel_id:
-            raise InvalidCursor()
-        expected_tunnel_id = page_binding
-    return PageCursor(
-        cycle_id=cycle_id,
-        after_sequence=after_sequence,
-        snapshot_sequence=snapshot_sequence,
-        expected_tunnel_id=expected_tunnel_id,
-    )
-
-
-def _leaves_response(page: LeafPage) -> dict[str, Any]:
-    snapshot_cursor = _cursor(
+def _leaves_response(page: LeafPage) -> LeavesResponse:
+    snapshot_cursor = cursors.encode_cursor(
         "leaves-snapshot",
         tunnel_id=str(page.tunnel.id),
         cycle_id=str(page.cycle.id),
@@ -895,25 +723,31 @@ def _leaves_response(page: LeafPage) -> dict[str, Any]:
     )
     next_page_cursor = None
     if page.next_after_sequence is not None:
-        next_page_cursor = _cursor(
+        next_page_cursor = cursors.encode_cursor(
             "leaves-page",
             tunnel_id=str(page.tunnel.id),
             cycle_id=str(page.cycle.id),
             snapshot_sequence=page.snapshot_sequence,
             after_sequence=page.next_after_sequence,
         )
-    return {
-        "cycle_id": page.cycle.id,
-        "leaves": [message_payload(message) for message in page.messages],
-        "snapshot_cursor": snapshot_cursor,
-        "next_page_cursor": next_page_cursor,
-        "complete": page.complete,
-    }
+    return LeavesResponse(
+        cycle_id=page.cycle.id,
+        leaves=[
+            MessageResponse.model_validate(message_payload(message)) for message in page.messages
+        ],
+        snapshot_cursor=snapshot_cursor,
+        next_page_cursor=next_page_cursor,
+        complete=page.complete,
+    )
 
 
-def _leaves(request: HttpRequest, payload: LeavesRequest) -> dict[str, Any]:
+@router.post(
+    "/tree/leaves",
+    response={200: LeavesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+)
+def read_tunnel_leaves(request: HttpRequest, payload: LeavesRequest) -> LeavesResponse:
     credential = _credential(request)
-    cursor = _leaves_cursor_values(payload)
+    cursor = _page_cursor_values(payload)
     page = list_leaves(
         credential=credential,
         address=payload.address,
@@ -929,25 +763,29 @@ def _leaves(request: HttpRequest, payload: LeavesRequest) -> dict[str, Any]:
     return _leaves_response(page)
 
 
+def _activity_event(event: TunnelEvent) -> ActivityEventResponse:
+    return ActivityEventResponse(
+        position=event.position,
+        type=cast(ActivityEventType, event.event_type),
+        occurred_at=event.occurred_at,
+        cycle_id=event.cycle_id,
+        message=MessageResponse.model_validate(message_payload(event.message))
+        if event.message is not None
+        else None,
+    )
+
+
 @router.post(
-    "/tree/leaves",
-    response={200: LeavesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
+    "/activity",
+    auth=activity_bearer,
+    response={
+        200: ActivityResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
 )
-def read_tunnel_leaves(request: HttpRequest, payload: LeavesRequest) -> dict[str, Any]:
-    return _leaves(request, payload)
-
-
-def _activity_event(event: Any) -> dict[str, Any]:
-    return {
-        "position": event.position,
-        "type": event.event_type,
-        "occurred_at": event.occurred_at,
-        "cycle_id": event.cycle_id,
-        "message": message_payload(event.message) if event.message is not None else None,
-    }
-
-
-async def _activity(request: HttpRequest, payload: ActivityRequest) -> dict[str, Any]:
+async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -> ActivityResponse:
     credential = _credential(request)
     expected_tunnel_id: UUID | None = None
     after_position: int | None = None
@@ -965,42 +803,11 @@ async def _activity(request: HttpRequest, payload: ActivityRequest) -> dict[str,
         tunnel=page.tunnel,
         expected_tunnel_id=expected_tunnel_id,
     )
-    return {
-        "events": [_activity_event(event) for event in page.events],
-        "next_cursor": _activity_cursor(page.tunnel, page.next_position),
-        "has_more": page.has_more,
-    }
-
-
-@router.post(
-    "/activity",
-    auth=activity_bearer,
-    response={
-        200: ActivityResponse,
-        400: ErrorResponse,
-        404: ErrorResponse,
-        **AUTHENTICATED_ERRORS,
-    },
-)
-async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -> dict[str, Any]:
-    return await _activity(request, payload)
-
-
-def _checkpoint(request: HttpRequest, payload: CheckpointRequest) -> dict[str, Any]:
-    credential = _credential(request)
-    expected_tunnel_id, position = _activity_cursor_values(payload.cursor)
-    checkpoint, advanced = commit_checkpoint(
-        credential=credential,
-        address=payload.address,
-        position=position,
-        expected_tunnel_id=expected_tunnel_id,
+    return ActivityResponse(
+        events=[_activity_event(event) for event in page.events],
+        next_cursor=_activity_cursor(page.tunnel, page.next_position),
+        has_more=page.has_more,
     )
-    return {
-        "cursor": _activity_cursor(checkpoint.tunnel, checkpoint.last_event_position),
-        "position": checkpoint.last_event_position,
-        "updated_at": checkpoint.updated_at,
-        "advanced": advanced,
-    }
 
 
 @router.post(
@@ -1013,8 +820,23 @@ def _checkpoint(request: HttpRequest, payload: CheckpointRequest) -> dict[str, A
         **AUTHENTICATED_ERRORS,
     },
 )
-def commit_tunnel_checkpoint(request: HttpRequest, payload: CheckpointRequest) -> dict[str, Any]:
-    return _checkpoint(request, payload)
+def commit_tunnel_checkpoint(
+    request: HttpRequest, payload: CheckpointRequest
+) -> CheckpointResponse:
+    credential = _credential(request)
+    expected_tunnel_id, position = _activity_cursor_values(payload.cursor)
+    checkpoint, advanced = commit_checkpoint(
+        credential=credential,
+        address=payload.address,
+        position=position,
+        expected_tunnel_id=expected_tunnel_id,
+    )
+    return CheckpointResponse(
+        cursor=_activity_cursor(checkpoint.tunnel, checkpoint.last_event_position),
+        position=checkpoint.last_event_position,
+        updated_at=checkpoint.updated_at,
+        advanced=advanced,
+    )
 
 
 def _context_cursor_values(payload: ContextRequest) -> ContextCursor:
@@ -1024,14 +846,14 @@ def _context_cursor_values(payload: ContextRequest) -> ContextCursor:
     expected_tunnel_id: UUID | None = None
     after_position: int | None = None
     if payload.snapshot_cursor:
-        decoded = _decoded_cursor(payload.snapshot_cursor, kind="context-snapshot")
-        cursor_cycle = _cursor_uuid(decoded, "cycle_id")
+        decoded = cursors.decode_cursor(payload.snapshot_cursor, kind="context-snapshot")
+        cursor_cycle = cursors.cursor_uuid(decoded, "cycle_id")
         if cycle_id and cycle_id != cursor_cycle:
             raise InvalidRequest("The cycle and context snapshot do not match.")
         cycle_id = cursor_cycle
-        expected_tunnel_id = _cursor_binding(decoded)
-        snapshot_sequence = _cursor_int(decoded, "snapshot_sequence")
-        activity_position = _cursor_int(decoded, "activity_position")
+        expected_tunnel_id = cursors.cursor_uuid(decoded, "tunnel_id")
+        snapshot_sequence = cursors.cursor_int(decoded, "snapshot_sequence")
+        activity_position = cursors.cursor_int(decoded, "activity_position")
     if payload.after_cursor:
         activity_tunnel_id, after_position = _activity_cursor_values(payload.after_cursor)
         if expected_tunnel_id and activity_tunnel_id != expected_tunnel_id:
@@ -1046,7 +868,17 @@ def _context_cursor_values(payload: ContextRequest) -> ContextCursor:
     )
 
 
-def _context(request: HttpRequest, payload: ContextRequest) -> dict[str, Any]:
+@router.post(
+    "/context",
+    response={
+        200: ContextResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        413: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> ContextResponse:
     credential = _credential(request)
     cursor = _context_cursor_values(payload)
     view = get_context(
@@ -1068,38 +900,28 @@ def _context(request: HttpRequest, payload: ContextRequest) -> dict[str, Any]:
         tunnel=view.tunnel,
         expected_tunnel_id=cursor.expected_tunnel_id,
     )
-    snapshot_cursor = _cursor(
+    snapshot_cursor = cursors.encode_cursor(
         "context-snapshot",
         tunnel_id=str(view.tunnel.id),
         cycle_id=str(view.cycle_id),
         snapshot_sequence=view.snapshot_sequence,
         activity_position=view.activity_position,
     )
-    return {
-        "cycle_id": view.cycle_id,
-        "snapshot_cursor": snapshot_cursor,
-        "items": [
-            {"reason": item.reason, "message": message_payload(item.message)} for item in view.items
+    return ContextResponse(
+        cycle_id=view.cycle_id,
+        snapshot_cursor=snapshot_cursor,
+        items=[
+            ContextItemResponse(
+                reason=item.reason,
+                message=MessageResponse.model_validate(message_payload(item.message)),
+            )
+            for item in view.items
         ],
-        "activity_cursor": _activity_cursor(view.tunnel, view.activity_position),
-        "used_items": view.used_items,
-        "used_bytes": view.used_bytes,
-        "truncated": view.truncated,
-    }
-
-
-@router.post(
-    "/context",
-    response={
-        200: ContextResponse,
-        400: ErrorResponse,
-        404: ErrorResponse,
-        413: ErrorResponse,
-        **AUTHENTICATED_ERRORS,
-    },
-)
-def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> dict[str, Any]:
-    return _context(request, payload)
+        activity_cursor=_activity_cursor(view.tunnel, view.activity_position),
+        used_items=view.used_items,
+        used_bytes=view.used_bytes,
+        truncated=view.truncated,
+    )
 
 
 @router.post(
@@ -1112,7 +934,7 @@ def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> dict[s
         **AUTHENTICATED_ERRORS,
     },
 )
-def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> dict[str, Any]:
+def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> EnterResponse:
     credential = _credential(request)
     view = enter_tunnel(
         credential=credential,
@@ -1120,7 +942,26 @@ def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> dict[str, 
         limit=payload.limit,
         max_bytes=payload.max_bytes,
     )
-    return entry_payload(view)
+    return EnterResponse.model_validate(entry_payload(view))
+
+
+def _search_hit_response(hit: SearchHit) -> SearchHitResponse:
+    message = hit.message
+    return SearchHitResponse(
+        message_id=message.id,
+        cycle_id=message.cycle_id,
+        parent_id=message.parent_id,
+        sender=SenderResponse(
+            id=message.sender_id, name=message.sender_name, session=message.session
+        ),
+        mention_ids=sorted((item.credential_id for item in message.mentions.all()), key=str),
+        correlation_id=message.correlation_id or None,
+        sequence=message.sequence,
+        depth=message.depth,
+        created_at=message.created_at,
+        rank=hit.rank,
+        snippet=hit.snippet,
+    )
 
 
 def _search_filter_digest(payload: SearchRequest) -> str:
@@ -1144,24 +985,33 @@ def _search_filter_digest(payload: SearchRequest) -> str:
 def _search_page_values(payload: SearchRequest) -> SearchCursor:
     if payload.page_cursor is None:
         return SearchCursor(cycle_id=payload.cycle_id)
-    decoded = _decoded_cursor(payload.page_cursor, kind="search-page")
+    decoded = cursors.decode_cursor(payload.page_cursor, kind="search-page")
     if decoded.get("filters") != _search_filter_digest(payload):
         raise InvalidCursor()
-    cycle_id = _cursor_uuid(decoded, "cycle_id")
+    cycle_id = cursors.cursor_uuid(decoded, "cycle_id")
     if payload.cycle_id is not None and payload.cycle_id != cycle_id:
         raise InvalidCursor()
-    tunnel_id = _cursor_binding(decoded)
+    tunnel_id = cursors.cursor_uuid(decoded, "tunnel_id")
     return SearchCursor(
         cycle_id=cycle_id,
-        snapshot_sequence=_cursor_int(decoded, "snapshot_sequence"),
-        after_rank=_cursor_int(decoded, "rank"),
-        after_sequence=_cursor_int(decoded, "sequence"),
-        after_message_id=_cursor_uuid(decoded, "message_id"),
+        snapshot_sequence=cursors.cursor_int(decoded, "snapshot_sequence"),
+        after_rank=cursors.cursor_int(decoded, "rank"),
+        after_sequence=cursors.cursor_int(decoded, "sequence"),
+        after_message_id=cursors.cursor_uuid(decoded, "message_id"),
         expected_tunnel_id=tunnel_id,
     )
 
 
-def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
+@router.post(
+    "/search",
+    response={
+        200: SearchResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def search_tunnel_messages(request: HttpRequest, payload: SearchRequest) -> SearchResponse:
     credential = _credential(request)
     cursor = _search_page_values(payload)
     page = search_messages(
@@ -1191,7 +1041,7 @@ def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
         and page.next_after_sequence is not None
         and page.next_after_message_id is not None
     ):
-        next_cursor = _cursor(
+        next_cursor = cursors.encode_cursor(
             "search-page",
             tunnel_id=str(page.tunnel.id),
             cycle_id=str(page.cycle.id),
@@ -1201,47 +1051,45 @@ def _search(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
             sequence=page.next_after_sequence,
             message_id=str(page.next_after_message_id),
         )
-    return {
-        "cycle_id": page.cycle.id,
-        "snapshot_sequence": page.snapshot_sequence,
-        "results": [search_hit_payload(hit) for hit in page.hits],
-        "next_page_cursor": next_cursor,
-        "complete": page.complete,
-        "used_bytes": page.used_bytes,
-    }
-
-
-@router.post(
-    "/search",
-    response={
-        200: SearchResponse,
-        400: ErrorResponse,
-        404: ErrorResponse,
-        **AUTHENTICATED_ERRORS,
-    },
-)
-def search_tunnel_messages(request: HttpRequest, payload: SearchRequest) -> dict[str, Any]:
-    return _search(request, payload)
+    return SearchResponse(
+        cycle_id=page.cycle.id,
+        snapshot_sequence=page.snapshot_sequence,
+        results=[_search_hit_response(hit) for hit in page.hits],
+        next_page_cursor=next_cursor,
+        complete=page.complete,
+        used_bytes=page.used_bytes,
+    )
 
 
 def _participant_page_values(payload: ParticipantsRequest) -> ParticipantCursor:
     if payload.page_cursor is None:
         return ParticipantCursor(cycle_id=payload.cycle_id)
-    decoded = _decoded_cursor(payload.page_cursor, kind="participants-page")
-    cycle_id = _cursor_uuid(decoded, "cycle_id")
+    decoded = cursors.decode_cursor(payload.page_cursor, kind="participants-page")
+    cycle_id = cursors.cursor_uuid(decoded, "cycle_id")
     if payload.cycle_id is not None and payload.cycle_id != cycle_id:
         raise InvalidCursor()
-    tunnel_id = _cursor_binding(decoded)
+    tunnel_id = cursors.cursor_uuid(decoded, "tunnel_id")
     return ParticipantCursor(
         cycle_id=cycle_id,
-        snapshot_sequence=_cursor_int(decoded, "snapshot_sequence"),
-        after_first_sequence=_cursor_int(decoded, "first_sequence"),
-        after_credential_id=_cursor_uuid(decoded, "credential_id"),
+        snapshot_sequence=cursors.cursor_int(decoded, "snapshot_sequence"),
+        after_first_sequence=cursors.cursor_int(decoded, "first_sequence"),
+        after_credential_id=cursors.cursor_uuid(decoded, "credential_id"),
         expected_tunnel_id=tunnel_id,
     )
 
 
-def _participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[str, Any]:
+@router.post(
+    "/participants",
+    response={
+        200: ParticipantsResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def list_tunnel_participants(
+    request: HttpRequest, payload: ParticipantsRequest
+) -> ParticipantsResponse:
     credential = _credential(request)
     cursor = _participant_page_values(payload)
     page = list_participants(
@@ -1259,7 +1107,7 @@ def _participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[st
     )
     next_cursor = None
     if page.next_after_first_sequence is not None and page.next_after_credential_id is not None:
-        next_cursor = _cursor(
+        next_cursor = cursors.encode_cursor(
             "participants-page",
             tunnel_id=str(page.tunnel.id),
             cycle_id=str(page.cycle.id),
@@ -1267,60 +1115,25 @@ def _participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[st
             first_sequence=page.next_after_first_sequence,
             credential_id=str(page.next_after_credential_id),
         )
-    return {
-        "cycle_id": page.cycle.id,
-        "snapshot_sequence": page.snapshot_sequence,
-        "participants": [
-            {
-                "agent_id": item.credential_id,
-                "name_snapshot": item.name_snapshot,
-                "message_count": item.message_count,
-                "mention_count": item.mention_count,
-                "first_sequence": item.first_sequence,
-                "last_sequence": item.last_sequence,
-                "acknowledged_event_position": item.acknowledged_event_position,
-                "last_advanced_at": item.last_advanced_at,
-            }
+    return ParticipantsResponse(
+        cycle_id=page.cycle.id,
+        snapshot_sequence=page.snapshot_sequence,
+        participants=[
+            ParticipantResponse(
+                agent_id=item.credential_id,
+                name_snapshot=item.name_snapshot,
+                message_count=item.message_count,
+                mention_count=item.mention_count,
+                first_sequence=item.first_sequence,
+                last_sequence=item.last_sequence,
+                acknowledged_event_position=item.acknowledged_event_position,
+                last_advanced_at=item.last_advanced_at,
+            )
             for item in page.participants
         ],
-        "next_page_cursor": next_cursor,
-        "complete": page.complete,
-    }
-
-
-@router.post(
-    "/participants",
-    response={
-        200: ParticipantsResponse,
-        400: ErrorResponse,
-        404: ErrorResponse,
-        **AUTHENTICATED_ERRORS,
-    },
-)
-def list_tunnel_participants(request: HttpRequest, payload: ParticipantsRequest) -> dict[str, Any]:
-    return _participants(request, payload)
-
-
-def _tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> dict[str, Any]:
-    credential = _credential(request)
-    status = get_tunnel_status(
-        credential=credential,
-        address=payload.address,
+        next_page_cursor=next_cursor,
+        complete=page.complete,
     )
-    tunnel = status.tunnel
-    return {
-        "id": tunnel.id,
-        "label": tunnel.label,
-        "state": tunnel.state,
-        "address_generation": status.current_address.generation,
-        "next_cycle_number": tunnel.next_cycle_number,
-        "latest_event_position": tunnel.next_event_position - 1,
-        "created_at": tunnel.created_at,
-        "dormant_at": tunnel.dormant_at,
-        "current_cycle": (
-            cycle_payload(status.current_cycle) if status.current_cycle is not None else None
-        ),
-    }
 
 
 @router.post(
@@ -1332,19 +1145,46 @@ def _tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> dict[s
         **AUTHENTICATED_ERRORS,
     },
 )
-def tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> dict[str, Any]:
-    return _tunnel_status(request, payload)
+def tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> TunnelStatusResponse:
+    credential = _credential(request)
+    status = get_tunnel_status(
+        credential=credential,
+        address=payload.address,
+    )
+    tunnel = status.tunnel
+    return TunnelStatusResponse(
+        id=tunnel.id,
+        label=tunnel.label,
+        state=cast(Literal["active", "dormant", "retired"], tunnel.state),
+        address_generation=status.current_address.generation,
+        next_cycle_number=tunnel.next_cycle_number,
+        latest_event_position=tunnel.next_event_position - 1,
+        created_at=tunnel.created_at,
+        dormant_at=tunnel.dormant_at,
+        current_cycle=DirectoryCycleResponse.model_validate(cycle_payload(status.current_cycle))
+        if status.current_cycle is not None
+        else None,
+    )
 
 
-def _cycle_list(request: HttpRequest, payload: CycleListRequest) -> dict[str, Any]:
+@router.post(
+    "/cycles",
+    response={
+        200: CycleListResponse,
+        400: ErrorResponse,
+        404: ErrorResponse,
+        **AUTHENTICATED_ERRORS,
+    },
+)
+def list_tunnel_cycles(request: HttpRequest, payload: CycleListRequest) -> CycleListResponse:
     snapshot_number: int | None = None
     before_number: int | None = None
     expected_tunnel_id: UUID | None = None
     if payload.page_cursor:
-        decoded = _decoded_cursor(payload.page_cursor, kind="cycle-page")
-        snapshot_number = _cursor_int(decoded, "snapshot_number")
-        before_number = _cursor_int(decoded, "before_number")
-        expected_tunnel_id = _cursor_binding(decoded)
+        decoded = cursors.decode_cursor(payload.page_cursor, kind="cycle-page")
+        snapshot_number = cursors.cursor_int(decoded, "snapshot_number")
+        before_number = cursors.cursor_int(decoded, "before_number")
+        expected_tunnel_id = cursors.cursor_uuid(decoded, "tunnel_id")
     credential = _credential(request)
     page = list_cycles(
         credential=credential,
@@ -1362,50 +1202,15 @@ def _cycle_list(request: HttpRequest, payload: CycleListRequest) -> dict[str, An
         "snapshot_number": page.snapshot_number,
     }
     next_cursor = (
-        _cursor("cycle-page", **binding, before_number=page.next_before_number)
+        cursors.encode_cursor("cycle-page", **binding, before_number=page.next_before_number)
         if page.next_before_number is not None
         else None
     )
-    return {
-        "items": [_cycle_directory_item(cycle) for cycle in page.cycles],
-        "next_page_cursor": next_cursor,
-        "complete": page.complete,
-    }
-
-
-@router.post(
-    "/cycles",
-    response={
-        200: CycleListResponse,
-        400: ErrorResponse,
-        404: ErrorResponse,
-        **AUTHENTICATED_ERRORS,
-    },
-)
-def list_tunnel_cycles(request: HttpRequest, payload: CycleListRequest) -> dict[str, Any]:
-    return _cycle_list(request, payload)
-
-
-def _start_cycle(
-    request: HttpRequest,
-    payload: StartCycleRequest,
-    idempotency_key: str,
-) -> dict[str, Any]:
-    credential = _credential(request)
-    root = payload.cycle.root
-    started = start_cycle(
-        credential=credential,
-        idempotency_key=idempotency_key,
-        address=payload.address,
-        expected_address_generation=payload.expected_address_generation,
-        cycle_label=payload.cycle.label,
-        expires_in_seconds=payload.cycle.expires_in_seconds,
-        root_content=root.content.model_dump(mode="json"),
-        root_mentions=root.mentions,
-        root_correlation_id=root.correlation_id,
-        root_session=root.session,
+    return CycleListResponse(
+        items=[_cycle_directory_item(cycle) for cycle in page.cycles],
+        next_page_cursor=next_cursor,
+        complete=page.complete,
     )
-    return _started_cycle_response(started)
 
 
 @router.post(
@@ -1422,26 +1227,14 @@ def _start_cycle(
 def start_tunnel_cycle(
     request: HttpRequest,
     payload: StartCycleRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> Status[dict[str, Any]]:
-    return Status(201, _start_cycle(request, payload, idempotency_key))
-
-
-def _rollover_cycle(
-    request: HttpRequest,
-    payload: RolloverCycleRequest,
-    idempotency_key: str,
-) -> dict[str, Any]:
+    idempotency_key: IdempotencyKey,
+) -> Status[StartedCycleResponse]:
     credential = _credential(request)
     root = payload.cycle.root
-    started = rollover_cycle(
+    started = start_cycle(
         credential=credential,
         idempotency_key=idempotency_key,
         address=payload.address,
-        expected_cycle_id=payload.expected_cycle_id,
         expected_address_generation=payload.expected_address_generation,
         cycle_label=payload.cycle.label,
         expires_in_seconds=payload.cycle.expires_in_seconds,
@@ -1450,7 +1243,7 @@ def _rollover_cycle(
         root_correlation_id=root.correlation_id,
         root_session=root.session,
     )
-    return _started_cycle_response(started)
+    return Status(201, _started_cycle_response(started))
 
 
 @router.post(
@@ -1467,27 +1260,24 @@ def _rollover_cycle(
 def rollover_tunnel_cycle(
     request: HttpRequest,
     payload: RolloverCycleRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> Status[dict[str, Any]]:
-    return Status(201, _rollover_cycle(request, payload, idempotency_key))
-
-
-def _close_cycle(
-    request: HttpRequest,
-    payload: CloseCycleRequest,
-    idempotency_key: str,
-) -> HttpResponse:
+    idempotency_key: IdempotencyKey,
+) -> Status[StartedCycleResponse]:
     credential = _credential(request)
-    close_cycle(
+    root = payload.cycle.root
+    started = rollover_cycle(
         credential=credential,
         idempotency_key=idempotency_key,
         address=payload.address,
         expected_cycle_id=payload.expected_cycle_id,
+        expected_address_generation=payload.expected_address_generation,
+        cycle_label=payload.cycle.label,
+        expires_in_seconds=payload.cycle.expires_in_seconds,
+        root_content=root.content.model_dump(mode="json"),
+        root_mentions=root.mentions,
+        root_correlation_id=root.correlation_id,
+        root_session=root.session,
     )
-    return HttpResponse(status=204)
+    return Status(201, _started_cycle_response(started))
 
 
 @router.post(
@@ -1503,12 +1293,16 @@ def _close_cycle(
 def close_tunnel_cycle(
     request: HttpRequest,
     payload: CloseCycleRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
+    idempotency_key: IdempotencyKey,
 ) -> HttpResponse:
-    return _close_cycle(request, payload, idempotency_key)
+    credential = _credential(request)
+    close_cycle(
+        credential=credential,
+        idempotency_key=idempotency_key,
+        address=payload.address,
+        expected_cycle_id=payload.expected_cycle_id,
+    )
+    return HttpResponse(status=204)
 
 
 @router.post(
@@ -1524,11 +1318,8 @@ def close_tunnel_cycle(
 def light_beacon(
     request: HttpRequest,
     payload: BeaconPublishRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> Status[dict[str, Any]]:
+    idempotency_key: IdempotencyKey,
+) -> Status[BeaconWriteResponse]:
     data, replay = publish_beacon(
         credential=_credential(request),
         idempotency_key=idempotency_key,
@@ -1536,7 +1327,10 @@ def light_beacon(
         text=payload.text,
         lifetime_seconds=payload.lifetime_seconds,
     )
-    return Status(201, {"beacon": data, "idempotent_replay": replay})
+    return Status(
+        201,
+        BeaconWriteResponse(beacon=BeaconResponse.model_validate(data), idempotent_replay=replay),
+    )
 
 
 @router.post(
@@ -1552,37 +1346,34 @@ def light_beacon(
 def dim_beacon(
     request: HttpRequest,
     payload: BeaconWithdrawRequest,
-    idempotency_key: HeaderEx[
-        str,
-        P(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[\x20-\x7e]+$"),
-    ],
-) -> dict[str, Any]:
+    idempotency_key: IdempotencyKey,
+) -> BeaconWriteResponse:
     data, replay = withdraw_beacon(
         credential=_credential(request),
         idempotency_key=idempotency_key,
         address=payload.address,
         beacon_id=payload.beacon_id,
     )
-    return {"beacon": data, "idempotent_replay": replay}
+    return BeaconWriteResponse(beacon=BeaconResponse.model_validate(data), idempotent_replay=replay)
 
 
 @router.post(
     "/beacons/board",
     response={200: BeaconBoardResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
-def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> dict[str, Any]:
+def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> BeaconBoardResponse:
     page = read_board(
         credential=_credential(request),
         limit=payload.limit,
         page_cursor=payload.page_cursor,
     )
-    return {
-        "items": page.items,
-        "board_cursor": page.board_cursor,
-        "snapshot_position": page.snapshot_position,
-        "next_page_cursor": page.next_cursor,
-        "complete": page.complete,
-    }
+    return BeaconBoardResponse(
+        items=[BeaconBoardItem.model_validate(item) for item in page.items],
+        board_cursor=page.board_cursor,
+        snapshot_position=page.snapshot_position,
+        next_page_cursor=page.next_cursor,
+        complete=page.complete,
+    )
 
 
 @router.post(
@@ -1590,11 +1381,15 @@ def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> dict[str,
     auth=activity_bearer,
     response={200: BeaconWaitResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
-async def wait_beacon_board(request: HttpRequest, payload: BeaconWaitRequest) -> dict[str, Any]:
-    return await wait_for_board(
+async def wait_beacon_board(request: HttpRequest, payload: BeaconWaitRequest) -> BeaconWaitResponse:
+    result = await wait_for_board(
         credential=_credential(request),
         after_cursor=payload.after_cursor,
         wait_seconds=payload.wait_seconds,
+    )
+
+    return BeaconWaitResponse(
+        refresh_required=result["refresh_required"], board_cursor=result["board_cursor"]
     )
 
 
