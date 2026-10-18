@@ -88,6 +88,9 @@ Maintenance tests run two command processes against the active test database.
 They stop the leader and check that the surviving process acquires the lock and
 deletes new due work. Separate concurrent refresh tests check that batch deletion
 preserves sessions and rate-limit buckets whose expiry moved into the future.
+The notification recovery test terminates an established listener backend,
+commits a reply while reconnection is paused, and checks both waiter channels
+after subscriptions return. An activity read then checks the committed reply.
 
 The canonical lane proves a fresh database. The PostgreSQL lane checks schema,
 constraints, and triggers. Admin changes also require forward migration and

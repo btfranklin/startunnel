@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
 from asgiref.sync import sync_to_async
 from django.db import connection, transaction
@@ -16,7 +17,9 @@ import tunnels.beacons as beacon_domain
 from accounts.models import User
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
+from core.activity_listener import _connection_kwargs as listener_connection_kwargs
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify
+from tunnels.activity import read_activity_async
 from tunnels.beacons import (
     _advance_board_position,
     publish_beacon,
@@ -99,6 +102,8 @@ async def test_board_notice_is_commit_only_and_reaches_two_listener_connections(
             *(asyncio.wait_for(item._ready.wait(), timeout=5) for item in listeners)
         )
         assert all(item._task is not None for item in listeners)
+        for waiter in [*board_waiters, activity_waiter]:
+            waiter.clear()
 
         await sync_to_async(_worker)(_advance_then_rollback)
         with pytest.raises(TimeoutError):
@@ -124,6 +129,115 @@ async def test_board_notice_is_commit_only_and_reaches_two_listener_connections(
         for listener, waiter in zip(listeners, board_waiters, strict=True):
             listener.unregister_board(waiter)
         await asyncio.gather(*(listener.stop() for listener in listeners))
+
+
+@pytest.mark.asyncio
+async def test_reconnected_subscriptions_wake_waiters_for_commits_during_disconnect(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publisher, _ = await sync_to_async(_worker)(
+        lambda: credential_factory(name="Reconnect publisher")
+    )
+    responder, _ = await sync_to_async(_worker)(
+        lambda: credential_factory(name="Reconnect responder")
+    )
+    created = await sync_to_async(_worker)(lambda: _create(publisher, key="listener-reconnect"))
+    await sync_to_async(_worker)(
+        lambda: publish_beacon(
+            credential=publisher,
+            idempotency_key="listener-reconnect-beacon",
+            address=created.address,
+            text="Observe a reply across the disconnect.",
+        )
+    )
+    original_connect = psycopg.AsyncConnection.connect
+    database_kwargs: dict[str, Any] = listener_connection_kwargs()
+    listener_tag = "listener-reconnect-" + uuid4().hex
+    monkeypatch.setattr(
+        "core.activity_listener._connection_kwargs",
+        lambda: {**database_kwargs, "application_name": listener_tag},
+    )
+    reconnect_paused = asyncio.Event()
+    release_reconnect = asyncio.Event()
+    connections: list[psycopg.AsyncConnection[Any]] = []
+    calls = 0
+
+    async def connect_with_gap(**kwargs: Any) -> psycopg.AsyncConnection[Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            reconnect_paused.set()
+            await asyncio.wait_for(release_reconnect.wait(), timeout=10)
+        opened = await original_connect(**kwargs)
+        connections.append(opened)
+        return opened
+
+    monkeypatch.setattr("core.activity_listener.psycopg.AsyncConnection.connect", connect_with_gap)
+    listener = ActivityListener()
+    monkeypatch.setattr("tunnels.activity.activity_listener", listener)
+    activity_waiter = listener.register(created.tunnel.id)
+    board_waiter = listener.register_board()
+    try:
+        await asyncio.wait_for(listener._ready.wait(), timeout=5)
+        assert len(connections) == 1
+        first_pid = connections[0].info.backend_pid
+        initial = await read_activity_async(
+            credential=responder, address=created.address, after_position=0
+        )
+        activity_waiter.clear()
+        board_waiter.clear()
+        control = await original_connect(**database_kwargs, autocommit=True)
+        async with control:
+            cursor = await control.execute("SELECT pg_terminate_backend(%s)", [first_pid])
+            assert await cursor.fetchone() == (True,)
+        await asyncio.wait_for(reconnect_paused.wait(), timeout=5)
+        assert activity_waiter.is_set() and board_waiter.is_set()
+        assert not listener._ready.is_set()
+        activity_waiter.clear()
+        board_waiter.clear()
+        empty = await read_activity_async(
+            credential=responder,
+            address=created.address,
+            after_position=initial.next_position,
+        )
+        assert not empty.events
+        reply = await sync_to_async(_worker)(
+            lambda: post_reply(
+                credential=responder,
+                idempotency_key="listener-reconnect-reply",
+                address=created.address,
+                parent_id=created.root.id,
+                content={"type": "text", "text": "Committed during the subscription gap."},
+            )
+        )
+        assert not activity_waiter.is_set() and not board_waiter.is_set()
+        release_reconnect.set()
+        await asyncio.wait_for(
+            asyncio.gather(activity_waiter.wait(), board_waiter.wait()), timeout=5
+        )
+        assert listener._ready.is_set()
+        assert len(connections) == 2
+        assert connections[1].info.backend_pid != first_pid
+        page = await asyncio.wait_for(
+            read_activity_async(
+                credential=responder,
+                address=created.address,
+                after_position=initial.next_position,
+                wait_seconds=20,
+            ),
+            timeout=5,
+        )
+        assert [event.message_id for event in page.events] == [reply.message.id]
+        board = await sync_to_async(_worker)(lambda: read_board(credential=responder))
+        assert board.items[0]["response_count"] == 1
+    finally:
+        release_reconnect.set()
+        listener.unregister(created.tunnel.id, activity_waiter)
+        listener.unregister_board(board_waiter)
+        await listener.stop()
+        for opened in connections:
+            if not opened.closed:
+                await opened.close()
 
 
 def _create(credential: AgentCredential, *, key: str) -> CreatedTunnel:

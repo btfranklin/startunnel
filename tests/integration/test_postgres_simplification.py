@@ -250,6 +250,8 @@ async def test_multiple_activity_listeners_receive_one_committed_event() -> None
     try:
         await asyncio.wait_for(first._ready.wait(), timeout=5)
         await asyncio.wait_for(second._ready.wait(), timeout=5)
+        first_waiter.clear()
+        second_waiter.clear()
         database = await psycopg.AsyncConnection.connect(
             **_connection_kwargs(),
             autocommit=True,

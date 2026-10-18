@@ -104,6 +104,7 @@ class ActivityListener:
                     await connection.execute(f"LISTEN {ACTIVITY_CHANNEL}")
                     await connection.execute(f"LISTEN {BOARD_CHANNEL}")
                     self._ready.set()
+                    self._wake_all()
                     backoff = 1.0
                     async for notification in connection.notifies():
                         if notification.channel == BOARD_CHANNEL:

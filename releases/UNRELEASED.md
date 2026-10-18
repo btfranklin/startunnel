@@ -133,3 +133,9 @@ resets stale connections. A failed content deletion no longer delays other due
 batches or nearer deadlines. Batch deletion preserves sessions and rate-limit
 buckets that were refreshed after selection. PostgreSQL tests now run two real
 maintenance commands and check leader takeover after the first leader stops.
+
+## Notification recovery
+
+The activity listener now wakes registered activity and board waits after both
+PostgreSQL subscriptions return. Database reads can then find changes that
+committed during the connection gap. Bounded fallback waits remain available.

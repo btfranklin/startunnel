@@ -240,9 +240,12 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
         "tunnels.activity._begin_activity_wait_for_async",
         lambda **kwargs: _ActivityStart(tunnel=tunnel, position=2, high_water_position=2),
     )
-    monkeypatch.setattr(
-        "tunnels.activity._continue_activity_wait_for_async", lambda **kwargs: pages.pop(0)
-    )
+
+    def reread(**kwargs: Any) -> ActivityPage:
+        assert registered == [tunnel.id]
+        return pages.pop(0)
+
+    monkeypatch.setattr("tunnels.activity._continue_activity_wait_for_async", reread)
     page = await read_activity_async(
         credential=credential,
         address="address",

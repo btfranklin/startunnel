@@ -163,6 +163,8 @@ async def test_listener_reconnects_after_database_error(
         calls += 1
         if calls == 1:
             raise psycopg.OperationalError("down")
+        board_waiter.clear()
+        activity_waiter.clear()
         return RestoredConnection()
 
     class RestoredConnection:
@@ -177,6 +179,8 @@ async def test_listener_reconnects_after_database_error(
 
         async def notifies(self) -> Any:
             assert listener._ready.is_set()
+            assert board_waiter.is_set()
+            assert activity_waiter.is_set()
             yield SimpleNamespace(channel=BOARD_CHANNEL, payload="1")
             listener._stopping = True
 

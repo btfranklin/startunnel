@@ -131,6 +131,9 @@ PostgreSQL `NOTIFY` wakes activity and board readers after commit. Each web proc
 Board waits use a global change position and the next effective expiry. A
 change requests a fresh paginated snapshot; no second event history is stored.
 Deadline waits remove expired Beacons even before maintenance records the end.
+After both PostgreSQL notification subscriptions are established, the listener
+wakes registered activity and board waits. Each wait reads PostgreSQL again to
+find changes that committed during a connection gap.
 Reply notices advance the board only for the first distinct responding credential.
 No board reader means no background board polling.
 
