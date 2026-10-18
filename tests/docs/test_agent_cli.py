@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import importlib.util
 import json
@@ -14,6 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
@@ -469,6 +471,34 @@ def test_closed_output_pipe_exits_without_a_traceback(arguments: tuple[str, ...]
         assert process.stderr.read() == b""
 
 
+@pytest.mark.parametrize(
+    ("platform", "error_number", "handled"),
+    [("win32", errno.EINVAL, True), ("linux", errno.EINVAL, False), ("win32", errno.EACCES, False)],
+)
+def test_windows_closed_pipe_error_keeps_other_io_errors_visible(
+    monkeypatch: pytest.MonkeyPatch, platform: str, error_number: int, handled: bool
+) -> None:
+    cli = _load_cli_module()
+    failure = OSError(error_number, "synthetic I/O failure")
+
+    def fail_output(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise failure
+
+    redirected: list[int] = []
+    monkeypatch.setattr(cli, "print", fail_output, raising=False)
+    monkeypatch.setattr(cli, "sys", SimpleNamespace(platform=platform, stdout=sys.stdout))
+    monkeypatch.setattr(cli.os, "dup2", lambda source, target: redirected.append(target))
+    if handled:
+        assert cli.main(["version"]) == 1
+        assert redirected == [sys.stdout.fileno()]
+    else:
+        with pytest.raises(OSError) as raised:
+            cli.main(["version"])
+        assert raised.value is failure
+        assert redirected == []
+
+
 def test_missing_command_argument_has_json_usage_error() -> None:
     result = run_cli("http://127.0.0.1:8000", "reply")
 
@@ -841,28 +871,7 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
         elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
             assert node.module is not None
             imports.add(node.module.split(".", 1)[0])
-    assert imports <= {
-        "argparse",
-        "ast",
-        "collections",
-        "contextlib",
-        "dataclasses",
-        "email",
-        "http",
-        "hashlib",
-        "json",
-        "math",
-        "os",
-        "pathlib",
-        "re",
-        "sys",
-        "stat",
-        "tempfile",
-        "time",
-        "typing",
-        "urllib",
-        "uuid",
-    }
+    assert imports <= sys.stdlib_module_names
 
 
 def _load_cli_module() -> Any:

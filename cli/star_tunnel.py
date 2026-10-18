@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import errno
 import hashlib
 import json
 import math
@@ -1343,7 +1344,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except CliError as error:
         print_error(error)
         return 2 if error.code == "usage_error" else 1
-    except BrokenPipeError:
+    except OSError as error:
+        # Windows can report a closed pipe as EINVAL.
+        if not isinstance(error, BrokenPipeError) and not (
+            sys.platform == "win32" and error.errno == errno.EINVAL
+        ):
+            raise
         with open(os.devnull, "w") as output:
             os.dup2(output.fileno(), sys.stdout.fileno())
         return 1

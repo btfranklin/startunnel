@@ -220,7 +220,7 @@ class StandaloneClientTests(unittest.TestCase):
                     )
                 finally:
                     os.close(write_descriptor)
-                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(result.stderr, b"")
 
     def test_invalid_json_integer_is_a_structured_request_error(self) -> None:
