@@ -51,10 +51,10 @@ def validate_rendered_images(images: list[str]) -> None:
         validate_image_reference(image, name="Each enabled production service image")
 
 
-def production_secret_directory(value: str | None = None) -> Path:
+def production_secret_directory() -> Path:
     """Resolve the production secret directory as Compose resolves it."""
 
-    configured = value if value is not None else os.environ.get("STARTUNNEL_SECRETS_DIR")
+    configured = os.environ.get("STARTUNNEL_SECRETS_DIR")
     path = Path(configured or "secrets")
     if path.is_absolute():
         return path

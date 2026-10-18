@@ -564,17 +564,8 @@ def rollback(
         ) from error
 
 
-def _absolute_input(path: Path, *, label: str) -> Path:
-    return _require_absolute(path, label=label)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--secrets-directory",
-        type=Path,
-        help="Override STARTUNNEL_SECRETS_DIR for this operation.",
-    )
     subparsers = parser.add_subparsers(dest="operation", required=True)
     prepare_parser = subparsers.add_parser(
         "prepare", help="Create two new mode-0600 password input files."
@@ -590,23 +581,21 @@ def main(argv: list[str] | None = None) -> int:
     rollback_parser.add_argument("--rollback-file", required=True, type=Path)
     args = parser.parse_args(argv)
 
-    directory = production_secret_directory(
-        str(args.secrets_directory) if args.secrets_directory is not None else None
-    )
+    directory = production_secret_directory()
     command = compose_command(edge=False)
     try:
         if args.operation == "prepare":
-            output_directory = _absolute_input(args.directory, label="Output directory")
+            output_directory = _require_absolute(args.directory, label="Output directory")
             admin_file, runtime_file = prepare_replacement_files(output_directory)
             print("Created two mode-0600 PostgreSQL password files. Values were not displayed.")
             print(f"Admin input: {admin_file}")
             print(f"Runtime input: {runtime_file}")
         elif args.operation == "rotate":
-            rollback_file = _absolute_input(args.rollback_file, label="Rollback file")
+            rollback_file = _require_absolute(args.rollback_file, label="Rollback file")
             rotate(
                 directory=directory,
-                new_admin_file=_absolute_input(args.new_admin_file, label="New admin file"),
-                new_runtime_file=_absolute_input(
+                new_admin_file=_require_absolute(args.new_admin_file, label="New admin file"),
+                new_runtime_file=_require_absolute(
                     args.new_runtime_file,
                     label="New runtime file",
                 ),
@@ -616,7 +605,7 @@ def main(argv: list[str] | None = None) -> int:
             print("PostgreSQL credentials rotated. The old credentials no longer authenticate.")
             print(f"Keep the mode-0600 rollback file secure until acceptance: {rollback_file}")
         else:
-            rollback_file = _absolute_input(args.rollback_file, label="Rollback file")
+            rollback_file = _require_absolute(args.rollback_file, label="Rollback file")
             rollback(directory=directory, rollback_file=rollback_file, command=command)
             print("PostgreSQL credentials rolled back. The replacement credentials are inactive.")
     except (OSError, RotationError, ValueError) as error:

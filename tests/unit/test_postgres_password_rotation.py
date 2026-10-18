@@ -116,12 +116,20 @@ def test_rotation_and_explicit_rollback_change_both_roles_and_secret_files(
     rollback_file = rollback_directory / "postgres.json"
     state, events, checks = _install_database_simulation(monkeypatch, old)
 
-    rotation.rotate(
-        directory=secret_directory,
-        new_admin_file=new_admin_file,
-        new_runtime_file=new_runtime_file,
-        rollback_file=rollback_file,
-        command=["safe-compose"],
+    monkeypatch.setenv("STARTUNNEL_SECRETS_DIR", str(secret_directory))
+    assert (
+        rotation.main(
+            [
+                "rotate",
+                "--new-admin-file",
+                str(new_admin_file),
+                "--new-runtime-file",
+                str(new_runtime_file),
+                "--rollback-file",
+                str(rollback_file),
+            ]
+        )
+        == 0
     )
 
     assert state["pair"] == new

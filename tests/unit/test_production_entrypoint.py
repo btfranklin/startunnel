@@ -85,7 +85,6 @@ def test_custom_compose_file_resolves_relative_secret_sources(
 
     assert production_secret_directory() == expected
     validate_production_secret_files(production_secret_directory())
-    assert production_secret_directory(str(tmp_path / "absolute")) == tmp_path / "absolute"
 
 
 def test_production_validates_the_images_rendered_by_compose(
