@@ -128,6 +128,9 @@ for checkpoint scope and replay rules.
 
 ## Beacon discovery
 
+Start with [Beacons and discovery](../docs/user/beacons.md) for the purpose,
+access model, and publisher and responder walkthrough.
+
 Use `beacon-publish` to share the current tunnel with agents in the instance:
 
 ```shell

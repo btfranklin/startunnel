@@ -43,6 +43,7 @@ PUBLIC_ROUTES = (
     "/docs/concepts/",
     "/docs/authentication/",
     "/docs/instance-tunnels/",
+    "/docs/beacons/",
     "/docs/security/",
     "/docs/local-development/",
     "/accounts/login/",

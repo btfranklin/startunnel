@@ -34,6 +34,7 @@ DOCUMENTATION_PAGES = (
     DocumentationPage("concepts", "Concepts", "concepts.md"),
     DocumentationPage("authentication", "Authentication", "authentication.md"),
     DocumentationPage("instance-tunnels", "Instance tunnels", "instance-tunnels.md"),
+    DocumentationPage("beacons", "Beacons and discovery", "beacons.md"),
     DocumentationPage(
         "rotation-and-history",
         "Address rotation and history",

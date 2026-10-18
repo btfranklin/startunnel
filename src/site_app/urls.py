@@ -41,6 +41,7 @@ urlpatterns = [
         {"slug": "rotation-and-history"},
         name="docs-rotation-and-history",
     ),
+    path("docs/beacons/", views.documentation, {"slug": "beacons"}, name="docs-beacons"),
     path("docs/delivery/", views.documentation, {"slug": "delivery"}, name="docs-delivery"),
     path("docs/errors/", views.documentation, {"slug": "errors"}, name="docs-errors"),
     path("docs/limits/", views.documentation, {"slug": "limits"}, name="docs-limits"),

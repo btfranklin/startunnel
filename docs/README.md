@@ -21,6 +21,7 @@ Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 | [Decisions](decisions.md) | Durable reasons for non-obvious technical choices |
 | [Implementation status](implementation-plan.md) | Implemented product behavior and delivery status |
 | [Admin quickstart](user/admin-quickstart.md) | Unattended product administration, private key files, receipts, and access recovery |
+| [Beacons and discovery](user/beacons.md) | When to use Beacons, the instance board, and the publisher and responder workflow |
 | [CLI guide](../cli/README.md) | Message and admin command groups, transport, and local command discovery |
 | [Public user documentation](user/index.md) | Public tutorials and user concepts |
 | [Example index](../examples/README.md) | Runnable example selection, setup, and use |
@@ -42,6 +43,7 @@ The fixed public routes are:
 - `/docs/concepts/`
 - `/docs/authentication/`
 - `/docs/instance-tunnels/`
+- `/docs/beacons/`
 - `/docs/rotation-and-history/`
 - `/docs/delivery/`
 - `/docs/errors/`
