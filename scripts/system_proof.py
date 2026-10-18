@@ -71,6 +71,8 @@ def _web_health_script(expected_status: int, *, path: str = "/health/ready") -> 
 
 def _runtime_contents_script() -> str:
     return """
+import hashlib
+import json
 import shutil
 import ssl
 import subprocess
@@ -95,6 +97,15 @@ for name in (
         assert asset.read(1), f'Empty collected asset: {name}'
 
 assert ssl.create_default_context().get_ca_certs(), 'Missing CA certificates'
+client = Path('/app/cli/star_tunnel.py')
+result = subprocess.run(
+    [sys.executable, str(client), 'version'],
+    check=True, capture_output=True, text=True,
+)
+build = json.loads(result.stdout)
+assert build['version'], 'Missing client version'
+assert 'source_revision' in build, 'Missing client source metadata'
+assert build['sha256'] == hashlib.sha256(client.read_bytes()).hexdigest()
 for command in ('pip', 'pip3', 'perfect-doc', 'cargo'):
     assert shutil.which(command) is None, f'Unexpected runtime tool: {command}'
 for interpreter in {sys.executable, str(Path(sys.base_prefix) / 'bin' / 'python3')}:

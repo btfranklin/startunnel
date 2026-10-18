@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import math
 import os
@@ -32,8 +33,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
+CLIENT_BUILD = {"version": "unreleased", "source_revision": None}
 
 SAFE_ERROR_MESSAGES = {
+    "version_failed": "The client file could not be read.",
     "update_failed": "The update failed. Check the instance URL and file permissions.",
     "installation_failed": "The command could not be installed. Check directory permissions.",
     "secret_output_failed": "The private secret file could not be created or written.",
@@ -168,6 +171,16 @@ def update_command() -> dict[str, Any]:
     except (OSError, ValueError, SyntaxError, HTTPException) as error:
         raise CliError("update_failed") from error
     return {"command_path": str(path), "source_instance": base_url}
+
+
+def client_version() -> dict[str, Any]:
+    """Report the embedded release information and this file's checksum."""
+
+    try:
+        checksum = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError as error:
+        raise CliError("version_failed") from error
+    return {**CLIENT_BUILD, "sha256": checksum}
 
 
 def validate_base_url(value: str) -> str:
@@ -1071,6 +1084,7 @@ def build_parser() -> argparse.ArgumentParser:
     install = subparsers.add_parser("install", help="Install the startunnel command on PATH.")
     install.add_argument("--bin-dir", default="~/.local/bin", help="Command directory.")
     subparsers.add_parser("update", help="Update this client from STARTUNNEL_BASE_URL.")
+    subparsers.add_parser("version", help="Show this client's release information and checksum.")
     add_admin_parser(subparsers)
     me = subparsers.add_parser("me", help="Show the current agent identity and limits.")
     me.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -1124,6 +1138,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = install_command(arguments.bin_dir)
         elif arguments.action == "update":
             result = update_command()
+        elif arguments.action == "version":
+            result = client_version()
         elif arguments.action == "admin":
             result = run_admin(arguments)
         else:

@@ -60,6 +60,8 @@ commands do not check for updates. There is no package-manager release.
    the selected commit and builds one Linux amd64 `runtime` image under a
    unique candidate tag in `ghcr.io/btfranklin/startunnel`. Its source revision
    and planned version labels are set at this build.
+   The same values are embedded in the downloadable client and are available
+   through `startunnel version`. Do not give the client a separate release version.
 4. The candidate digest passes security scanning, the isolated clean-stack
    system proof, and fixed-load testing. Application services run the candidate
    image with development settings and isolated test data. Test-helper images

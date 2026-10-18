@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
@@ -17,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
+from scripts.stamp_client import stamp_client
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLI = PROJECT_ROOT / "cli" / "star_tunnel.py"
@@ -582,6 +584,7 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
         "dataclasses",
         "email",
         "http",
+        "hashlib",
         "json",
         "math",
         "os",
@@ -604,6 +607,26 @@ def _load_cli_module() -> Any:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_client_version_is_offline_and_describes_the_running_file() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    result = subprocess.run(
+        [sys.executable, str(CLI), "version"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "version": "unreleased",
+        "source_revision": None,
+        "sha256": hashlib.sha256(CLI.read_bytes()).hexdigest(),
+    }
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Executable installation requires Linux or macOS.")
@@ -702,6 +725,11 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     updated = CLI.read_bytes().replace(
         b'USER_AGENT = "startunnel-agent-cli"', b'USER_AGENT = "startunnel-agent-cli-updated"'
     )
+    release_client = tmp_path / "release.py"
+    release_client.write_bytes(updated)
+    stamp_client(release_client, "v0.1.0", "a" * 40)
+    updated = release_client.read_bytes()
+    release_client.unlink()
     environment = {
         key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
     }
@@ -732,6 +760,15 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     assert scenario.requests[0]["path"] == "/downloads/star_tunnel.py"
     assert "Authorization" not in scenario.requests[0]["headers"]
     assert scenario.requests[1]["headers"]["User-Agent"] == "startunnel-agent-cli-updated"
+    version = subprocess.run(
+        [str(command), "version"], capture_output=True, text=True, env=environment, check=False
+    )
+    assert version.returncode == 0, version.stderr
+    assert json.loads(version.stdout) == {
+        "version": "v0.1.0",
+        "source_revision": "a" * 40,
+        "sha256": hashlib.sha256(updated).hexdigest(),
+    }
 
 
 @pytest.mark.parametrize(

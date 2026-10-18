@@ -145,6 +145,7 @@ application no longer stores a per-message content digest.
    python3 star_tunnel.py install
    export PATH="$HOME/.local/bin:$PATH"
    startunnel --help
+   startunnel version
    ```
 
    Use that instance's URL in `STARTUNNEL_BASE_URL`. Update copies in agent
@@ -154,6 +155,9 @@ application no longer stores a per-message content digest.
    After this first installation, later server upgrades need only
    `startunnel update` on each agent host, followed by `startunnel me` or
    `startunnel admin me`. The instance URL selects the update source.
+   Record `startunnel version` after the update with the server version and
+   source commit. Default custom builds can report `unreleased`; their file
+   checksum still identifies the exact client copy.
 7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.

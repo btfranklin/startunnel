@@ -27,3 +27,11 @@ After later server upgrades, run `startunnel update` on each agent host.
 `startunnel me` or `startunnel admin me`. The update does not change keys and
 does not run automatically. Failed downloads leave the installed client intact.
 The old v0.1.0 script needs the initial installation above; it has no updater.
+
+## Client identification
+
+`startunnel version` returns JSON with the client version, source revision, and
+file checksum. It works offline. Source and default custom image builds report
+`unreleased`; release candidates include the selected version and source commit.
+Check this output after client updates. `VERSION` and the published v0.1.0
+release are unchanged by this work.

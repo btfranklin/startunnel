@@ -38,6 +38,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ghcr.io/btfranklin/startunnel:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          build-args: |
+            STARTUNNEL_CLIENT_VERSION=${{ steps.version.outputs.version }}
+            STARTUNNEL_SOURCE_REVISION=${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/btfranklin/startunnel
             org.opencontainers.image.revision=${{ github.sha }}

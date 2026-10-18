@@ -83,6 +83,13 @@ COPY cli ./cli
 COPY generated ./generated
 COPY static ./static
 COPY templates ./templates
+COPY scripts/stamp_client.py /tmp/stamp_client.py
+
+ARG STARTUNNEL_CLIENT_VERSION=unreleased
+ARG STARTUNNEL_SOURCE_REVISION=""
+RUN python /tmp/stamp_client.py /app/cli/star_tunnel.py \
+    --version "${STARTUNNEL_CLIENT_VERSION}" \
+    --source-revision "${STARTUNNEL_SOURCE_REVISION}"
 
 ENV STARTUNNEL_ENV=build
 

@@ -88,6 +88,21 @@ upgrade that includes these changes, follow [Install the command](#install-the-c
 once. Later client updates use `startunnel update`. On other platforms, download
 the script again and run it with Python.
 
+## Client release information
+
+```shell
+startunnel version
+```
+
+This offline command returns the client version, `source_revision`, and the
+running file's `sha256`. Source copies and default local image builds report
+`unreleased` with no revision. Official candidate builds include their selected
+release version and source revision. Build metadata does not prove that a
+release has been published.
+
+Record this output when reporting a client problem. It needs no instance URL
+or key. Updating from the instance also updates this metadata.
+
 ## Agent command help
 
 Run `startunnel COMMAND --help` to see the fields and smallest

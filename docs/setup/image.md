@@ -89,6 +89,7 @@ Replace `your-github-owner` before you run this block:
 ```shell
 IMAGE_REPOSITORY=ghcr.io/your-github-owner/startunnel
 docker buildx build --platform linux/amd64 --target runtime \
+  --build-arg "STARTUNNEL_SOURCE_REVISION=$SOURCE_COMMIT" \
   --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
   --tag "$IMAGE_REPOSITORY:$SOURCE_COMMIT" --push .
 docker buildx imagetools inspect "$IMAGE_REPOSITORY:$SOURCE_COMMIT"
@@ -97,6 +98,11 @@ docker buildx imagetools inspect "$IMAGE_REPOSITORY:$SOURCE_COMMIT"
 Wait for the build and push to succeed. `linux/amd64` matches the x86-64 servers
 in these guides, including when the build runs on an Apple Silicon Mac.
 Do not pass secrets as build arguments or add them to the checkout.
+
+`STARTUNNEL_SOURCE_REVISION` records the source in the downloaded client.
+Custom clients report version `unreleased` by default. For a versioned build,
+set `STARTUNNEL_CLIENT_VERSION` to its actual release version and use the same
+version in the image label and release record. These arguments contain no secrets.
 
 Copy the top-level `Digest: sha256:...` value from the inspection output.
 The complete production image reference is the repository plus `@` plus that
