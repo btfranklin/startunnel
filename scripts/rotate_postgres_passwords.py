@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -328,12 +329,16 @@ def verify_transition(command: list[str], *, previous: PasswordPair, current: Pa
 
 def _atomic_replace_secret(path: Path, value: str) -> None:
     path = path.resolve()
+    current = path.stat()
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(temporary, flags, 0o600)
     try:
-        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            replacement = os.fstat(output.fileno())
+            if (replacement.st_uid, replacement.st_gid) != (current.st_uid, current.st_gid):
+                os.fchown(output.fileno(), current.st_uid, current.st_gid)
+            os.fchmod(output.fileno(), stat.S_IMODE(current.st_mode))
             output.write(value)
             output.write("\n")
             output.flush()

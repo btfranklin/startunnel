@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -328,7 +329,10 @@ def test_replacement_secret_files_accept_readonly_and_symlinked_inputs(tmp_path:
     )
 
 
-def test_replacement_keeps_managed_leaf_symlinks(tmp_path: Path) -> None:
+def test_replacement_keeps_managed_leaf_symlinks_and_target_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     secret_directory = tmp_path / "secrets"
     secret_directory.mkdir()
     target_directory = tmp_path / "managed"
@@ -337,8 +341,16 @@ def test_replacement_keeps_managed_leaf_symlinks(tmp_path: Path) -> None:
     runtime_target = target_directory / rotation.RUNTIME_SECRET_NAME
     _write_secret(admin_target, "old-admin")
     _write_secret(runtime_target, "old-runtime")
+    runtime_target.chmod(0o640)
+    old_admin = admin_target.stat()
+    old_runtime = runtime_target.stat()
     (secret_directory / rotation.ADMIN_SECRET_NAME).symlink_to(admin_target)
     (secret_directory / rotation.RUNTIME_SECRET_NAME).symlink_to(runtime_target)
+
+    def unexpected_chown(*args: object) -> None:
+        pytest.fail("Matching owner and group must not require chown.")
+
+    monkeypatch.setattr(os, "fchown", unexpected_chown)
 
     pair = PasswordPair(admin="A" * 40, runtime="B" * 40)
     rotation.replace_secret_pair(secret_directory, pair)
@@ -347,4 +359,30 @@ def test_replacement_keeps_managed_leaf_symlinks(tmp_path: Path) -> None:
     assert (secret_directory / rotation.RUNTIME_SECRET_NAME).is_symlink()
     assert rotation.read_password_pair(secret_directory) == pair
     assert admin_target.stat().st_mode & 0o777 == 0o600
-    assert runtime_target.stat().st_mode & 0o777 == 0o600
+    assert runtime_target.stat().st_mode & 0o777 == 0o640
+    assert (admin_target.stat().st_uid, admin_target.stat().st_gid) == (
+        old_admin.st_uid,
+        old_admin.st_gid,
+    )
+    assert (runtime_target.stat().st_uid, runtime_target.stat().st_gid) == (
+        old_runtime.st_uid,
+        old_runtime.st_gid,
+    )
+
+
+def test_replacement_metadata_failure_keeps_old_file_and_removes_temporary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / rotation.ADMIN_SECRET_NAME
+    _write_secret(target, "old-admin")
+
+    def fail_chmod(*args: object) -> None:
+        raise OSError("simulated metadata failure")
+
+    monkeypatch.setattr(os, "fchmod", fail_chmod)
+    with pytest.raises(OSError, match="simulated metadata failure"):
+        rotation._atomic_replace_secret(target, "new-admin")
+
+    assert target.read_text(encoding="utf-8") == "old-admin\n"
+    assert list(tmp_path.iterdir()) == [target]
