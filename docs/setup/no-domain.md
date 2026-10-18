@@ -56,8 +56,9 @@ The operator or setup agent must complete these changes:
    port 2019. Monitor renewal failures and expiry.
 
 In `production.env`, set `STARTUNNEL_DOMAIN` to the bare public IPv4 address,
-without a scheme or path. Despite its name, the production Compose file uses
-this value for the allowed host, HTTPS origin, base URL, and Caddy site address.
+without a scheme or path. The production Compose file uses this value by
+default for `ALLOWED_HOSTS`, the HTTPS origin and base URL, and the Caddy site
+address. Set `STARTUNNEL_ALLOWED_HOSTS` when Django must accept other hosts.
 Use `https://PUBLIC_IPV4` as the instance URL throughout installation and client
 setup. This public IPv4 setup uses HTTPS. An operator can select HTTP for a trusted container, VPN, or private network.
 

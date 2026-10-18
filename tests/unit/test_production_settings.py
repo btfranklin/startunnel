@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _environment() -> dict[str, str]:
     environment = os.environ.copy()
+    environment["DJANGO_SETTINGS_MODULE"] = "startunnel.settings.production"
     environment.pop("STARTUNNEL_SECURE_SSL_REDIRECT", None)
     environment.update(
         {
@@ -25,7 +26,7 @@ def _environment() -> dict[str, str]:
             "STARTUNNEL_METRICS_TOKEN": "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
             "DATABASE_URL": "postgresql://test:test@localhost/test",
             "STARTUNNEL_ALLOWED_HOSTS": "test.startunnel.test",
-            "STARTUNNEL_CSRF_TRUSTED_ORIGINS": "https://test.startunnel.test",
+            "STARTUNNEL_CSRF_TRUSTED_ORIGINS": "",
             "STARTUNNEL_BASE_URL": "https://test.startunnel.test",
         }
     )
@@ -152,7 +153,6 @@ def test_production_keeps_the_configured_postgresql_pool() -> None:
         "https://test.startunnel.test/not-an-origin",
         "https://test.startunnel.test?query=1",
         "https://test.startunnel.test#fragment",
-        "https://other.startunnel.test",
     ],
 )
 def test_production_requires_one_allowed_public_origin(base_url: str) -> None:
@@ -164,21 +164,20 @@ def test_production_requires_one_allowed_public_origin(base_url: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_url", "trusted_origin", "canonical_url"),
+    ("base_url", "canonical_url"),
     [
-        ("http://web:8000", "http://web:8000", "http://web:8000"),
-        ("http://192.168.1.20:8000", "http://192.168.1.20:8000", "http://192.168.1.20:8000"),
-        ("http://10.8.0.5", "http://10.8.0.5", "http://10.8.0.5"),
-        ("http://10.8.0.5:8080/", "http://10.8.0.5:8080/", "http://10.8.0.5:8080"),
+        ("http://web:8000", "http://web:8000"),
+        ("http://192.168.1.20:8000", "http://192.168.1.20:8000"),
+        ("http://10.8.0.5", "http://10.8.0.5"),
+        ("http://10.8.0.5:8080/", "http://10.8.0.5:8080"),
     ],
 )
 def test_production_http_origin_disables_https_only_settings(
-    base_url: str, trusted_origin: str, canonical_url: str
+    base_url: str, canonical_url: str
 ) -> None:
     environment = _environment()
     environment["STARTUNNEL_ALLOWED_HOSTS"] = base_url.split("//", 1)[1].split(":", 1)[0]
     environment["STARTUNNEL_BASE_URL"] = base_url
-    environment["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] = trusted_origin
     result = subprocess.run(
         [
             sys.executable,
@@ -222,12 +221,59 @@ def test_production_https_defaults_to_secure_settings() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_production_requires_public_origin_in_csrf_trust() -> None:
+def test_production_allows_django_host_wildcards() -> None:
     environment = _environment()
-    environment["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] = "https://other.startunnel.test"
-    result = _import_production(environment)
-    assert result.returncode != 0
-    assert "origin must be in STARTUNNEL_CSRF_TRUSTED_ORIGINS" in result.stderr
+    environment["STARTUNNEL_ALLOWED_HOSTS"] = ".example.test"
+    environment["STARTUNNEL_BASE_URL"] = "https://outside.example"
+    code = """
+import django
+django.setup()
+from django.core.exceptions import DisallowedHost
+from django.test import RequestFactory
+from unittest import TestCase
+factory = RequestFactory()
+assert factory.get("/", HTTP_HOST="example.test").get_host() == "example.test"
+assert factory.get("/", HTTP_HOST="api.example.test").get_host() == "api.example.test"
+request = factory.get("/", HTTP_HOST="outside.example")
+TestCase().assertRaises(DisallowedHost, request.get_host)
+"""
+    result = _import_production(environment, code)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("trusted_origins", "origin", "accepted"),
+    [
+        ("", "https://app.example.test", True),
+        ("https://*.trusted.example", "https://api.trusted.example", True),
+        ("https://*.trusted.example", "https://untrusted.example", False),
+    ],
+)
+def test_production_csrf_uses_django_origin_validation(
+    trusted_origins: str, origin: str, accepted: bool
+) -> None:
+    environment = _environment()
+    environment["STARTUNNEL_ALLOWED_HOSTS"] = ".example.test"
+    environment["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] = trusted_origins
+    result = _import_production(
+        environment,
+        "import django; django.setup(); "
+        "from django.conf import settings; "
+        "from django.http import HttpResponse; "
+        "from django.middleware.csrf import CsrfViewMiddleware, get_token; "
+        "from django.test import RequestFactory; "
+        "request = RequestFactory().post('/', secure=True, HTTP_HOST='app.example.test', "
+        + "HTTP_ORIGIN="
+        + repr(origin)
+        + "); request._dont_enforce_csrf_checks = False; "
+        "token = get_token(request); "
+        "request.COOKIES[settings.CSRF_COOKIE_NAME] = request.META['CSRF_COOKIE']; "
+        "request.META['HTTP_X_CSRFTOKEN'] = token; "
+        "response = CsrfViewMiddleware(lambda request: HttpResponse('ok')).process_view("
+        "request, lambda request: HttpResponse('ok'), (), {}); "
+        "assert (response is None) is " + repr(accepted),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_production_canonicalizes_public_origin_trailing_slash() -> None:

@@ -144,7 +144,7 @@ services:
         - CMD
         - /app/.venv/bin/python
         - -c
-        - import os, urllib.request; host = os.environ['STARTUNNEL_ALLOWED_HOSTS'].split(',')[0].strip(); request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3).read()
+        - from urllib.parse import urlparse; import os, urllib.request; base_url = os.environ.get('STARTUNNEL_BASE_URL', ''); host = urlparse(base_url).netloc or os.environ['STARTUNNEL_ALLOWED_HOSTS'].split(',')[0].strip(); request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3).read()
       interval: 60s
       start_interval: 2s
       timeout: 5s

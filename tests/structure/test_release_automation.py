@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -131,14 +132,34 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
 @pytest.mark.parametrize(
-    ("base_url", "expected"),
+    (
+        "base_url",
+        "allowed_hosts",
+        "trusted_origins",
+        "expected_url",
+        "expected_hosts",
+        "expected_trusted",
+    ),
     [
-        ("http://startunnel.internal:8000", "http://startunnel.internal:8000"),
-        (None, "https://startunnel.example.test"),
+        (
+            "http://startunnel.internal:8000",
+            "internal.example.test,.vpn.example.test",
+            "https://*.browser.example.test",
+            "http://startunnel.internal:8000",
+            "internal.example.test,.vpn.example.test",
+            "https://*.browser.example.test",
+        ),
+        (None, None, None, "https://startunnel.example.test", "startunnel.example.test", ""),
     ],
 )
 def test_production_compose_uses_operator_origin_or_https_default(
-    base_url: str | None, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str | None,
+    allowed_hosts: str | None,
+    trusted_origins: str | None,
+    expected_url: str,
+    expected_hosts: str,
+    expected_trusted: str,
 ) -> None:
     environment = os.environ.copy()
     environment.update(
@@ -146,8 +167,14 @@ def test_production_compose_uses_operator_origin_or_https_default(
         STARTUNNEL_APP_IMAGE="startunnel:test",
     )
     environment.pop("STARTUNNEL_BASE_URL", None)
+    environment.pop("STARTUNNEL_ALLOWED_HOSTS", None)
+    environment.pop("STARTUNNEL_CSRF_TRUSTED_ORIGINS", None)
     if base_url is not None:
         environment["STARTUNNEL_BASE_URL"] = base_url
+    if allowed_hosts is not None:
+        environment["STARTUNNEL_ALLOWED_HOSTS"] = allowed_hosts
+    if trusted_origins is not None:
+        environment["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] = trusted_origins
     result = subprocess.run(
         [
             "docker",
@@ -170,9 +197,27 @@ def test_production_compose_uses_operator_origin_or_https_default(
     )
     assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)["services"]
+    healthcheck = services["web"]["healthcheck"]["test"][-1]
+    captured_hosts: list[str | None] = []
+    monkeypatch.setenv("STARTUNNEL_BASE_URL", expected_url)
+    monkeypatch.setenv("STARTUNNEL_ALLOWED_HOSTS", expected_hosts)
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> Any:
+        captured_hosts.append(request.get_header("Host"))
+        return type("Response", (), {"read": lambda self: None})()
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        fake_urlopen,
+    )
+    exec(healthcheck, {})
+    expected_host = "startunnel.internal:8000" if base_url else "startunnel.example.test"
+    assert captured_hosts == [expected_host]
     for name in ("migrate", "web", "maintenance"):
-        assert services[name]["environment"]["STARTUNNEL_BASE_URL"] == expected
-        assert services[name]["environment"]["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] == expected
+        assert services[name]["environment"]["STARTUNNEL_BASE_URL"] == expected_url
+        assert services[name]["environment"]["STARTUNNEL_ALLOWED_HOSTS"] == expected_hosts
+        assert services[name]["environment"]["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] == expected_trusted
 
 
 def test_system_health_probe_outlasts_database_pool_acquisition() -> None:

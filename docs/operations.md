@@ -168,7 +168,14 @@ the secret files and every enabled image, then starts without a host build.
 default. For HTTP on a trusted container, VPN, or private network, set
 `STARTUNNEL_BASE_URL` to that origin and configure its private route and port.
 The HTTP or HTTPS scheme sets the default redirect, secure-cookie, and HSTS
-settings. The same origin must appear in `STARTUNNEL_CSRF_TRUSTED_ORIGINS`.
+settings. `STARTUNNEL_ALLOWED_HOSTS` defaults to `STARTUNNEL_DOMAIN`, but you
+can set it to a comma-separated list of Django host names or wildcard domains.
+`STARTUNNEL_BASE_URL` does not need to match this list. Django checks each
+request host against `ALLOWED_HOSTS`.
+
+`STARTUNNEL_CSRF_TRUSTED_ORIGINS` defaults to empty. Same-origin browser
+requests work without an extra entry. Add origins in Django's format only when
+the browser uses a different origin; Django checks those origins.
 
 `STARTUNNEL_MAX_REQUEST_BODY_BYTES` controls the application request-body limit.
 The default is 131,072 bytes; the operator can select up to 1,048,576 bytes.

@@ -50,7 +50,7 @@ if not ALLOWED_HOSTS:
     raise RuntimeError("STARTUNNEL_ALLOWED_HOSTS must contain at least one host.")
 CSRF_TRUSTED_ORIGINS = [
     origin.strip().rstrip("/")
-    for origin in env("STARTUNNEL_CSRF_TRUSTED_ORIGINS", required=True).split(",")  # noqa: F405
+    for origin in env("STARTUNNEL_CSRF_TRUSTED_ORIGINS", "").split(",")  # noqa: F405
     if origin.strip()
 ]
 STARTUNNEL_BASE_URL = env("STARTUNNEL_BASE_URL", required=True)  # noqa: F405
@@ -65,12 +65,7 @@ if (
     or public_url.fragment
 ):
     raise RuntimeError("STARTUNNEL_BASE_URL must be one complete HTTP or HTTPS origin.")
-public_host = public_url.hostname.lower()
-if public_host not in {host.lower() for host in ALLOWED_HOSTS}:
-    raise RuntimeError("STARTUNNEL_BASE_URL host must be in STARTUNNEL_ALLOWED_HOSTS.")
 public_origin = f"{public_url.scheme}://{public_url.netloc}"
-if public_origin not in CSRF_TRUSTED_ORIGINS:
-    raise RuntimeError("STARTUNNEL_BASE_URL origin must be in STARTUNNEL_CSRF_TRUSTED_ORIGINS.")
 STARTUNNEL_BASE_URL = public_origin
 
 DEBUG = False
