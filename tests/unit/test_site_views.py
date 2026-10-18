@@ -9,15 +9,18 @@ from uuid import uuid4
 
 import pytest
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.http import HttpRequest
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from agents.models import AgentCredential
 from agents.services import CredentialError
 from site_app.views import _authenticated_user
 from tunnels.errors import InvalidRequest, TunnelUnavailable
-from tunnels.services import create_tunnel
+from tunnels.models import Tunnel
+from tunnels.services import create_tunnel, rollover_cycle_as_operator
 
 pytestmark = pytest.mark.django_db
 
@@ -64,6 +67,93 @@ def test_cycle_history_escapes_message_session(
     assert page.status_code == 200
     assert b"Shared agent[&lt;img src=x onerror=alert(1)&gt;]" in page.content
     assert b"<img src=x onerror=alert(1)>" not in page.content
+
+
+def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
+    client: Client, user_factory: Any, credential_factory: Any
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    first = create_tunnel(
+        credential=credential,
+        idempotency_key="site-query-first",
+        root_content={"type": "text", "text": "First root"},
+    )
+    client.force_login(actor)
+    with CaptureQueriesContext(connection) as one_tunnel_queries:
+        first_page = client.get("/app/tunnels/")
+    assert first_page.status_code == 200
+    assert first_page.context["tunnel_rows"][0]["current_address"].address == first.address
+
+    created_at = timezone.now()
+    created_tunnels = []
+    for index in range(201):
+        created_tunnels.append(
+            create_tunnel(
+                credential=credential,
+                idempotency_key=f"site-query-many-{index}",
+                root_content={"type": "text", "text": f"Root {index}"},
+                label=f"Tunnel page {index}",
+            )
+        )
+    for index, created in enumerate(created_tunnels, start=1):
+        Tunnel.objects.filter(pk=created.tunnel.pk).update(
+            created_at=created_at + timedelta(seconds=index)
+        )
+    with CaptureQueriesContext(connection) as many_tunnel_queries:
+        many_page = client.get("/app/tunnels/")
+    assert many_page.status_code == 200
+    assert len(many_page.context["tunnel_rows"]) == 200
+    assert len(many_tunnel_queries) == len(one_tunnel_queries)
+    older_page = client.get("/app/tunnels/?page=2")
+    assert older_page.status_code == 200
+    assert b"Tunnel page 0" in older_page.content
+    assert b"Tunnel page 199" not in older_page.content
+
+
+def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
+    client: Client, user_factory: Any, credential_factory: Any
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    tunnels = [
+        create_tunnel(
+            credential=credential,
+            idempotency_key=f"site-history-{index}",
+            root_content={"type": "text", "text": f"Initial root {index}"},
+        )
+        for index in range(2)
+    ]
+    expected_sessions: dict[Any, list[str]] = {}
+    for tunnel_index, created in enumerate(tunnels):
+        current_cycle = created.cycle
+        sessions = []
+        for cycle_number in range(2, 13):
+            session = f"session-{tunnel_index}-{cycle_number}"
+            sessions.append(session)
+            result = rollover_cycle_as_operator(
+                actor=actor,
+                tunnel_id=created.tunnel.id,
+                expected_cycle_id=current_cycle.id,
+                expected_address_generation=1,
+                root_content={"type": "text", "text": f"Root {session}"},
+                root_session=session,
+            )
+            current_cycle = result.cycle
+        expected_sessions[created.tunnel.id] = sessions
+
+    client.force_login(actor)
+    response = client.get("/app/tunnels/")
+    assert response.status_code == 200
+    rows = {row["tunnel"].id: row for row in response.context["tunnel_rows"]}
+    assert set(rows) == {created.tunnel.id for created in tunnels}
+    for created in tunnels:
+        row = rows[created.tunnel.id]
+        assert row["cycle"].number == 12
+        assert [cycle.number for cycle in row["cycles"]] == list(range(12, 2, -1))
+        assert [cycle.root_message.session for cycle in row["cycles"]] == list(
+            reversed(expected_sessions[created.tunnel.id][1:])
+        )
 
 
 def test_create_agent_shows_key_once_and_revoke_is_instance_wide(

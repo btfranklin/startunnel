@@ -176,6 +176,17 @@
           {% endwith %}
         {% endfor %}
       </ul>
+      {% if tunnel_page.has_other_pages %}
+        <nav class="pagination" aria-label="Tunnel pages">
+          {% if tunnel_page.has_previous %}
+            <a href="?page={{ tunnel_page.previous_page_number }}" rel="prev">Previous</a>
+          {% endif %}
+          <span aria-current="page">Page {{ tunnel_page.number }} of {{ tunnel_page.paginator.num_pages }}</span>
+          {% if tunnel_page.has_next %}
+            <a href="?page={{ tunnel_page.next_page_number }}" rel="next">Next</a>
+          {% endif %}
+        </nav>
+      {% endif %}
     {% else %}
       <div class="empty-state">
         <h3>No tunnels yet.</h3>

@@ -11,6 +11,8 @@ from uuid import uuid4
 import pytest
 import time_machine
 from django.core.management import call_command
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
@@ -44,6 +46,58 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     assert listed[0]["address"] == rotated.address
     assert client.get(path, **headers).json()["address"] == rotated.address
     assert rotated.address not in str(list(AuditEvent.objects.values_list("metadata", flat=True)))
+
+
+def test_admin_tunnel_list_batches_address_and_active_cycle_reads(
+    client: Any, user_factory: Any, credential_factory: Any
+) -> None:
+    from tunnels.services import create_tunnel
+
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor)
+    expected = []
+    for index in range(12):
+        expected.append(
+            create_tunnel(
+                credential=credential,
+                idempotency_key=f"admin-list-{index}",
+                root_content={"type": "text", "text": f"Root {index}"},
+            )
+        )
+    _, secret = issue_admin_key(owner=actor, name="batch inspection")
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    client.get("/api/v1/admin/tunnels?limit=1", **headers)
+    with CaptureQueriesContext(connection) as one_tunnel_queries:
+        small = client.get("/api/v1/admin/tunnels?limit=1", **headers)
+    with CaptureQueriesContext(connection) as many_tunnel_queries:
+        many = client.get("/api/v1/admin/tunnels?limit=20", **headers)
+
+    assert small.status_code == many.status_code == 200
+    assert len(many.json()["items"]) == 12
+    assert len(many_tunnel_queries) == len(one_tunnel_queries)
+    resources = {item["address"]: item for item in many.json()["items"]}
+    for tunnel in expected:
+        item = resources[tunnel.address]
+        assert item["address_generation"] == 1
+        assert item["active_cycle_id"] == str(tunnel.cycle.id)
+
+
+def test_admin_key_list_uses_one_owner_read_for_each_page(client: Any, user_factory: Any) -> None:
+    actor = user_factory()
+    for index in range(8):
+        issue_admin_key(owner=actor, name=f"owner read {index}")
+    _, secret = issue_admin_key(owner=actor, name="owner read admin")
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    client.get("/api/v1/admin/keys?limit=1", **headers)
+    with CaptureQueriesContext(connection) as one_key_queries:
+        small = client.get("/api/v1/admin/keys?limit=1", **headers)
+    with CaptureQueriesContext(connection) as many_key_queries:
+        many = client.get("/api/v1/admin/keys?limit=20", **headers)
+
+    assert small.status_code == many.status_code == 200
+    assert len(many.json()["items"]) == 9
+    assert all(item["available"] for item in many.json()["items"])
+    assert len(many_key_queries) == len(one_key_queries)
 
 
 def test_admin_reports_configured_credential_limit(

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.db.models import Prefetch
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.cache import never_cache
@@ -294,27 +296,51 @@ def tunnels(request: HttpRequest) -> HttpResponse:
             messages.error(request, str(error))
         return redirect("site:tunnels")
 
-    tunnels = (
+    tunnel_page = Paginator(
         Tunnel.objects.select_related("creator")
         .exclude(state=Tunnel.State.RETIRED)
-        .order_by("-created_at", "id")[:200]
-    )
-    tunnel_rows = [
-        {
-            "tunnel": tunnel,
-            "is_active": tunnel.state == Tunnel.State.ACTIVE,
-            "cycle": tunnel.cycles.filter(state=Cycle.State.ACTIVE).first(),
-            "cycles": tunnel.cycles.select_related("root_message").order_by("-number")[:10],
-            "current_address": tunnel.addresses.filter(state=TunnelAddress.State.CURRENT).first(),
-            "retirement_confirmation": retirement_confirmation(tunnel),
-        }
-        for tunnel in tunnels
-    ]
+        .order_by("-created_at", "id")
+        .prefetch_related(
+            Prefetch(
+                "addresses",
+                queryset=TunnelAddress.objects.filter(state=TunnelAddress.State.CURRENT),
+                to_attr="current_addresses",
+            ),
+            Prefetch(
+                "cycles",
+                queryset=Cycle.objects.filter(state=Cycle.State.ACTIVE),
+                to_attr="active_cycles",
+            ),
+            Prefetch(
+                "cycles",
+                queryset=Cycle.objects.select_related("root_message").order_by("-number")[:10],
+                to_attr="history_cycles",
+            ),
+        ),
+        200,
+    ).get_page(request.GET.get("page"))
+    tunnel_rows = []
+    for tunnel in tunnel_page:
+        prefetched = cast(Any, tunnel)
+        active_cycles: list[Cycle] = prefetched.active_cycles
+        history_cycles: list[Cycle] = prefetched.history_cycles
+        current_addresses: list[TunnelAddress] = prefetched.current_addresses
+        tunnel_rows.append(
+            {
+                "tunnel": tunnel,
+                "is_active": tunnel.state == Tunnel.State.ACTIVE,
+                "cycle": active_cycles[0] if active_cycles else None,
+                "cycles": history_cycles,
+                "current_address": current_addresses[0] if current_addresses else None,
+                "retirement_confirmation": retirement_confirmation(tunnel),
+            }
+        )
     return render(
         request,
         "app/tunnels.html",
         {
             "tunnel_rows": tunnel_rows,
+            "tunnel_page": tunnel_page,
             "cycle_form": TunnelCycleForm(),
             "idempotency_key": str(uuid4()),
         },

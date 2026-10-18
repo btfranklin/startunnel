@@ -10,13 +10,14 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import DatabaseError, connection, transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from agents.models import AgentCredential
@@ -99,9 +100,9 @@ def agent_resource(key: AgentCredential) -> dict[str, Any]:
     }
 
 
-def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
-    address = TunnelAddress.objects.filter(tunnel=tunnel, state=TunnelAddress.State.CURRENT).first()
-    cycle = Cycle.objects.filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
+def _serialize_tunnel(
+    tunnel: Tunnel, address: TunnelAddress | None, cycle: Cycle | None
+) -> dict[str, Any]:
     return {
         "id": str(tunnel.id),
         "label": tunnel.label,
@@ -113,6 +114,21 @@ def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
         "active_cycle_id": str(cycle.id) if cycle else None,
         "retirement_confirmation": retirement_confirmation(tunnel),
     }
+
+
+def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
+    address = TunnelAddress.objects.filter(tunnel=tunnel, state=TunnelAddress.State.CURRENT).first()
+    cycle = Cycle.objects.filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
+    return _serialize_tunnel(tunnel, address, cycle)
+
+
+def _tunnel_list_resource(tunnel: Tunnel) -> dict[str, Any]:
+    prefetched = cast(Any, tunnel)
+    addresses: list[TunnelAddress] = prefetched.current_addresses
+    cycles: list[Cycle] = prefetched.active_cycles
+    return _serialize_tunnel(
+        tunnel, addresses[0] if addresses else None, cycles[0] if cycles else None
+    )
 
 
 def audit_resource(event: AuditEvent) -> dict[str, Any]:
@@ -193,6 +209,21 @@ def list_admin_resources(
         if kind == "audit"
         else models[kind].objects.all().order_by("id")
     )
+    if kind == "keys":
+        queryset = queryset.select_related("owner")
+    elif kind == "tunnels":
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                "addresses",
+                queryset=TunnelAddress.objects.filter(state=TunnelAddress.State.CURRENT),
+                to_attr="current_addresses",
+            ),
+            Prefetch(
+                "cycles",
+                queryset=Cycle.objects.filter(state=Cycle.State.ACTIVE),
+                to_attr="active_cycles",
+            ),
+        )
     filters = {
         "state": state,
         "admin_id": str(admin_id) if admin_id else None,
@@ -266,7 +297,7 @@ def list_admin_resources(
         "accounts": admin_resource,
         "keys": key_resource,
         "agents": agent_resource,
-        "tunnels": tunnel_resource,
+        "tunnels": _tunnel_list_resource,
         "audit": audit_resource,
         "cycles": lambda row: {
             "id": str(row.id),

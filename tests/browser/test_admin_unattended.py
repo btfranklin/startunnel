@@ -360,3 +360,65 @@ def test_admin_pages_and_key_controls_work_without_javascript(
         _database_shell(
             f"from accounts.models import User; User.objects.filter(username={username!r}).delete()"
         )
+
+
+def test_tunnel_board_paginates_without_javascript(browser: Browser) -> None:  # noqa: F811
+    username = "pages_" + uuid4().hex[:20]
+    password = "Pages-" + uuid4().hex + "-Pass9!"
+    credential_name = "page-" + uuid4().hex[:16]
+    label_prefix = "Browser page " + uuid4().hex[:12]
+    base_url = os.getenv("STARTUNNEL_BASE_URL", "http://web:8000").rstrip("/")
+    context = browser.new_context(java_script_enabled=False)
+    page = context.new_page()
+    try:
+        _database_shell(
+            f"""
+from datetime import timedelta
+from django.utils import timezone
+from accounts.models import User
+from agents.services import create_credential
+from tunnels.models import Tunnel
+from tunnels.services import create_tunnel
+actor = User.objects.create_user(username={username!r}, password={password!r})
+credential = create_credential(actor=actor, name={credential_name!r}).credential
+created_at = timezone.now()
+for index in range(201):
+    result = create_tunnel(
+        credential=credential,
+        idempotency_key={credential_name!r} + "-" + str(index),
+        root_content={{"type": "text", "text": "Pagination proof"}},
+        label={label_prefix!r} + str(index),
+    )
+    Tunnel.objects.filter(pk=result.tunnel.pk).update(
+        created_at=created_at + timedelta(seconds=index)
+    )
+"""
+        )
+        page.goto(base_url + "/accounts/login/")
+        page.get_by_label("Username", exact=True).fill(username)
+        page.get_by_label("Password", exact=True).fill(password)
+        page.get_by_role("button", name="Sign in", exact=True).click()
+        page.goto(base_url + "/app/tunnels/")
+        expect(page.get_by_text(label_prefix + "200", exact=True).first).to_be_visible()
+        expect(page.get_by_text(label_prefix + "0", exact=True)).to_have_count(0)
+        page.get_by_role("link", name="Next", exact=True).click()
+        expect(
+            page.get_by_role("navigation", name="Tunnel pages").locator('[aria-current="page"]')
+        ).to_contain_text("Page 2 of")
+        expect(page.get_by_text(label_prefix + "0", exact=True).first).to_be_visible()
+        expect(page.get_by_text(label_prefix + "200", exact=True)).to_have_count(0)
+        page.get_by_role("link", name="Previous", exact=True).click()
+        expect(page.get_by_text(label_prefix + "200", exact=True).first).to_be_visible()
+    finally:
+        context.close()
+        _database_shell(
+            f"""
+from agents.models import AgentCredential
+from tunnels.services import retire_tunnels_for_credentials
+credential = AgentCredential.objects.filter(name={credential_name!r}).first()
+if credential:
+    retire_tunnels_for_credentials(
+        credential_ids=[credential.id], reason="browser_test_cleanup"
+    )
+"""
+        )
