@@ -136,9 +136,12 @@ make a verified backup before applying the update. No conversion file is needed.
 
 The first release establishes a supported baseline; it does not convert the
 older migration graph. Use the installed image's source revision to determine
-eligibility with the preview above. A matching applied migration prefix and verified forward migration permit existing
-accounts, agent keys, messages, and secrets to remain in place. If they differ,
-stop and arrange an explicit data conversion tested against a restored copy.
+eligibility with the preview above. A matching applied migration prefix and
+verified forward migration preserve accounts, credentials, and deployment
+secrets. If the one-time tunnel reset is pending, it deletes existing tunnels
+and messages. Later upgrades preserve new tunnels after that reset has been
+applied. If the migration graphs differ, stop and arrange an explicit data
+conversion tested against a restored copy.
 The ManageAI installation's actual commit and database must be inspected before
 claiming its upgrade is compatible.
 
