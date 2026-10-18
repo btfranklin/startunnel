@@ -7,8 +7,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
 from cli.star_tunnel import CliError, build_parser
 from markdown_it import MarkdownIt
+from scripts import check_docs
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "cli/star_tunnel.py"
@@ -102,3 +104,22 @@ def test_markdown_link_checker_rejects_missing_cross_file_heading(tmp_path: Path
 
     assert result.returncode == 1
     assert "#missing-heading" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("route", ["/app/audit/", "/app/learn/", "/app/admins/access/"])
+def test_documentation_links_use_django_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    (tmp_path / "README.md").write_text(f"[Page]({route})\n")
+    assert check_docs.check_links() == []
+
+
+def test_documentation_links_report_unknown_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    (tmp_path / "README.md").write_text("[Page](/app/unknown-page/)\n")
+    failures = check_docs.check_links()
+    assert len(failures) == 1
+    assert "does not resolve in Django" in failures[0].detail

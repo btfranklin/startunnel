@@ -2,41 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+import django
+from django.urls import Resolver404, resolve
+
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = (ROOT / "examples").resolve()
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 EXAMPLE_INCLUDE = re.compile(r'\{\{\s*example\s+"([^"]+)"\s+region="([A-Za-z0-9_-]+)"\s*\}\}')
-PUBLIC_ROUTES = {
-    "/",
-    "/api/docs/",
-    "/api/v1/openapi.json",
-    "/docs/",
-    "/docs/agent-quickstart/",
-    "/docs/admin-quickstart/",
-    "/docs/tutorial/",
-    "/docs/concepts/",
-    "/docs/authentication/",
-    "/docs/instance-tunnels/",
-    "/docs/delivery/",
-    "/docs/errors/",
-    "/docs/limits/",
-    "/docs/security/",
-    "/docs/examples/",
-    "/docs/rotation-and-history/",
-    "/docs/local-development/",
-    "/downloads/star_tunnel.py",
-    "/app/",
-    "/app/account/",
-    "/app/admins/",
-    "/app/agents/",
-    "/app/tunnels/",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,16 +69,15 @@ def check_links() -> list[Failure]:
                 continue
             decoded_path = unquote(parsed.path)
             if decoded_path.startswith("/"):
-                if decoded_path not in PUBLIC_ROUTES:
+                try:
+                    resolve(decoded_path)
+                except Resolver404:
                     failures.append(
                         Failure(
                             path,
                             _line_number(text, match.start()),
-                            f"Public route {decoded_path!r} is not in the fixed route manifest.",
-                            (
-                                "Add the route to the Django documentation manifest and "
-                                "PUBLIC_ROUTES, or correct the link."
-                            ),
+                            f"Public route {decoded_path!r} does not resolve in Django.",
+                            ("Add the route to the Django URL configuration, or correct the link."),
                         )
                     )
                 continue
@@ -172,6 +150,9 @@ def check_example_includes() -> list[Failure]:
 
 
 def main() -> int:
+    sys.path.insert(0, str(ROOT / "src"))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "startunnel.settings.development")
+    django.setup()
     failures = [
         *check_links(),
         *check_example_includes(),
