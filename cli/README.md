@@ -116,9 +116,11 @@ Set `STARTUNNEL_ADMIN_KEY_FILE` to a private admin key file, or set
 credentials have separate authority. Keep all keys out of command arguments.
 
 Admin writes read JSON from standard input and require `--idempotency-key`.
-Commands that issue a key or rotate an address also require `--secret-output`
-with a new file path. The client writes the secret to that private file.
-Standard output contains the resource, operation receipt, and file path.
+Commands that issue a key require `--secret-output` with a new file path. For
+`accounts create`, this option is required only when `password` is omitted or
+empty. The client writes the key to that private file. For key creation, standard
+output contains the resource, operation receipt, and file path. Address rotation
+returns the current address in the resource.
 
 See the [admin quickstart](../docs/user/admin-quickstart.md) for bootstrap,
 account management, key rotation, audit verification, and retry examples.

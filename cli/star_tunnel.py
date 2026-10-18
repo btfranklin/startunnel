@@ -557,7 +557,7 @@ ADMIN_COMMANDS = {
     "tunnels rotate": (
         "POST",
         "tunnels/rotate",
-        True,
+        False,
         ("tunnel_id", "expected_address_generation"),
         (),
     ),
@@ -621,7 +621,12 @@ def admin_schema() -> dict[str, Any]:
                 "path": "/api/v1/admin/" + spec[1],
                 "stdin_json": spec[0] == "POST",
                 "idempotency_key_required": spec[0] == "POST",
-                "secret_output_required": spec[2],
+                "secret_output_required": spec[2] and name != "accounts create",
+                "secret_output_condition": (
+                    "Required when password is omitted or empty."
+                    if name == "accounts create"
+                    else None
+                ),
                 "required_fields": list(spec[3]),
                 "optional_fields": list(spec[4]),
             }
@@ -645,7 +650,7 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
     name = arguments.admin_command
     if name == "schema":
         return admin_schema()
-    method, suffix, secret_required, _required, optional = ADMIN_COMMANDS[name]
+    method, suffix, has_secret_output, _required, optional = ADMIN_COMMANDS[name]
     if "{id}" in suffix:
         try:
             resource_id = str(uuid.UUID(arguments.resource_id))
@@ -662,12 +667,17 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
             suffix += "?" + urlencode(query)
     body = read_input_object() if method == "POST" else None
     retry_key = require_idempotency_key(arguments.idempotency_key) if method == "POST" else None
+    secret_required = has_secret_output and name != "accounts create"
+    if name == "accounts create" and not (body or {}).get("password"):
+        secret_required = True
+        if not arguments.secret_output:
+            raise CliError("usage_error")
     transport = StarTunnelTransport(os.environ.get("STARTUNNEL_BASE_URL", ""), require_admin_key())
     descriptor = None
     complete = False
     reserved = False
     try:
-        if secret_required:
+        if secret_required and arguments.secret_output:
             descriptor = _reserve_secret_file(arguments.secret_output)
             reserved = True
         result = transport.request(
@@ -693,9 +703,7 @@ def run_admin(arguments: argparse.Namespace) -> dict[str, Any]:
             result["secret_output"] = arguments.secret_output
             complete = True
         elif secret_required:
-            # Password-backed account creation can return no API key.
-            if name != "accounts create":
-                raise CliError("invalid_response")
+            raise CliError("invalid_response")
         if name == "doctor" and not result.get("healthy", False):
             raise CliError("health_check_failed")
         return result
@@ -730,9 +738,15 @@ def add_admin_parser(subparsers: Any) -> None:
                 + ", ".join(spec[3])
                 + ". Optional fields: "
                 + (", ".join(spec[4]) or "none")
-                + ". "
-                "Write resource metadata and an operation receipt as JSON to stdout. "
-                "Save returned secrets in the required private output file."
+                + ". Write resource metadata and an operation receipt as JSON to stdout. "
+                + (
+                    "Save a returned key in the required private output file. "
+                    "Required only when password is omitted or empty."
+                    if name == "accounts create"
+                    else "Save returned keys in the required private output file."
+                    if spec[2]
+                    else ""
+                )
             )
             command.epilog = (
                 "Inspect before acting. Reuse the same body and idempotency key for a retry "
@@ -753,7 +767,15 @@ def add_admin_parser(subparsers: Any) -> None:
                 "--idempotency-key", required=True, help="Reuse for exact retries."
             )
         if spec[2]:
-            command.add_argument("--secret-output", required=True, help="New private secret file.")
+            command.add_argument(
+                "--secret-output",
+                required=name != "accounts create",
+                help=(
+                    "New private secret file; required when password is omitted or empty."
+                    if name == "accounts create"
+                    else "New private secret file."
+                ),
+            )
         if name.endswith((" list", " cycles")):
             command.add_argument("--limit", type=int)
             command.add_argument("--cursor")

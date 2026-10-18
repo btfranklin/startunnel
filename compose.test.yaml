@@ -112,6 +112,8 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      maintenance:
+        condition: service_healthy
     tmpfs:
       - /tmp:size=1g,mode=1777
     shm_size: 1gb

@@ -75,8 +75,10 @@ Tunnel lists and inspection include the stored current `address`. A retired
 tunnel has no current address and returns `null`. Use this field to recover an
 address without rotating it. Keep addresses out of URLs and logs.
 
-Mutations read JSON from stdin and require an idempotency key. A creation that
-returns a key, or an address rotation, also requires a private output file:
+Mutations read JSON from stdin and require an idempotency key. Key creation
+requires a private output file. For account creation, provide this file only
+when `password` is omitted or empty. Address rotation returns the new address
+in `resource.address`.
 
 ```shell
 python star_tunnel.py admin accounts create --idempotency-key create-second-admin --secret-output /private/path/second-admin.key <<'JSON'
@@ -85,6 +87,10 @@ JSON
 
 python star_tunnel.py admin agents create --idempotency-key issue-work-agent --secret-output /private/path/work-agent.key <<'JSON'
 {"name":"work-agent"}
+JSON
+
+python star_tunnel.py admin accounts create --idempotency-key create-browser-admin <<'JSON'
+{"username":"browser-admin","password":"a-strong-password"}
 JSON
 ```
 
@@ -190,8 +196,8 @@ Use those inspected values in the next write:
 
 `root_content` uses the message content shape, such as
 `{"type":"text","text":"Start the next review."}`. Start and rollover also
-accept `cycle_label` and `expires_in_seconds`. Address rotation requires
-`--secret-output` with a new private file. Retirement uses the exact
+accept `cycle_label` and `expires_in_seconds`. Address rotation returns the new
+address in `resource.address`. Retirement uses the exact
 `retirement_confirmation` value from inspection. Inspection does not reserve
 the resource. A conflict requires fresh inspection before a new operation.
 

@@ -156,22 +156,20 @@ def test_tunnel_actions_call_instance_operator_services(
     assert called and called[0]["actor"] == actor
 
 
-def test_tunnel_rotate_returns_one_time_address(
+def test_tunnel_rotate_returns_to_tunnel_board(
     client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client.force_login(user_factory())
     monkeypatch.setattr(
         "site_app.views.execute_admin_operation",
-        lambda **kwargs: {"secret": "safe-address", "resource": {"address_generation": 2}},
+        lambda **kwargs: {"resource": {"address": "safe-address", "address_generation": 2}},
     )
-    monkeypatch.setattr("site_app.views.display_address", lambda value: value)
     response = client.post(
         "/app/tunnels/",
         {"action": "rotate", "tunnel_id": uuid4(), "expected_address_generation": "1"},
     )
-    assert response.status_code == 200
-    assert response["Cache-Control"] == "no-store, private"
-    assert b"safe-address" in response.content
+    assert response.status_code == 302
+    assert response["Location"] == "/app/tunnels/"
 
 
 def test_tunnel_page_maps_bad_input_and_domain_errors(
@@ -200,23 +198,3 @@ def test_tunnel_page_maps_bad_input_and_domain_errors(
         ).status_code
         == 302
     )
-
-
-def test_private_response_helpers_do_not_cache(
-    rf: Any, monkeypatch: pytest.MonkeyPatch, user_factory: Any
-) -> None:
-    from site_app.admin_views import private_download
-    from site_app.views import _one_time_address_response
-
-    request = rf.get("/")
-    request.user = user_factory()
-    key_response = private_download("st_test", "key.txt")
-    address_response = _one_time_address_response(
-        request,
-        address="address",
-        display_value="display",
-        generation=1,
-        subject_name="Tunnel",
-        return_url="/app/tunnels/",
-    )
-    assert key_response["Cache-Control"] == address_response["Cache-Control"] == "no-store, private"

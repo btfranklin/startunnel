@@ -4,20 +4,20 @@
   <header class="app-header">
     <div>
       <h1>Tunnels</h1>
-      <p>An address appears only in the API creation response. This page cannot recover or copy it.</p>
+      <p>Current addresses appear in this list. Keep them out of URLs and logs.</p>
     </div>
   </header>
   <section class="list-panel" aria-labelledby="tunnel-list">
     <div class="panel-heading">
       <h2 id="tunnel-list">Recent metadata</h2>
-      <span>Addresses excluded</span>
+      <span>Current addresses shown</span>
     </div>
     {% if tunnel_rows %}
       <ul class="record-list record-list--tunnels">
         {% for row in tunnel_rows %}
           {% with tunnel=row.tunnel %}
             <li>
-              <div><strong>{{ tunnel.label|default:"Unlabelled tunnel" }}</strong><code>{{ tunnel.id }}</code><small>Created by {{ tunnel.creator.name }}{% if row.cycle %} · Cycle {{ row.cycle.number }} ends {{ row.cycle.expires_at|date:"j M Y, H:i T" }}{% elif tunnel.state == "dormant" %} · Ready for a new cycle{% endif %}</small></div>
+              <div><strong>{{ tunnel.label|default:"Unlabelled tunnel" }}</strong><code>{{ tunnel.id }}</code>{% if row.current_address %}<code class="tunnel-address">{{ row.current_address.address }}</code>{% endif %}<small>Created by {{ tunnel.creator.name }}{% if row.cycle %} · Cycle {{ row.cycle.number }} ends {{ row.cycle.expires_at|date:"j M Y, H:i T" }}{% elif tunnel.state == "dormant" %} · Ready for a new cycle{% endif %}</small></div>
               {% if tunnel.state == "retired" %}
                 <span class="state state--muted">Retired</span>
               {% elif row.current_address %}
@@ -123,7 +123,7 @@
                   {% endif %}
                   <details>
                     <summary>Rotate address</summary>
-                    <p>The new address appears once. Store it before you leave the page.</p>
+                    <p>The old address stops resolving after rotation.</p>
                     <form method="post">
                       {% csrf_token %}
                       <input type="hidden" name="action" value="rotate">

@@ -178,12 +178,12 @@ paths. CLI `admin doctor` uses the status endpoint and interprets failed require
 checks as an exit failure; there is no separate doctor endpoint.
 
 Mutation results contain `resource` and `operation`, with receipt and audit-event
-IDs. A key issue or address rotation also returns `secret` to the authenticated
-caller. Direct API clients must save it privately. The CLI removes that field
-from stdout and writes the value only to `--secret-output`. Admin tunnel lists
-and inspection return the stored current `address`, or `null` when no current
-address exists. Admin inspection never returns stored raw keys. Keep addresses
-out of URLs and logs.
+IDs. Key issue results return `secret` to the authenticated caller. Direct API
+clients must save it privately. The CLI removes that field from stdout and
+writes the value only to `--secret-output`. Address rotation returns the new
+address in `resource.address`, as do admin tunnel lists and inspection. These
+responses return `null` when no current address exists. Admin inspection never
+returns stored raw keys. Keep addresses out of URLs and logs.
 
 Account, key, agent, tunnel, cycle, and audit lists return `items` and
 `next_cursor`. Keep the same filters when following a cursor. Admin operations

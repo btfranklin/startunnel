@@ -302,6 +302,18 @@ def _derived_secret(receipt: AdminOperation, kind: str) -> str:
 
 def _replay(receipt: AdminOperation) -> dict[str, Any]:
     response = dict(receipt.response)
+    if receipt.operation == "tunnels.rotate":
+        resource = response.get("resource", {})
+        address_row = TunnelAddress.objects.filter(
+            tunnel_id=resource.get("id"),
+            generation=resource.get("address_generation"),
+            state=TunnelAddress.State.CURRENT,
+            tunnel__state__in=["active", "dormant"],
+        ).first()
+        if address_row is None or address_row.address != resource.get("address"):
+            raise LifecycleConflict(
+                "This operation address is no longer available. Inspect the resource."
+            )
     if receipt.secret_kind:
         if receipt.secret_resource_id is None:
             raise LifecycleConflict("The operation resource is not available.")
@@ -315,15 +327,6 @@ def _replay(receipt: AdminOperation) -> dict[str, Any]:
             secret = _derived_secret(receipt, receipt.secret_kind)
             agent_row = AgentCredential.objects.filter(pk=receipt.secret_resource_id).first()
             available = agent_row is not None and agent_row.is_available
-        elif receipt.secret_kind == "address":
-            address_row = TunnelAddress.objects.filter(
-                pk=receipt.secret_resource_id,
-                state=TunnelAddress.State.CURRENT,
-                tunnel__state__in=["active", "dormant"],
-            ).first()
-            if address_row is not None:
-                secret = address_row.address
-                available = True
         if not available:
             raise LifecycleConflict(
                 "This operation secret is no longer available. Inspect the resource."
@@ -557,13 +560,10 @@ def _perform(
         else:
             start_cycle_as_operator(**arguments)
     elif operation == "tunnels.rotate":
-        rotated = rotate_address_as_operator(
+        rotate_address_as_operator(
             **common,
             expected_address_generation=int(data["expected_address_generation"]),
         )
-        row = TunnelAddress.objects.get(tunnel_id=tunnel_id, generation=rotated.generation)
-        receipt.secret_kind = "address"
-        receipt.secret_resource_id = row.id
     elif operation == "tunnels.retire":
         retire_tunnel_as_operator(
             **common,

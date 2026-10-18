@@ -270,8 +270,8 @@ def test_agent_key_is_one_time_and_tunnel_address_rotates(
             row = page.locator("li").filter(has_text=label)
             row.locator("summary").filter(has_text="Rotate address").click()
             row.get_by_role("button", name="Rotate address").click()
-            expect(page.get_by_role("heading", name="Copy the new tunnel address.")).to_be_visible()
-            new_address = page.locator("#one-time-tunnel-address").inner_text().strip()
+            expect(page.get_by_role("heading", name="Tunnels", exact=True)).to_be_visible()
+            new_address = row.locator(".tunnel-address").inner_text().strip()
             assert new_address != old_address
 
             old_read = client.post(
@@ -279,12 +279,12 @@ def test_agent_key_is_one_time_and_tunnel_address_rotates(
                 headers={"Authorization": f"Bearer {key}"},
                 json={"address": old_address},
             )
+            assert old_read.status_code == 404
             new_read = client.post(
                 "/api/v1/tree",
                 headers={"Authorization": f"Bearer {key}"},
                 json={"address": new_address},
             )
-            assert old_read.status_code == 404
             assert new_read.status_code == 200
     finally:
         page.close()

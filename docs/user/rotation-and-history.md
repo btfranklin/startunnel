@@ -3,9 +3,9 @@
 An administrator can rotate a tunnel address. The old address stops resolving. The new address points to the same tunnel and history. Rotation requires the expected address generation so two operators cannot silently overwrite each other.
 
 Use `admin tunnels get ID` to inspect the current generation and active cycle.
-`admin tunnels rotate` requires a new private output file. Share that file only
-through the approved private channel. Admin inspection does not disclose the
-current address.
+`admin tunnels rotate` returns the new address as `resource.address`. Exact
+retries return that address only while it remains current. Admin inspection
+also shows the current address.
 
 Retiring a tunnel stops all address access and future cycles. Use the
 `retirement_confirmation` value from inspection, the expected address

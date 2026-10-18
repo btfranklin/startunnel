@@ -91,7 +91,8 @@ It proved key-only bootstrap, the full unattended CLI administration sequence,
 message exchange, lifecycle controls, key replacement, revocation, audit and
 receipt verification, no-JavaScript key controls, and desktop and mobile layout.
 The browser password form also preserved its current session after a service
-operation. Screenshots contain metadata only.
+operation. Browser rows show current tunnel addresses. Screenshots from this lane
+use disposable browser-test data.
 
 Source implementation and local tests do not prove installed runtime. The
 hosted evidence above applies to its exact commit and image digest. These

@@ -37,6 +37,15 @@ def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPat
     result = cli.run_admin(arguments("schema"))
     assert result["openapi_path"] == "/api/v1/openapi.json"
     assert len(result["commands"]) == len(cli.ADMIN_COMMANDS)
+    account_create = next(
+        item for item in result["commands"] if item["command"] == "admin accounts create"
+    )
+    assert account_create["secret_output_required"] is False
+    assert account_create["secret_output_condition"] == (
+        "Required when password is omitted or empty."
+    )
+    rotated = next(item for item in result["commands"] if item["command"] == "admin tunnels rotate")
+    assert rotated["secret_output_required"] is False
     for command in result["commands"]:
         parsed = (
             arguments(*command["command"].split()[1:])
@@ -95,6 +104,63 @@ def test_secret_saved_privately_and_removed_from_result(
     assert filename.stat().st_mode & 0o777 == 0o600
     assert "secret" not in result
     assert result["secret_output"] == str(filename)
+
+
+@pytest.mark.parametrize("with_output_path", [False, True])
+def test_password_account_creation_needs_no_secret_file(
+    configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    with_output_path: bool,
+) -> None:
+    filename = tmp_path / "existing.key"
+    filename.write_text("keep this key file")
+    filename.chmod(0o400)
+    stdin(monkeypatch, {"username": "password-admin", "password": "valid-password"})
+    calls: list[Any] = []
+
+    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((args, kwargs))
+        return {"resource": {"id": "safe-id"}}
+
+    monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
+    values = ["accounts", "create", "--idempotency-key", "account-password"]
+    if with_output_path:
+        values.extend(("--secret-output", str(filename)))
+    result = cli.run_admin(arguments(*values))
+    assert result["resource"]["id"] == "safe-id"
+    assert len(calls) == 1
+    assert filename.read_text() == "keep this key file"
+
+
+def test_tunnel_rotation_returns_resource_address_without_secret_output(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stdin(
+        monkeypatch,
+        {"tunnel_id": "safe-tunnel-id", "expected_address_generation": 1},
+    )
+    monkeypatch.setattr(
+        cli.StarTunnelTransport,
+        "request",
+        lambda *args, **kwargs: {"resource": {"address": "safe-address"}},
+    )
+    result = cli.run_admin(arguments("tunnels", "rotate", "--idempotency-key", "rotate-address"))
+    assert result["resource"]["address"] == "safe-address"
+    assert "secret" not in result
+
+
+def test_key_account_creation_requires_secret_file_before_request(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stdin(monkeypatch, {"username": "key-admin"})
+    monkeypatch.setattr(
+        cli.StarTunnelTransport,
+        "request",
+        lambda *args, **kwargs: pytest.fail("Missing output path must fail before the request."),
+    )
+    with pytest.raises(cli.CliError, match="usage_error"):
+        cli.run_admin(arguments("accounts", "create", "--idempotency-key", "account-key"))
 
 
 def test_secret_output_accepts_symlinked_parent_and_keeps_new_file_private(

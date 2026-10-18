@@ -143,6 +143,15 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         assert (
             client.command("admin", "me", admin_key_file=second_file)["admin"]["id"] == second["id"]
         )
+        password_account = client.mutation(
+            "accounts",
+            "create",
+            {
+                "username": "password_" + uuid4().hex[:20],
+                "password": "Valid-password-7291!",
+            },
+        )
+        assert password_account["browser_access"] is True
         assert client.command("admin", "accounts", "get", second["id"])["active"] is True
 
         agent_file = tmp_path / "worker.key"
@@ -221,7 +230,6 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         assert rolled["active_cycle_id"] != started["active_cycle_id"]
         cycles = client.command("admin", "tunnels", "cycles", tunnel_id)
         assert len(cycles["items"]) == 3
-        rotated_address_file = tmp_path / "rotated.address"
         rotated = client.mutation(
             "tunnels",
             "rotate",
@@ -229,10 +237,12 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
                 "tunnel_id": tunnel_id,
                 "expected_address_generation": generation,
             },
-            secret_output=rotated_address_file,
         )
         assert rotated["address_generation"] == generation + 1
+        rotated_address = rotated["address"]
+        assert rotated_address
         inspected = client.command("admin", "tunnels", "get", tunnel_id)
+        assert rotated_address == inspected["address"]
         retired = client.mutation(
             "tunnels",
             "retire",

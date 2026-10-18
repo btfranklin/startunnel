@@ -68,9 +68,11 @@ The running instance's `/api/v1/openapi.json` owns typed request and response
 definitions. List results include a continuation cursor; keep filters unchanged
 when reading the next page. Settings are read-only diagnostics.
 Inspect state, submit a change with an idempotency key, and verify its operation
-receipt and audit event. Mutations read JSON on stdin. Key creation and address
-rotation require `--secret-output` with a new private file. Reuse the exact input
-and key for a lost-response retry within 24 hours. Inspect state after a conflict.
+receipt and audit event. Mutations read JSON on stdin. Key creation requires
+`--secret-output` with a new private file. Account creation needs this option
+only when `password` is omitted or empty. Address rotation returns the new
+address in `resource.address`. Reuse the exact input and key for a lost-response
+retry within 24 hours. Inspect state after a conflict.
 
 Keep admin and agent credentials separate. An admin key cannot exchange messages.
 Use an issued agent credential with the existing message commands. Keep ordinary

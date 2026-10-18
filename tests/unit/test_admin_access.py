@@ -287,13 +287,27 @@ def test_tunnel_operations_replay_and_revoked_addresses(
     data = {"tunnel_id": identifier, "expected_address_generation": 1}
     rotated = run(actor, "tunnels.rotate", data, key)
     assert rotated["resource"]["address_generation"] == 2
-    assert rotated["resource"]["address"] == rotated["secret"]
+    assert rotated["resource"]["address"]
+    assert "secret" not in rotated
     assert run(actor, "tunnels.rotate", data, key) == rotated
+    run(
+        actor,
+        "tunnels.rotate",
+        {"tunnel_id": identifier, "expected_address_generation": 2},
+        str(uuid4()),
+    )
+    with pytest.raises(LifecycleConflict):
+        run(actor, "tunnels.rotate", data, key)
     assert list_admin_resources("cycles", actor=actor, tunnel_id=created.tunnel.id)["items"]
+    current = tunnel_resource(created.tunnel)
     run(
         actor,
         "tunnels.retire",
-        {"tunnel_id": identifier, "confirmation": "admin-cycle", "expected_address_generation": 2},
+        {
+            "tunnel_id": identifier,
+            "confirmation": "admin-cycle",
+            "expected_address_generation": current["address_generation"],
+        },
     )
     with pytest.raises(LifecycleConflict):
         run(actor, "tunnels.rotate", data, key)
