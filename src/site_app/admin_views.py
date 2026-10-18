@@ -12,7 +12,6 @@ from django.views.decorators.http import require_POST, require_safe
 
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import User
-from accounts.services import AccountError
 from tunnels.errors import TunnelDomainError
 
 
@@ -70,7 +69,7 @@ def admin_access(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Browser access was updated. Sign in again if required.")
         else:
             raise Http404
-    except (AccountError, TunnelDomainError, ValueError) as error:
+    except (TunnelDomainError, ValueError) as error:
         messages.error(request, str(error))
     return redirect("site:admins")
 
@@ -89,7 +88,7 @@ def audit(request: HttpRequest) -> HttpResponse:
             cursor=request.GET.get("cursor"),
             action=request.GET.get("action") or None,
         )
-    except (AccountError, TunnelDomainError, ValueError) as error:
+    except (TunnelDomainError, ValueError) as error:
         messages.error(request, str(error))
         events = {"items": [], "next_cursor": None}
     return render(

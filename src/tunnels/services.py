@@ -1576,13 +1576,6 @@ def close_cycle(
     )
 
 
-def get_tunnel(*, credential: AgentCredential, tunnel_id: UUID) -> Tunnel:
-    tunnel = Tunnel.objects.filter(pk=tunnel_id, creator=credential).first()
-    if not tunnel:
-        raise TunnelUnavailable()
-    return tunnel
-
-
 @transaction.atomic
 def close_cycle_as_operator(*, actor: User, tunnel_id: UUID, expected_cycle_id: UUID) -> None:
     if not User.objects.filter(pk=actor.pk, is_active=True).exists():

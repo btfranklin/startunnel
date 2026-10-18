@@ -11,8 +11,6 @@ from django.test import Client
 
 from accounts.forms import ThrottledAuthenticationForm
 from accounts.models import User
-from accounts.services import AccountError, create_admin, require_active_admin, set_admin_active
-from tunnels.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -33,37 +31,6 @@ def test_user_manager_rejects_invalid_creation() -> None:
         User.objects.create_superuser(username="root", is_staff=False)
     with pytest.raises(ValueError, match="superuser"):
         User.objects.create_superuser(username="root", is_superuser=False)
-
-
-def test_admins_can_create_and_manage_other_admins(user_factory: Any) -> None:
-    actor = user_factory(username="operator")
-    created = create_admin(actor=actor, username="second", password="long-safe-password-42")
-    assert created.check_password("long-safe-password-42")
-    assert AuditEvent.objects.filter(action="admin.created", target_id=created.id).exists()
-
-    assert set_admin_active(actor=actor, admin_id=created.id, active=False).is_active is False
-    assert AuditEvent.objects.filter(action="admin.deactivated", target_id=created.id).exists()
-    assert set_admin_active(actor=actor, admin_id=created.id, active=True).is_active is True
-    assert AuditEvent.objects.filter(action="admin.reactivated", target_id=created.id).exists()
-
-
-def test_account_services_reject_inactive_or_missing_accounts(user_factory: Any) -> None:
-    actor = user_factory()
-    actor.is_active = False
-    actor.save(update_fields=["is_active"])
-    with pytest.raises(AccountError, match="inactive"):
-        require_active_admin(actor)
-    with pytest.raises(AccountError, match="inactive"):
-        create_admin(actor=actor, username="new", password="long-safe-password-42")
-    with pytest.raises(AccountError, match="not available"):
-        set_admin_active(actor=actor, admin_id=actor.id, active=True)
-
-
-def test_last_active_admin_can_be_deactivated(user_factory: Any) -> None:
-    actor = user_factory()
-    assert not set_admin_active(actor=actor, admin_id=actor.id, active=False).is_active
-    with pytest.raises(AccountError, match="inactive"):
-        require_active_admin(User.objects.get(pk=actor.pk))
 
 
 def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any) -> None:

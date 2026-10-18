@@ -27,7 +27,6 @@ from tunnels.services import (
     close_cycle_as_operator,
     create_tunnel,
     get_message,
-    get_tunnel,
     list_replies,
     post_reply,
     read_tree,
@@ -307,9 +306,6 @@ def test_operator_can_close_start_and_roll_over_instance_cycle(
     credential, _ = credential_factory()
     actor = user_factory()
     created = _create(credential, "critical-operator-lifecycle")
-    assert get_tunnel(credential=credential, tunnel_id=created.tunnel.id) == created.tunnel
-    with pytest.raises(TunnelUnavailable):
-        get_tunnel(credential=credential, tunnel_id=uuid4())
     with pytest.raises(LifecycleConflict):
         close_cycle_as_operator(
             actor=actor,
