@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
@@ -1339,3 +1340,138 @@ def test_admin_cycle_help_lists_root_session(command: str) -> None:
 
     assert result.returncode == 0
     assert "root_session" in result.stdout
+
+
+def _admin_contract_path(path: str) -> str:
+    return "/".join("{id}" if part.startswith("{") else part for part in path.split("/"))
+
+
+def test_admin_commands_cover_all_openapi_operations() -> None:
+    cli = _load_cli_module()
+    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    operations = {
+        (method.upper(), _admin_contract_path(path))
+        for path, routes in document["paths"].items()
+        if path.startswith("/api/v1/admin/")
+        for method in routes
+        if method in {"get", "post"}
+    }
+    assert {
+        (command.method, "/api/v1/admin/" + command.suffix)
+        for command in cli.ADMIN_COMMANDS.values()
+    } == operations
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        name
+        for name, command in _load_cli_module().ADMIN_COMMANDS.items()
+        if command.method == "GET"
+    ],
+)
+def test_admin_get_commands_forward_all_openapi_query_fields(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = _load_cli_module()
+    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    command = cli.ADMIN_COMMANDS[name]
+    path = "/api/v1/admin/" + command.suffix
+    operation = next(
+        routes["get"]
+        for candidate, routes in document["paths"].items()
+        if _admin_contract_path(candidate) == path
+    )
+    resource_id = "00000000-0000-4000-8000-000000000001"
+    query_values = {
+        "limit": "7",
+        "cursor": "page+cursor/with=padding",
+        "state": "active",
+        "action": "keys.revoke",
+        "target_type": "tunnel",
+    }
+    expected_query = {
+        parameter["name"]: query_values.get(parameter["name"], resource_id)
+        for parameter in operation.get("parameters", [])
+        if parameter["in"] == "query"
+    }
+    arguments = ["admin", *name.split()]
+    if "{id}" in path:
+        arguments.append(resource_id)
+    for query_field, value in expected_query.items():
+        arguments.extend(("--" + query_field.replace("_", "-"), value))
+    monkeypatch.setenv("STARTUNNEL_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("STARTUNNEL_ADMIN_KEY", "sta_test-admin-key")
+    monkeypatch.delenv("STARTUNNEL_ADMIN_KEY_FILE", raising=False)
+    calls = []
+
+    def request(self: Any, method: str, request_path: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((self.agent_key, method, request_path, kwargs))
+        return {"healthy": True}
+
+    monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
+    assert cli.run_admin(cli.build_parser().parse_args(arguments)) == {"healthy": True}
+    assert len(calls) == 1
+    key, method, request_path, kwargs = calls[0]
+    assert key == "sta_test-admin-key"
+    assert method == "GET"
+    parsed = urlsplit(request_path)
+    assert parsed.path == path.replace("{id}", resource_id)
+    assert parse_qs(parsed.query) == {
+        query_field: [value] for query_field, value in expected_query.items()
+    }
+    assert kwargs["body"] is None
+    assert kwargs["idempotency_key"] is None
+    assert kwargs["retry"] is True
+
+
+@pytest.mark.parametrize("failed_path", ["/api/v1/tree/message", "/api/v1/cycles/close"])
+def test_tutorial_failure_closes_its_cycle_with_a_stable_retry_key(
+    failed_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = _load_cli_module()
+    monkeypatch.setenv("STARTUNNEL_BASE_URL", "http://127.0.0.1:8000")
+    monkeypatch.setenv("STARTUNNEL_SENDER_KEY", "st_sender-test-key")
+    monkeypatch.setenv("STARTUNNEL_RECEIVER_KEY", "st_receiver-test-key")
+    failure = cli.CliError("connection_failed")
+    calls = []
+    responses: dict[str, dict[str, Any]] = {
+        "/api/v1/tunnels": {
+            "tunnel": {"address": "synthetic-address"},
+            "cycle": {"id": "cycle-id", "root": {"id": "root-id"}},
+        },
+        "/api/v1/tree": {"nodes": [{"id": "root-id"}]},
+        "/api/v1/messages": {"message": {"id": "reply-id", "parent_id": "root-id"}},
+        "/api/v1/tree/message": {"message": {"id": "reply-id"}},
+        "/api/v1/context": {
+            "cycle_id": "cycle-id",
+            "items": [{"message": {"id": "root-id"}}, {"message": {"id": "reply-id"}}],
+        },
+        "/api/v1/cycles/close": {},
+    }
+    failed = False
+
+    def request(self: Any, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        nonlocal failed
+        calls.append({"key": self.agent_key, "method": method, "path": path, **kwargs})
+        if path == failed_path and not failed:
+            failed = True
+            raise failure
+        if path == "/api/v1/me":
+            return {"agent": {"id": self.agent_key}}
+        return responses[path]
+
+    monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
+    with pytest.raises(cli.CliError) as raised:
+        cli.run_tutorial()
+    assert raised.value is failure
+    closes = [call for call in calls if call["path"] == "/api/v1/cycles/close"]
+    assert len(closes) == (2 if failed_path == "/api/v1/cycles/close" else 1)
+    assert calls[-1] == closes[-1]
+    for close in closes:
+        assert close["key"] == "st_sender-test-key"
+        assert close["method"] == "POST"
+        assert close["body"] == {"address": "synthetic-address", "expected_cycle_id": "cycle-id"}
+        assert close["expected"] == {204}
+        uuid.UUID(close["idempotency_key"])
+    assert len({close["idempotency_key"] for close in closes}) == 1

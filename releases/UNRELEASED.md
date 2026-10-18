@@ -93,3 +93,9 @@ shutdown error. A completed API write is not undone by an output failure.
 Local errors name known settings or argument fields in `error.field_errors`.
 Parser errors point to the relevant command's help. Diagnostics do not copy
 rejected values. Error codes and exit statuses are unchanged.
+
+## Client maintenance
+
+Agent commands use the shared transport timeout and their existing route entry
+directly. Tutorial response checks keep their type checks without unused labels.
+Contract and failure tests now cover admin query fields and tutorial cleanup.

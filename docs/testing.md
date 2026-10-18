@@ -30,6 +30,9 @@ External web links are not fetched. Run `pdm run linkbust --no-color` for a
 focused link check. Documentation tests parse CLI examples with the actual
 command-line parser and compare documented CLI environment names with the
 client source.
+CLI contract tests compare agent and admin operations with OpenAPI, including
+admin query fields. Tutorial failure tests check cycle cleanup and reuse of the
+close idempotency key after an uncertain result.
 
 ## Documentation structure
 

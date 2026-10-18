@@ -735,12 +735,6 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
     )
 
 
-def route_path(action: str) -> str:
-    """Map one high-level action to its public API route."""
-
-    return "/api/v1" + ROUTES[action][1]
-
-
 def agent_schema(command: str | None = None) -> dict[str, Any]:
     """Describe agent API commands without a connection or credential."""
 
@@ -782,20 +776,14 @@ def run_action(arguments: argparse.Namespace) -> dict[str, Any]:
     body = read_input_object()
     if arguments.action in {"wait", "beacon-wait"}:
         body.setdefault("wait_seconds", 20)
-    method, _suffix, expected = ROUTES[arguments.action]
+    method, suffix, expected = ROUTES[arguments.action]
     idempotency_key = getattr(arguments, "idempotency_key", None)
-    timeout = REQUEST_TIMEOUT_SECONDS
-    if arguments.action in {"wait", "beacon-wait"}:
-        wait_seconds = body.get("wait_seconds")
-        if isinstance(wait_seconds, int) and not isinstance(wait_seconds, bool):
-            timeout = max(REQUEST_TIMEOUT_SECONDS, min(wait_seconds, 20) + 10)
     return transport.request(
         method,
-        route_path(arguments.action),
+        "/api/v1" + suffix,
         body=body,
         idempotency_key=idempotency_key,
         expected=expected,
-        timeout=timeout,
     )
 
 
@@ -1098,22 +1086,19 @@ def add_admin_parser(subparsers: Any) -> None:
                 command.add_argument("--" + field.replace("_", "-"), dest="filter_" + field)
 
 
-def _object(value: Any, name: str) -> dict[str, Any]:
-    del name
+def _object(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CliError("invalid_response")
     return value
 
 
-def _string(value: Any, name: str) -> str:
-    del name
+def _string(value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise CliError("invalid_response")
     return value
 
 
-def _items(value: Any, name: str) -> Sequence[Any]:
-    del name
+def _items(value: Any) -> Sequence[Any]:
     if not isinstance(value, list):
         raise CliError("invalid_response")
     return value
@@ -1134,10 +1119,10 @@ def run_tutorial() -> dict[str, Any]:
         sender_identity = sender.request("GET", "/api/v1/me", expected={200})
         checks.append("sender_identity")
         receiver_identity = receiver.request("GET", "/api/v1/me", expected={200})
-        sender_agent = _object(sender_identity.get("agent"), "sender agent")
-        receiver_agent = _object(receiver_identity.get("agent"), "receiver agent")
-        sender_id = _string(sender_agent.get("id"), "sender ID")
-        receiver_id = _string(receiver_agent.get("id"), "receiver ID")
+        sender_agent = _object(sender_identity.get("agent"))
+        receiver_agent = _object(receiver_identity.get("agent"))
+        sender_id = _string(sender_agent.get("id"))
+        receiver_id = _string(receiver_agent.get("id"))
         if sender_id == receiver_id:
             raise CliError("configuration_error")
         checks.append("receiver_identity")
@@ -1163,13 +1148,13 @@ def run_tutorial() -> dict[str, Any]:
             idempotency_key=str(uuid.uuid4()),
             expected={201},
         )
-        tunnel = _object(created.get("tunnel"), "tunnel")
-        cycle = _object(created.get("cycle"), "cycle")
-        root = _object(cycle.get("root"), "root")
-        address = _string(tunnel.get("address"), "address")
-        display_address = _string(tunnel.get("display_address", address), "display address")
-        cycle_id = _string(cycle.get("id"), "cycle ID")
-        root_id = _string(root.get("id"), "root ID")
+        tunnel = _object(created.get("tunnel"))
+        cycle = _object(created.get("cycle"))
+        root = _object(cycle.get("root"))
+        address = _string(tunnel.get("address"))
+        display_address = _string(tunnel.get("display_address", address))
+        cycle_id = _string(cycle.get("id"))
+        root_id = _string(root.get("id"))
         checks.append("root_created")
 
         tree = receiver.request(
@@ -1178,8 +1163,8 @@ def run_tutorial() -> dict[str, Any]:
             body={"address": address, "cycle_id": cycle_id},
             expected={200},
         )
-        nodes = _items(tree.get("nodes"), "tree nodes")
-        if len(nodes) != 1 or _object(nodes[0], "root node").get("id") != root_id:
+        nodes = _items(tree.get("nodes"))
+        if len(nodes) != 1 or _object(nodes[0]).get("id") != root_id:
             raise CliError("invalid_response")
         checks.append("root_read")
 
@@ -1199,8 +1184,8 @@ def run_tutorial() -> dict[str, Any]:
             idempotency_key=str(uuid.uuid4()),
             expected={201},
         )
-        message = _object(posted.get("message"), "reply")
-        reply_id = _string(message.get("id"), "reply ID")
+        message = _object(posted.get("message"))
+        reply_id = _string(message.get("id"))
         if message.get("parent_id") != root_id:
             raise CliError("invalid_response")
         checks.append("reply_created")
@@ -1211,7 +1196,7 @@ def run_tutorial() -> dict[str, Any]:
             body={"address": address, "cycle_id": cycle_id, "message_id": reply_id},
             expected={200},
         )
-        if _object(exact.get("message"), "message").get("id") != reply_id:
+        if _object(exact.get("message")).get("id") != reply_id:
             raise CliError("invalid_response")
         checks.append("reply_read")
 
@@ -1227,10 +1212,9 @@ def run_tutorial() -> dict[str, Any]:
             },
             expected={200},
         )
-        context_items = _items(context.get("items"), "context")
+        context_items = _items(context.get("items"))
         context_message_ids = {
-            _object(_object(item, "context item").get("message"), "context message").get("id")
-            for item in context_items
+            _object(_object(item).get("message")).get("id") for item in context_items
         }
         if context.get("cycle_id") != cycle_id or not {root_id, reply_id}.issubset(
             context_message_ids
@@ -1254,12 +1238,9 @@ def run_tutorial() -> dict[str, Any]:
             body={"address": address, "cycle_id": cycle_id},
             expected={200},
         )
-        retained_nodes = _items(retained.get("nodes"), "retained tree")
+        retained_nodes = _items(retained.get("nodes"))
         retained_by_id = {
-            _string(_object(node, "retained node").get("id"), "retained message ID"): _object(
-                node, "retained node"
-            )
-            for node in retained_nodes
+            _string(_object(node).get("id")): _object(node) for node in retained_nodes
         }
         if (
             set(retained_by_id) != {root_id, reply_id}
