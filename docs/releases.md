@@ -5,8 +5,7 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
-The next planned release is v0.2.0. It is not released. Its changes are recorded
-in [unreleased notes](../releases/UNRELEASED.md). Published v0.1.0 keeps its own
+The next planned release is v0.2.0. It is not released. Published v0.1.0 keeps its own
 [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
 and release records. Do not use its `release.json` to deploy pending changes.
 Use current source for a local trial or a
@@ -30,7 +29,8 @@ installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 
 When preparing v0.2.0, set the root `VERSION` file to `0.2.0`. Create
-`releases/v0.2.0.json` and reviewed `releases/v0.2.0.md` from the unreleased notes. For each later release, update the same files for that
+`releases/v0.2.0.json` and reviewed `releases/v0.2.0.md`. For each later release,
+update the same files for that
 version. The specification names every supported predecessor in
 `supported_from`, configuration changes, database requirements, and rollback
 steps. Preserve applied migration files; add forward migrations. Before listing

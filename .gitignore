@@ -54,4 +54,5 @@ generated/live-agent-results/
 # Local release records and private upgrade recovery configuration
 /release.json
 /release-notes.md
+/releases/UNRELEASED.md
 /production.env*
