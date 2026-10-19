@@ -227,11 +227,12 @@ def test_address_rotation_retries_one_database_collision(
     generated_tokens = iter((parse_address(created.address), b"\xff" * 16))
     monkeypatch.setattr("tunnels.cycles.secrets.token_bytes", lambda size: next(generated_tokens))
 
-    rotated = rotate_address_as_admin(
+    rotate_address_as_admin(
         actor=credential.created_by,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
     )
+    rotated = created.tunnel.addresses.get(state="current")
 
     assert rotated.address != created.address
     assert rotated.generation == 2

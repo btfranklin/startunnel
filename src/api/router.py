@@ -50,7 +50,7 @@ from tunnels.messages import (
 )
 from tunnels.models import Cycle, Message, Tunnel, TunnelEvent
 from tunnels.participants import list_participants
-from tunnels.search import SearchHit, search_messages
+from tunnels.search import SearchHit, search_hit_payload, search_messages
 
 from .admin import router as admin_router
 from .auth import activity_bearer, agent_bearer
@@ -376,6 +376,8 @@ def _cycle_directory_item(cycle: Cycle) -> CycleDirectoryItemResponse:
     response={200: MeResponse, **AUTHENTICATED_ERRORS},
 )
 def me(request: HttpRequest) -> MeResponse:
+    """Read the authenticated agent identity, instance limits, and usage."""
+
     credential = _credential(request)
     limits = instance_limits.effective_limits()
     status = agent_tunnel_status(credential=credential)
@@ -417,6 +419,8 @@ def create_tunnel_route(
     payload: CreateTunnelRequest,
     idempotency_key: IdempotencyKey,
 ) -> Status[CreateTunnelResponse]:
+    """Create a stable tunnel with its first cycle and immutable root message."""
+
     credential = _credential(request)
     root = payload.cycle.root
     created = create_tunnel(
@@ -449,6 +453,8 @@ def post_tunnel_reply(
     payload: PostReplyRequest,
     idempotency_key: IdempotencyKey,
 ) -> Status[PostReplyResponse]:
+    """Append an immutable reply to the active cycle. Exact retries return the original result."""
+
     credential = _credential(request)
     posted = post_reply(
         credential=credential,
@@ -548,6 +554,8 @@ def _tree_response(page: TreePage) -> TreeResponse:
     response={200: TreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def read_tunnel_tree(request: HttpRequest, payload: TreeRequest) -> TreeResponse:
+    """Read a preorder page within a fixed cycle snapshot."""
+
     credential = _credential(request)
     cursor = _page_cursor_values(payload)
     page = read_tree(
@@ -575,6 +583,8 @@ def read_tunnel_tree(request: HttpRequest, payload: TreeRequest) -> TreeResponse
     },
 )
 def read_tunnel_message(request: HttpRequest, payload: MessageReadRequest) -> MessageReadResponse:
+    """Read one retained message through the current tunnel address."""
+
     credential = _credential(request)
     message = get_message(
         credential=credential,
@@ -594,6 +604,8 @@ def read_tunnel_message(request: HttpRequest, payload: MessageReadRequest) -> Me
     response={200: BranchResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def read_tunnel_branch(request: HttpRequest, payload: BranchRequest) -> BranchResponse:
+    """Read the root-to-focus ancestry of one retained message."""
+
     credential = _credential(request)
     messages = get_branch(
         credential=credential,
@@ -640,6 +652,8 @@ def _reply_page_response(page: ReplyPage) -> RepliesResponse:
     response={200: RepliesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def read_tunnel_replies(request: HttpRequest, payload: RepliesRequest) -> RepliesResponse:
+    """Read direct replies within a fixed cycle snapshot."""
+
     credential = _credential(request)
     cursor = _page_cursor_values(payload)
     page = list_replies(
@@ -695,6 +709,8 @@ def _subtree_response(page: SubtreePage, *, max_depth: int) -> SubtreeResponse:
     response={200: SubtreeResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def read_tunnel_subtree(request: HttpRequest, payload: SubtreeRequest) -> SubtreeResponse:
+    """Read a bounded preorder page below one message."""
+
     credential = _credential(request)
     cursor = _page_cursor_values(payload)
     page = get_subtree(
@@ -746,6 +762,8 @@ def _leaves_response(page: LeafPage) -> LeavesResponse:
     response={200: LeavesResponse, 400: ErrorResponse, 404: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def read_tunnel_leaves(request: HttpRequest, payload: LeavesRequest) -> LeavesResponse:
+    """Read leaf messages within a fixed cycle snapshot."""
+
     credential = _credential(request)
     cursor = _page_cursor_values(payload)
     page = list_leaves(
@@ -786,6 +804,8 @@ def _activity_event(event: TunnelEvent) -> ActivityEventResponse:
     },
 )
 async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -> ActivityResponse:
+    """Read or wait for committed events without acknowledging them."""
+
     credential = _credential(request)
     expected_tunnel_id: UUID | None = None
     after_position: int | None = None
@@ -823,6 +843,8 @@ async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -
 def commit_tunnel_checkpoint(
     request: HttpRequest, payload: CheckpointRequest
 ) -> CheckpointResponse:
+    """Advance this credential's saved activity position. Earlier positions are rejected."""
+
     credential = _credential(request)
     expected_tunnel_id, position = _activity_cursor_values(payload.cursor)
     checkpoint, advanced = commit_checkpoint(
@@ -879,6 +901,8 @@ def _context_cursor_values(payload: ContextRequest) -> ContextCursor:
     },
 )
 def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> ContextResponse:
+    """Build bounded context around a focus message and optional references."""
+
     credential = _credential(request)
     cursor = _context_cursor_values(payload)
     view = get_context(
@@ -926,6 +950,7 @@ def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> Contex
 
 @router.post(
     "/enter",
+    summary="Enter tunnel",
     response={
         200: EnterResponse,
         400: ErrorResponse,
@@ -935,6 +960,8 @@ def read_tunnel_context(request: HttpRequest, payload: ContextRequest) -> Contex
     },
 )
 def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> EnterResponse:
+    """Read current status, root, recent replies, and continuation cursors from one snapshot."""
+
     credential = _credential(request)
     view = enter_tunnel(
         credential=credential,
@@ -946,22 +973,7 @@ def enter_tunnel_room(request: HttpRequest, payload: EnterRequest) -> EnterRespo
 
 
 def _search_hit_response(hit: SearchHit) -> SearchHitResponse:
-    message = hit.message
-    return SearchHitResponse(
-        message_id=message.id,
-        cycle_id=message.cycle_id,
-        parent_id=message.parent_id,
-        sender=SenderResponse(
-            id=message.sender_id, name=message.sender_name, session=message.session
-        ),
-        mention_ids=sorted((item.credential_id for item in message.mentions.all()), key=str),
-        correlation_id=message.correlation_id or None,
-        sequence=message.sequence,
-        depth=message.depth,
-        created_at=message.created_at,
-        rank=hit.rank,
-        snippet=hit.snippet,
-    )
+    return SearchHitResponse.model_validate(search_hit_payload(hit))
 
 
 def _search_filter_digest(payload: SearchRequest) -> str:
@@ -1012,6 +1024,8 @@ def _search_page_values(payload: SearchRequest) -> SearchCursor:
     },
 )
 def search_tunnel_messages(request: HttpRequest, payload: SearchRequest) -> SearchResponse:
+    """Search one retained cycle with fixed snapshot and response bounds."""
+
     credential = _credential(request)
     cursor = _search_page_values(payload)
     page = search_messages(
@@ -1090,6 +1104,8 @@ def _participant_page_values(payload: ParticipantsRequest) -> ParticipantCursor:
 def list_tunnel_participants(
     request: HttpRequest, payload: ParticipantsRequest
 ) -> ParticipantsResponse:
+    """Read message participants and their credential-scoped checkpoint progress."""
+
     credential = _credential(request)
     cursor = _participant_page_values(payload)
     page = list_participants(
@@ -1146,6 +1162,8 @@ def list_tunnel_participants(
     },
 )
 def tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> TunnelStatusResponse:
+    """Read the current address generation and effective tunnel lifecycle state."""
+
     credential = _credential(request)
     status = get_tunnel_status(
         credential=credential,
@@ -1177,6 +1195,8 @@ def tunnel_status(request: HttpRequest, payload: TunnelStatusRequest) -> TunnelS
     },
 )
 def list_tunnel_cycles(request: HttpRequest, payload: CycleListRequest) -> CycleListResponse:
+    """List cycles whose content is still readable."""
+
     snapshot_number: int | None = None
     before_number: int | None = None
     expected_tunnel_id: UUID | None = None
@@ -1229,6 +1249,8 @@ def start_tunnel_cycle(
     payload: StartCycleRequest,
     idempotency_key: IdempotencyKey,
 ) -> Status[StartedCycleResponse]:
+    """Start a cycle in a dormant or expired tunnel. The expected address generation must match."""
+
     credential = _credential(request)
     root = payload.cycle.root
     started = start_cycle(
@@ -1262,6 +1284,8 @@ def rollover_tunnel_cycle(
     payload: RolloverCycleRequest,
     idempotency_key: IdempotencyKey,
 ) -> Status[StartedCycleResponse]:
+    """Close the expected cycle and start its replacement in one transaction."""
+
     credential = _credential(request)
     root = payload.cycle.root
     started = rollover_cycle(
@@ -1295,6 +1319,8 @@ def close_tunnel_cycle(
     payload: CloseCycleRequest,
     idempotency_key: IdempotencyKey,
 ) -> HttpResponse:
+    """Close the expected cycle and preserve history until its deletion deadline."""
+
     credential = _credential(request)
     close_cycle(
         credential=credential,
@@ -1307,6 +1333,7 @@ def close_tunnel_cycle(
 
 @router.post(
     "/beacons",
+    summary="Publish Beacon",
     response={
         201: BeaconWriteResponse,
         400: ErrorResponse,
@@ -1320,6 +1347,8 @@ def light_beacon(
     payload: BeaconPublishRequest,
     idempotency_key: IdempotencyKey,
 ) -> Status[BeaconWriteResponse]:
+    """Publish the current cycle and share its address with all active agents."""
+
     data, replay = publish_beacon(
         credential=_credential(request),
         idempotency_key=idempotency_key,
@@ -1335,6 +1364,7 @@ def light_beacon(
 
 @router.post(
     "/beacons/withdraw",
+    summary="Withdraw Beacon",
     response={
         200: BeaconWriteResponse,
         400: ErrorResponse,
@@ -1348,6 +1378,8 @@ def dim_beacon(
     payload: BeaconWithdrawRequest,
     idempotency_key: IdempotencyKey,
 ) -> BeaconWriteResponse:
+    """Withdraw a Beacon. Agents that already obtained its address retain access."""
+
     data, replay = withdraw_beacon(
         credential=_credential(request),
         idempotency_key=idempotency_key,
@@ -1362,6 +1394,8 @@ def dim_beacon(
     response={200: BeaconBoardResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> BeaconBoardResponse:
+    """Read a bounded page of live Beacons and their current tunnel addresses."""
+
     page = read_board(
         credential=_credential(request),
         limit=payload.limit,
@@ -1382,6 +1416,8 @@ def beacon_board(request: HttpRequest, payload: BeaconBoardRequest) -> BeaconBoa
     response={200: BeaconWaitResponse, 400: ErrorResponse, **AUTHENTICATED_ERRORS},
 )
 async def wait_beacon_board(request: HttpRequest, payload: BeaconWaitRequest) -> BeaconWaitResponse:
+    """Wait for a board change or visibility deadline. Refresh the board after a change."""
+
     result = await wait_for_board(
         credential=_credential(request),
         after_cursor=payload.after_cursor,

@@ -152,7 +152,7 @@ pdm run python scripts/run_isolated_test_lane.py postgres
 Use isolated Compose projects for proof. Do not use a shared `startunnel` project.
 
 The aggregate check includes the offline Perfect Doc documentation check.
-After a Markdown change, also run `pdm run docs-structure`.
+Run `pdm run docs-structure` for a focused Markdown check.
 See [testing](docs/testing.md) for tool setup and focused checks.
 
 ## Documentation

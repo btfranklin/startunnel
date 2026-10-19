@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -260,9 +259,7 @@ def test_tree_message_and_reply_validation(credential_factory: Any) -> None:
         )
 
 
-def test_close_conflict_replay_race_and_inactive_noop(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_close_conflict_and_retry_do_not_duplicate_events(credential_factory: Any) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-close")
     with pytest.raises(LifecycleConflict):
@@ -272,22 +269,21 @@ def test_close_conflict_replay_race_and_inactive_noop(
             address=created.address,
             expected_cycle_id=uuid4(),
         )
-    monkeypatch.setattr("tunnels.cycles.find_idempotency_replay", lambda **kwargs: None)
-    monkeypatch.setattr(
-        "tunnels.cycles.begin_idempotency",
-        lambda **kwargs: SimpleNamespace(replay=True, record=SimpleNamespace()),
-    )
-    close_cycle(
+    arguments = dict(
         credential=credential,
-        idempotency_key="critical-close-race",
+        idempotency_key="critical-close-retry",
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    created.cycle.state = Cycle.State.CLOSED
+    close_cycle(**arguments)
+    close_cycle(**arguments)
+    created.cycle.refresh_from_db()
+    created.tunnel.refresh_from_db()
     initial = created.tunnel.next_event_position
     _close_locked_cycle(tunnel=created.tunnel, cycle=created.cycle, reason="test")
     created.tunnel.refresh_from_db()
     assert created.tunnel.next_event_position == initial
+    assert created.tunnel.events.filter(event_type="cycle_closed").count() == 1
 
 
 def test_cycle_readability_rejects_deleted_and_unknown_state() -> None:

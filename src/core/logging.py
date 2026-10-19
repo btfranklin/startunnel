@@ -34,6 +34,7 @@ class SafeJsonFormatter(logging.Formatter):
             "django.request",
             "django.server",
             "django.security",
+            "uvicorn.access",
         } or logger.startswith(("django.request.", "django.server.", "django.security."))
         message = "[REDACTED]" if raw_http or hasattr(record, "sql") else record.getMessage()
         event: dict[str, Any] = {

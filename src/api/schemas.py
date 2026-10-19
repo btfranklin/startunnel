@@ -87,7 +87,9 @@ class CreateTunnelRequest(PublicSchema):
 class SenderResponse(PublicSchema):
     id: UUID
     name: str
-    session: str | None
+    session: str | None = Field(
+        description="Self-declared display label; sender.id identifies the credential."
+    )
 
 
 class MentionResponse(PublicSchema):
@@ -158,17 +160,6 @@ class DirectoryCycleResponse(PublicSchema):
     content_bytes: int
 
 
-class TunnelMetadataResponse(PublicSchema):
-    id: UUID
-    label: str
-    state: Literal["active", "dormant", "retired"]
-    created_at: datetime
-    address: str | None = None
-    display_address: str | None = None
-    address_transcription: str | None = None
-    current_cycle: DirectoryCycleResponse | None
-
-
 class PostReplyRequest(PublicSchema):
     address: str = Field(examples=[EXAMPLE_ADDRESS])
     parent_id: UUID
@@ -219,8 +210,12 @@ class TreeResponse(PublicSchema):
     cycle: DirectoryCycleResponse
     root_id: UUID
     nodes: list[MessageResponse]
-    snapshot_cursor: str
-    next_page_cursor: str | None
+    snapshot_cursor: str = Field(
+        description="Opaque fixed snapshot. Current access and retention rules still apply."
+    )
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
     stats: TreeStatsResponse
 
@@ -265,8 +260,12 @@ class RepliesRequest(PublicSchema):
 class RepliesResponse(PublicSchema):
     parent_id: UUID
     messages: list[MessageResponse]
-    snapshot_cursor: str
-    next_page_cursor: str | None
+    snapshot_cursor: str = Field(
+        description="Opaque fixed snapshot. Current access and retention rules still apply."
+    )
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
 
 
@@ -333,7 +332,9 @@ class ContextItemResponse(PublicSchema):
 
 class ContextResponse(PublicSchema):
     cycle_id: UUID
-    snapshot_cursor: str
+    snapshot_cursor: str = Field(
+        description="Opaque fixed snapshot. Current access and retention rules still apply."
+    )
     items: list[ContextItemResponse]
     activity_cursor: str
     used_items: int
@@ -394,7 +395,9 @@ class SearchResponse(PublicSchema):
     cycle_id: UUID
     snapshot_sequence: int
     results: list[SearchHitResponse]
-    next_page_cursor: str | None
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
     used_bytes: int
 
@@ -423,7 +426,9 @@ class ParticipantsResponse(PublicSchema):
     cycle_id: UUID
     snapshot_sequence: int
     participants: list[ParticipantResponse]
-    next_page_cursor: str | None
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
 
 
@@ -441,8 +446,12 @@ class SubtreeResponse(PublicSchema):
     cycle_id: UUID
     root_id: UUID
     nodes: list[MessageResponse]
-    snapshot_cursor: str
-    next_page_cursor: str | None
+    snapshot_cursor: str = Field(
+        description="Opaque fixed snapshot. Current access and retention rules still apply."
+    )
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     truncated: bool
 
 
@@ -459,8 +468,12 @@ class LeavesRequest(PublicSchema):
 class LeavesResponse(PublicSchema):
     cycle_id: UUID
     leaves: list[MessageResponse]
-    snapshot_cursor: str
-    next_page_cursor: str | None
+    snapshot_cursor: str = Field(
+        description="Opaque fixed snapshot. Current access and retention rules still apply."
+    )
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
 
 
@@ -514,7 +527,9 @@ class CycleListRequest(PublicSchema):
 
 class CycleListResponse(PublicSchema):
     items: list[CycleDirectoryItemResponse]
-    next_page_cursor: str | None
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
 
 
@@ -572,11 +587,33 @@ class FieldErrorResponse(PublicSchema):
 
 
 class ErrorBodyResponse(PublicSchema):
-    code: str = Field(examples=["tunnel_unavailable"])
+    code: Literal[
+        "invalid_request",
+        "invalid_cursor",
+        "invalid_credential",
+        "invalid_address",
+        "tunnel_unavailable",
+        "cycle_unavailable",
+        "payload_too_large",
+        "quota_exceeded",
+        "idempotency_conflict",
+        "cycle_closed",
+        "lifecycle_conflict",
+        "checkpoint_regression",
+        "context_budget_too_small",
+        "entry_budget_too_small",
+        "rate_limited",
+        "dependency_unavailable",
+    ] = Field(
+        description="Stable error code for program decisions.", examples=["tunnel_unavailable"]
+    )
     message: str = Field(
         examples=["This tunnel is not available. Check the address or create a new tunnel."]
     )
-    request_id: str = Field(examples=["86698a49-65f5-4d46-bfeb-2594b4359c20"])
+    request_id: str = Field(
+        description="Safe request identifier for operator diagnostics.",
+        examples=["86698a49-65f5-4d46-bfeb-2594b4359c20"],
+    )
     field_errors: list[FieldErrorResponse]
 
 
@@ -628,7 +665,9 @@ class BeaconBoardResponse(PublicSchema):
     board_cursor: str
     items: list[BeaconBoardItem]
     snapshot_position: int
-    next_page_cursor: str | None
+    next_page_cursor: str | None = Field(
+        description="Continue this snapshot with the same filters, or null when complete."
+    )
     complete: bool
 
 

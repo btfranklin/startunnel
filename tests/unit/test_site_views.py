@@ -83,6 +83,12 @@ def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
     with CaptureQueriesContext(connection) as one_tunnel_queries:
         first_page = client.get("/app/tunnels/")
     assert first_page.status_code == 200
+    assert "no-store" in first_page["Cache-Control"]
+    assert all(
+        "text_payload" not in query["sql"] and "json_payload" not in query["sql"]
+        for query in one_tunnel_queries
+        if query["sql"].startswith("SELECT")
+    )
     assert first_page.context["tunnel_rows"][0]["current_address"].address == first.address
 
     created_at = timezone.now()

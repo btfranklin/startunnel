@@ -28,7 +28,7 @@ from core.maintenance_status import read_maintenance_status
 from core.models import AuditEvent
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
-from tunnels.beacons import beacon_data, beacon_queryset
+from tunnels.beacons import beacon_queryset
 from tunnels.models import Beacon, Cycle, Tunnel, TunnelAddress
 
 from .admin_access import validate_actor
@@ -42,6 +42,7 @@ from .admin_data import (
     admin_resource,
     agent_resource,
     audit_resource,
+    beacon_resource,
     key_resource,
 )
 from .models import AdminCredential, AdminReceipt, User
@@ -196,7 +197,7 @@ def list_admin_resources(
         "agents": agent_resource,
         "tunnels": _tunnel_list_resource,
         "audit": audit_resource,
-        "beacons": beacon_data,
+        "beacons": beacon_resource,
         "cycles": lambda row: {
             "id": str(row.id),
             "number": row.number,
@@ -218,8 +219,12 @@ def list_admin_resources(
     }
 
 
-def _replay(receipt: AdminReceipt) -> AdminOperationResult:
+def receipt_response(receipt: AdminReceipt) -> dict[str, Any]:
+    """Read a receipt only while its retained result is available."""
+
     response = dict(receipt.response)
+    if not response:
+        raise InvalidRequest("This operation is not available.")
     if receipt.operation == "beacons.withdraw":
         beacon = (
             Beacon.objects.select_related("cycle")
@@ -228,6 +233,11 @@ def _replay(receipt: AdminReceipt) -> AdminOperationResult:
         )
         if beacon is None or not cycle_is_readable(beacon.cycle):
             raise InvalidRequest("The operation resource is not available.")
+    return response
+
+
+def _replay(receipt: AdminReceipt) -> AdminOperationResult:
+    response = receipt_response(receipt)
     if receipt.operation == "tunnels.rotate":
         resource = response.get("resource", {})
         address_row = TunnelAddress.objects.filter(

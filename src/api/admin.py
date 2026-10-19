@@ -31,11 +31,12 @@ from accounts.admin_commands import (
     TunnelRotate,
     TunnelStart,
 )
-from accounts.admin_data import OperationReference, admin_resource, tunnel_resource
+from accounts.admin_data import OperationReference, admin_resource, beacon_resource, tunnel_resource
 from accounts.admin_services import (
     admin_status,
     execute_admin_operation,
     list_admin_resources,
+    receipt_response,
 )
 from accounts.models import AdminCredential, AdminReceipt, User
 from core import limits as instance_limits
@@ -43,7 +44,7 @@ from core.errors import InvalidCredential, InvalidRequest
 from core.limits import DEFAULT_LIMITS
 from core.rate_limits import consume_admin_auth_attempt
 from core.security import client_ip
-from tunnels.beacons import beacon_data, beacon_queryset
+from tunnels.beacons import beacon_queryset
 from tunnels.models import Tunnel
 
 from .schemas import BeaconResponse, ErrorResponse, IdempotencyKey
@@ -51,6 +52,7 @@ from .schemas import BeaconResponse, ErrorResponse, IdempotencyKey
 ADMIN_ERRORS = {
     400: ErrorResponse,
     401: ErrorResponse,
+    404: ErrorResponse,
     409: ErrorResponse,
     429: ErrorResponse,
     503: ErrorResponse,
@@ -263,6 +265,8 @@ def _execute(request: AdminRequest, data: AdminCommand, key: str) -> AdminResult
 
 @router.get("/me", response={200: AdminMe, **ADMIN_ERRORS})
 def me(request: AdminRequest) -> AdminMe:
+    """Read the authenticated administrator and key identity."""
+
     return AdminMe(
         admin=AccountResource.model_validate(admin_resource(request.auth.owner)),
         credential_id=request.auth.id,
@@ -272,6 +276,8 @@ def me(request: AdminRequest) -> AdminMe:
 
 @router.get("/capabilities", response={200: Capabilities, **ADMIN_ERRORS})
 def capabilities(request: AdminRequest) -> Capabilities:
+    """Read supported admin operations, limits, and the retry window."""
+
     return Capabilities(
         authority="instance_admin",
         operations=list(ADMIN_OPERATIONS),
@@ -282,6 +288,8 @@ def capabilities(request: AdminRequest) -> Capabilities:
 
 @router.get("/status", response={200: InstanceStatus, **ADMIN_ERRORS})
 def status(request: AdminRequest) -> InstanceStatus:
+    """Read database, maintenance, capacity, and runtime health."""
+
     snapshot = admin_status()
     maintenance = snapshot.get("maintenance")
     capacity = snapshot.get("capacity")
@@ -318,6 +326,8 @@ def accounts(
     cursor: str | None = None,
     state: str | None = None,
 ) -> AccountPage:
+    """List administrator accounts with bounded pagination."""
+
     page = list_admin_resources(
         "accounts", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
     )
@@ -329,6 +339,8 @@ def accounts(
 
 @router.get("/accounts/{uuid:admin_id}", response={200: AccountResource, **ADMIN_ERRORS})
 def account(request: AdminRequest, admin_id: UUID) -> AccountResource:
+    """Read one administrator account."""
+
     row = User.objects.filter(pk=admin_id).first()
     if row is None:
         raise InvalidRequest("This administrator is not available.")
@@ -343,6 +355,8 @@ def keys(
     state: str | None = None,
     admin_id: UUID | None = None,
 ) -> KeyPage:
+    """List admin key metadata. Raw keys are not returned."""
+
     page = list_admin_resources(
         "keys",
         actor=request.auth.owner,
@@ -364,6 +378,8 @@ def agents(
     cursor: str | None = None,
     state: str | None = None,
 ) -> AgentPage:
+    """List instance-owned agent credential metadata."""
+
     page = list_admin_resources(
         "agents", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
     )
@@ -380,6 +396,8 @@ def tunnels(
     cursor: str | None = None,
     state: str | None = None,
 ) -> TunnelPage:
+    """List instance tunnels, including their current addresses."""
+
     page = list_admin_resources(
         "tunnels", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
     )
@@ -391,6 +409,8 @@ def tunnels(
 
 @router.get("/tunnels/{uuid:tunnel_id}", response={200: TunnelResource, **ADMIN_ERRORS})
 def tunnel(request: AdminRequest, tunnel_id: UUID) -> TunnelResource:
+    """Read one tunnel and its current address."""
+
     row = Tunnel.objects.filter(pk=tunnel_id).first()
     if row is None:
         raise InvalidRequest("This tunnel is not available.")
@@ -405,6 +425,8 @@ def cycles(
     cursor: str | None = None,
     state: str | None = None,
 ) -> CyclePage:
+    """List cycle metadata; labels are cleared after the content deadline."""
+
     page = list_admin_resources(
         "cycles",
         actor=request.auth.owner,
@@ -430,6 +452,8 @@ def audit(
     target_id: UUID | None = None,
     credential_id: UUID | None = None,
 ) -> AuditPage:
+    """Read bounded audit history with optional actor and target filters."""
+
     page = list_admin_resources(
         "audit",
         actor=request.auth.owner,
@@ -449,17 +473,20 @@ def audit(
 
 @router.get("/operations/{uuid:operation_id}", response={200: OperationRecord, **ADMIN_ERRORS})
 def operation(request: AdminRequest, operation_id: UUID) -> OperationRecord:
+    """Read a retained operation result without issued secrets. Unavailable results return 400."""
+
     row = AdminReceipt.objects.filter(pk=operation_id, expires_at__gt=timezone.now()).first()
     if row is None:
         raise InvalidRequest("This operation is not available.")
+    response = receipt_response(row)
     return OperationRecord(
         id=row.id,
         name=row.operation,
         created_at=row.created_at,
         expires_at=row.expires_at,
         result=SafeAdminResult(
-            resource=RESOURCE_RESPONSE.validate_python(row.response["resource"]),
-            operation=_operation_reference(row.response["operation"]),
+            resource=RESOURCE_RESPONSE.validate_python(response["resource"]),
+            operation=_operation_reference(response["operation"]),
         ),
     )
 
@@ -470,6 +497,8 @@ def create_account(
     data: AccountCreate,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Create an administrator account with optional password access."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -479,6 +508,8 @@ def account_state(
     data: AccountState,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Activate or deactivate an account. Deactivation revokes its admin keys."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -488,6 +519,8 @@ def account_password(
     data: AccountPassword,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Set or remove password access for an administrator account."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -497,6 +530,8 @@ def create_key(
     data: KeyCreate,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Issue an admin key. An exact retry can recover the key while it remains available."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -506,6 +541,8 @@ def revoke_key(
     data: KeyRevoke,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Revoke one admin key."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -515,6 +552,8 @@ def create_agent(
     data: AgentCreate,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Issue an instance-owned agent key with an optional expiry."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -524,6 +563,8 @@ def revoke_agent(
     data: AgentRevoke,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Revoke an agent key without removing its shared messages or Beacons."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -533,6 +574,8 @@ def start_tunnel(
     data: TunnelStart,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Start a cycle with operator authority."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -542,6 +585,8 @@ def close_tunnel(
     data: TunnelClose,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Close the expected cycle with operator authority."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -551,6 +596,8 @@ def rollover_tunnel(
     data: TunnelRollover,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Close the expected cycle and start its replacement in one transaction."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -560,6 +607,8 @@ def rotate_tunnel(
     data: TunnelRotate,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Replace a tunnel address and withdraw its live Beacon. The old address stops resolving."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -569,6 +618,8 @@ def retire_tunnel(
     data: TunnelRetire,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Retire a tunnel, stop address access, and prevent future cycles."""
+
     return _execute(request, data, idempotency_key)
 
 
@@ -579,6 +630,8 @@ def beacons(
     cursor: str | None = None,
     tunnel_id: UUID | None = None,
 ) -> BeaconPage:
+    """List Beacon metadata, clearing text after the cycle read deadline."""
+
     page = list_admin_resources(
         "beacons",
         actor=request.auth.owner,
@@ -594,16 +647,20 @@ def beacons(
 
 @router.get("/beacons/{uuid:beacon_id}", response={200: BeaconResponse, **ADMIN_ERRORS})
 def beacon(request: AdminRequest, beacon_id: UUID) -> BeaconResponse:
+    """Read Beacon metadata and effective expiry state."""
+
     row = beacon_queryset().filter(pk=beacon_id).first()
     if row is None:
         raise InvalidRequest("This beacon is not available.")
-    return BeaconResponse.model_validate(beacon_data(row))
+    return BeaconResponse.model_validate(beacon_resource(row))
 
 
-@router.post("/beacons/withdraw", response={200: AdminResult, 404: ErrorResponse, **ADMIN_ERRORS})
+@router.post("/beacons/withdraw", response={200: AdminResult, **ADMIN_ERRORS})
 def withdraw_beacon(
     request: AdminRequest,
     data: BeaconWithdraw,
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
+    """Withdraw a Beacon with operator authority."""
+
     return _execute(request, data, idempotency_key)

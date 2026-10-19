@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
@@ -362,8 +363,8 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
 
 
 @pytest.mark.parametrize("operation", ["close", "rollover"])
-def test_lifecycle_rechecks_replay_after_initial_miss(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, operation: str
+def test_identical_lifecycle_retry_returns_the_original_result(
+    credential_factory: Any, operation: str
 ) -> None:
     from tunnels import cycles
 
@@ -382,7 +383,6 @@ def test_lifecycle_rechecks_replay_after_initial_miss(
         )
     action = cycles.close_cycle if operation == "close" else cycles.rollover_cycle
     first = action(**arguments)
-    monkeypatch.setattr(cycles, "find_idempotency_replay", lambda **kwargs: None)
     second = action(**arguments)
     if operation == "rollover":
         assert first is not None
@@ -444,3 +444,56 @@ def test_mention_batch_rejects_any_unavailable_credential(
             mention_ids=[available.id, missing_id if unavailable == "missing" else other.id],
             maximum=32,
         )
+
+
+@pytest.mark.parametrize("operation", ["start", "rollover", "admin_start", "admin_rollover"])
+def test_expired_cycle_can_be_replaced_without_maintenance(
+    credential_factory: Any, settings: Any, operation: str
+) -> None:
+    from tunnels.admin_actions import rollover_cycle_as_admin, start_cycle_as_admin
+    from tunnels.cycles import StartedCycle, get_tunnel_status, rollover_cycle, start_cycle
+
+    creator, _ = credential_factory()
+    created = _create(creator, key="lazy-expiry-create")
+    expiry = timezone.now() - timedelta(seconds=30)
+    Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=120)
+    settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 999
+
+    status = get_tunnel_status(credential=creator, address=created.address)
+    assert status.current_cycle is None
+    assert status.tunnel.state == Tunnel.State.DORMANT
+    created.tunnel.refresh_from_db()
+    created.cycle.refresh_from_db()
+    assert created.tunnel.state == Tunnel.State.ACTIVE
+    assert created.cycle.state == Cycle.State.ACTIVE
+
+    common: dict[str, Any] = {
+        "expected_address_generation": 1,
+        "root_content": {"type": "text", "text": "Continue after expiry."},
+    }
+    function: Callable[..., StartedCycle]
+    if operation.startswith("admin_"):
+        common.update(actor=creator.created_by, tunnel_id=created.tunnel.id)
+        function = (
+            rollover_cycle_as_admin if operation == "admin_rollover" else start_cycle_as_admin
+        )
+    else:
+        common.update(
+            credential=creator, address=created.address, idempotency_key="lazy-expiry-next"
+        )
+        function = rollover_cycle if operation == "rollover" else start_cycle
+    if operation.endswith("rollover"):
+        common["expected_cycle_id"] = created.cycle.id
+    started = function(**common)
+
+    created.cycle.refresh_from_db()
+    assert created.cycle.state == Cycle.State.CLOSED
+    assert created.cycle.close_reason == "expired"
+    assert created.cycle.closed_at == expiry
+    assert created.cycle.retention_seconds == 120
+    assert created.cycle.delete_after == expiry + timedelta(seconds=120)
+    assert started.cycle.number == 2
+    assert (
+        get_tunnel_status(credential=creator, address=created.address).current_cycle
+        == started.cycle
+    )

@@ -62,9 +62,10 @@ def test_tunnel_inspection_shows_stored_data_but_rejects_changes(
     created = create_tunnel(
         credential=credential, idempotency_key="inspection-create", root_content=content
     )
-    rotated = rotate_address_as_admin(
+    rotate_address_as_admin(
         actor=administrator, tunnel_id=created.tunnel.pk, expected_address_generation=1
     )
+    rotated = created.tunnel.addresses.get(state="current")
     address = TunnelAddress.objects.get(tunnel=created.tunnel, state="current")
     event = created.tunnel.events.get(event_type="address_rotated")
     client.force_login(administrator)

@@ -71,6 +71,5 @@ explicit acknowledgement, withdrawal, and continued use of a known address.
 It needs two agent credentials and no model provider.
 
 Local test results, hosted candidate evidence, and installed runtime are
-separate. [Dated candidate evidence](security.md#candidate-validation-2026-10-09)
-applies only to its recorded source commit and image. Each later candidate
-requires its own validation. Publication does not deploy an instance.
+separate. Each candidate requires validation of its source commit and image.
+Publication does not deploy an instance.

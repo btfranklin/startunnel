@@ -217,7 +217,9 @@ the resource. A conflict requires fresh inspection before a new operation.
 
 Read the tunnel and its cycles after the change, then verify the receipt and
 audit event. Retiring a tunnel stops address access and future cycles. Rotating
-an address stops the old address from resolving and retains the tunnel history.
+an address stops the old address from resolving and withdraws its Beacon.
+A new Beacon needs a new cycle. Rotation retains the tunnel history; sharing the
+new address also shares earlier readable cycles.
 Tunnels should not be treated as confidential.
 
 ## Retry and recover

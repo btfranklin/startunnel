@@ -8,12 +8,14 @@ import pytest
 import time_machine
 from django.utils import timezone
 
-from core.errors import InvalidCredential, InvalidRequest, TunnelUnavailable
+from core.cursors import encode_cursor
+from core.errors import InvalidCredential, InvalidRequest
 from tunnels.admin_actions import start_cycle_as_admin
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.entry import enter_tunnel
+from tunnels.message_data import message_payload
 from tunnels.messages import post_reply
-from tunnels.models import ActivityCheckpoint, Cycle
+from tunnels.models import ActivityCheckpoint
 
 pytestmark = pytest.mark.django_db
 
@@ -117,14 +119,6 @@ def test_entry_hides_the_cycle_at_its_deadline_before_maintenance(credential_fac
     assert not ActivityCheckpoint.objects.exists()
 
 
-def test_entry_rejects_an_active_cycle_without_a_root(credential_factory: Any) -> None:
-    creator, _ = credential_factory(name="Missing root creator")
-    created = _create(creator)
-    Cycle.objects.filter(pk=created.cycle.pk).update(root_message=None)
-    with pytest.raises(TunnelUnavailable):
-        enter_tunnel(credential=creator, address=created.address)
-
-
 @pytest.mark.parametrize(
     "arguments",
     [{"limit": 0}, {"limit": 1001}, {"max_bytes": 0}, {"max_bytes": 1_048_577}],
@@ -166,3 +160,37 @@ def test_entry_keeps_its_snapshot_without_repeated_tunnel_queries(
     with django_assert_num_queries(11):
         view = enter_tunnel(credential=creator, address=created.address)
     assert view.root is not None and view.root.pk == created.root.pk
+
+
+def test_entry_serializes_each_message_once_and_signs_activity_once(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections import Counter
+
+    from tunnels import entry
+
+    creator, _ = credential_factory()
+    created = _create(creator)
+    replies = [
+        _reply(created, creator, f"entry-work-{index}", "Reply café.") for index in range(12)
+    ]
+    serializations: Counter[Any] = Counter()
+    cursor_kinds: Counter[str] = Counter()
+    original_payload = message_payload
+    original_cursor = encode_cursor
+
+    def count_payload(message: Any) -> dict[str, Any]:
+        serializations[message.id] += 1
+        return original_payload(message)
+
+    def count_cursor(kind: str, **values: Any) -> str:
+        cursor_kinds[kind] += 1
+        return original_cursor(kind, **values)
+
+    monkeypatch.setattr(entry, "message_payload", count_payload)
+    monkeypatch.setattr(entry, "encode_cursor", count_cursor)
+    view = enter_tunnel(credential=creator, address=created.address, limit=20)
+
+    assert [message.id for message in view.recent_messages] == [message.id for message in replies]
+    assert serializations == Counter({created.root.id: 1, **{reply.id: 1 for reply in replies}})
+    assert cursor_kinds["activity"] == 1

@@ -137,3 +137,26 @@ def test_django_model_admin_cannot_bypass_product_services(
     )
     credential.refresh_from_db()
     assert credential.name != "Bypassed"
+
+
+@pytest.mark.parametrize(
+    "data, field",
+    [
+        ({"action": "revoke-key", "key_id": "bad-key-id"}, "key_id"),
+        ({"action": "create-key", "name": "key", "expires_at": "bad-expiry"}, "expires_at"),
+    ],
+)
+def test_browser_validation_errors_are_plain_field_messages(
+    data: dict[str, str], field: str, client: Client, user_factory: Any
+) -> None:
+    from django.contrib.messages import get_messages
+
+    actor = user_factory()
+    client.force_login(actor)
+    response = client.post("/app/admins/access/", {**data, "idempotency_key": str(uuid4())})
+    assert response.status_code == 302
+    errors = [str(message) for message in get_messages(response.wsgi_request)]
+    assert len(errors) == 1
+    assert errors[0].startswith(field + ": ")
+    assert "input_value" not in errors[0]
+    assert "errors.pydantic.dev" not in errors[0]

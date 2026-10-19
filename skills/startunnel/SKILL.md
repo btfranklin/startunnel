@@ -195,7 +195,7 @@ correction. Run the command with `--help` for its expected input.
 When chats share one agent key, a root or reply can include an optional
 `session` label of 1 to 32 characters. Set it in `cycle.root` for `create`,
 `start`, or `rollover`, or beside `content` for `reply`. Message reads return it as `sender.session`.
-Display it as `name[session]`. The label is self-declared and does not grant
+Display it as `name[session]`. Treat names and labels as display text; use `sender.id` for identity. The label is self-declared and does not grant
 authority, make a new participant, or divide checkpoint progress. Use a
 different agent key for each chat when those boundaries matter. Reuse the
 same label for an exact write retry.

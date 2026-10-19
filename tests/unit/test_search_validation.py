@@ -11,6 +11,7 @@ import pytest
 from core.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
 from tunnels.cycles import create_tunnel
 from tunnels.messages import post_reply
+from tunnels.models import Message
 from tunnels.search import (
     SearchHit,
     _base_query,
@@ -94,6 +95,13 @@ def test_branch_filter_collects_only_the_selected_descendants(
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, key="search-validation-branch")
+    sibling = post_reply(
+        credential=credential,
+        idempotency_key="search-validation-sibling",
+        address=created.address,
+        parent_id=created.root.id,
+        content={"type": "text", "text": "Earlier sibling."},
+    ).message
     selected = post_reply(
         credential=credential,
         idempotency_key="search-validation-selected",
@@ -116,14 +124,16 @@ def test_branch_filter_collects_only_the_selected_descendants(
         content={"type": "text", "text": "Outside."},
     ).message
 
-    ids = _branch_message_ids(
+    branch = _branch_message_ids(
         cycle=created.cycle,
         root_id=selected.id,
         high_water=descendant.sequence,
     )
+    ids = set(Message.objects.filter(id__in=branch).values_list("id", flat=True))
 
     assert ids == {selected.id, descendant.id}
     assert outside.id not in ids
+    assert sibling.id not in ids
     with pytest.raises(CycleUnavailable):
         _branch_message_ids(
             cycle=created.cycle,
@@ -234,7 +244,7 @@ def test_search_hit_payload_preserves_public_fields_and_full_timestamp_precision
         "correlation_id": "search-validation",
         "sequence": message.sequence,
         "depth": message.depth,
-        "created_at": "2026-02-03T04:05:06.123456+00:00",
+        "created_at": "2026-02-03T04:05:06.123Z",
         "rank": 42,
         "snippet": "A safe café snippet.",
     }

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from core.cursors import encode_cursor
-from core.errors import EntryBudgetTooSmall, InvalidCredential, InvalidRequest, TunnelUnavailable
+from core.errors import EntryBudgetTooSmall, InvalidCredential, InvalidRequest
 
 from .access import credential_is_active, limits_for, resolve_tunnel
 from .message_data import cycle_payload, message_payload
@@ -68,11 +68,13 @@ def _message_wire_size(message: Message) -> int:
     return len(json.dumps(message_payload(message), cls=DjangoJSONEncoder).encode("utf-8"))
 
 
-def _response_wire_size(entry: TunnelEntry, message_sizes: tuple[int, ...]) -> int:
-    payload = _entry_payload(entry, include_recent_messages=False)
-    fixed_size = len(json.dumps(payload, cls=DjangoJSONEncoder).encode("utf-8"))
-    list_size = 2 + sum(message_sizes) + max(len(message_sizes) - 1, 0) * 2
-    return fixed_size - 2 + list_size
+def _response_wire_size(
+    entry: TunnelEntry, *, fixed_size: int, message_bytes: int, message_count: int
+) -> int:
+    # The fixed payload contains an empty list, a null cursor, and false.
+    cursor_bytes = len(json.dumps(entry.history_cursor).encode("utf-8")) - len("null")
+    list_bytes = message_bytes + max(message_count - 1, 0) * 2
+    return fixed_size + cursor_bytes + list_bytes - int(entry.history_omitted)
 
 
 def _make_entry(
@@ -83,6 +85,7 @@ def _make_entry(
     recent_messages: tuple[Message, ...],
     snapshot_sequence: int | None,
     activity_position: int,
+    activity_cursor: str,
 ) -> TunnelEntry:
     history_upper_sequence = None
     history_omitted = False
@@ -100,9 +103,6 @@ def _make_entry(
                 snapshot_sequence=history_upper_sequence,
                 after_sequence=root.sequence,
             )
-    activity_cursor = encode_cursor(
-        "activity", tunnel_id=str(tunnel.id), position=activity_position
-    )
     return TunnelEntry(
         tunnel=tunnel,
         cycle=cycle,
@@ -148,21 +148,16 @@ def enter_tunnel(
         )
         if cycle is not None:
             snapshot_sequence = max(cycle.next_sequence - 1, 0)
-            if cycle.root_message_id is None:
-                raise TunnelUnavailable()
             root = (
-                Message.objects.select_related("sender", "parent", "cycle")
-                .prefetch_related("mentions__credential")
-                .filter(pk=cycle.root_message_id, cycle=cycle, sequence=1)
-                .first()
+                Message.objects.select_related("cycle")
+                .prefetch_related("mentions")
+                .get(cycle=cycle, sequence=1)
             )
-            if root is None:
-                raise TunnelUnavailable()
             candidate_limit = limit - 1
             if candidate_limit:
                 rows = list(
-                    Message.objects.select_related("sender", "parent", "cycle")
-                    .prefetch_related("mentions__credential")
+                    Message.objects.select_related("cycle")
+                    .prefetch_related("mentions")
                     .filter(
                         cycle=cycle,
                         sequence__gt=root.sequence,
@@ -173,33 +168,60 @@ def enter_tunnel(
                 rows.reverse()
                 candidates = tuple(rows)
 
-    chosen: list[Message] = []
-    chosen_sizes: list[int] = []
-    for message in reversed(candidates):
-        trial_messages = tuple([message, *chosen])
-        trial_sizes = tuple([_message_wire_size(message), *chosen_sizes])
-        trial = _make_entry(
-            tunnel=tunnel,
-            cycle=cycle,
-            root=root,
-            recent_messages=trial_messages,
-            snapshot_sequence=snapshot_sequence,
-            activity_position=activity_position,
-        )
-        if _response_wire_size(trial, trial_sizes) > max_bytes:
-            break
-        chosen.insert(0, message)
-        chosen_sizes.insert(0, trial_sizes[0])
-
+    activity_cursor = encode_cursor(
+        "activity", tunnel_id=str(tunnel.id), position=activity_position
+    )
     result = _make_entry(
         tunnel=tunnel,
         cycle=cycle,
         root=root,
-        recent_messages=tuple(chosen),
+        recent_messages=(),
         snapshot_sequence=snapshot_sequence,
         activity_position=activity_position,
+        activity_cursor=activity_cursor,
     )
-    if _response_wire_size(result, tuple(chosen_sizes)) > max_bytes:
+    fixed_payload = _entry_payload(result, include_recent_messages=False)
+    fixed_payload.update(history_cursor=None, history_omitted=False)
+    fixed_size = len(json.dumps(fixed_payload, cls=DjangoJSONEncoder).encode("utf-8"))
+    chosen: list[Message] = []
+    message_bytes = 0
+    for message in reversed(candidates):
+        # Only the oldest selected sequence changes the history cursor. Its
+        # compressed length can change at each boundary, so measure it exactly.
+        trial = _make_entry(
+            tunnel=tunnel,
+            cycle=cycle,
+            root=root,
+            recent_messages=(message,),
+            snapshot_sequence=snapshot_sequence,
+            activity_position=activity_position,
+            activity_cursor=activity_cursor,
+        )
+        trial_bytes = message_bytes + _message_wire_size(message)
+        if (
+            _response_wire_size(
+                trial,
+                fixed_size=fixed_size,
+                message_bytes=trial_bytes,
+                message_count=len(chosen) + 1,
+            )
+            > max_bytes
+        ):
+            break
+        chosen.append(message)
+        message_bytes = trial_bytes
+        result = trial
+
+    result = replace(result, recent_messages=tuple(reversed(chosen)))
+    if (
+        _response_wire_size(
+            result,
+            fixed_size=fixed_size,
+            message_bytes=message_bytes,
+            message_count=len(chosen),
+        )
+        > max_bytes
+    ):
         raise EntryBudgetTooSmall()
     if not credential_is_active(credential):
         raise InvalidCredential()

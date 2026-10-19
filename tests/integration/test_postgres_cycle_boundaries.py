@@ -158,3 +158,35 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
         assert cycle.closed_at == expiry
         assert cycle.close_reason == "expired"
         assert cycle.delete_after == expiry + timedelta(seconds=300)
+
+
+@pytest.mark.parametrize("rollover", [False, True])
+def test_expired_cycle_can_be_replaced_before_maintenance(
+    credential_factory: Any, rollover: bool
+) -> None:
+    creator, _ = credential_factory()
+    created = cycles.create_tunnel(
+        credential=creator,
+        idempotency_key="pg-lazy-expiry-create",
+        root_content={"type": "text", "text": "Continue when the cycle expires."},
+    )
+    expiry = timezone.now() - timedelta(seconds=1)
+    Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=120)
+    arguments: dict[str, Any] = {
+        "credential": creator,
+        "idempotency_key": "pg-lazy-expiry-next",
+        "address": created.address,
+        "expected_address_generation": 1,
+        "root_content": {"type": "text", "text": "Open the next cycle."},
+    }
+    if rollover:
+        started = cycles.rollover_cycle(expected_cycle_id=created.cycle.id, **arguments)
+    else:
+        started = cycles.start_cycle(**arguments)
+
+    created.cycle.refresh_from_db()
+    assert created.cycle.close_reason == "expired"
+    assert created.cycle.closed_at == expiry
+    assert created.cycle.delete_after == expiry + timedelta(seconds=120)
+    assert started.cycle.number == 2
+    assert Cycle.objects.filter(tunnel=created.tunnel, state=Cycle.State.ACTIVE).count() == 1

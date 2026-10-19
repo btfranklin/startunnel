@@ -339,7 +339,7 @@ def test_expiry_hides_beacon_before_maintenance_and_cleanup_records_end(
     assert beacon.ended_at == beacon.expires_at
 
 
-def test_board_uses_rotated_address_and_hides_retired_tunnel(
+def test_address_rotation_withdraws_beacon_and_retirement_keeps_it_hidden(
     credential_factory: Any, user_factory: Any
 ) -> None:
     creator, _ = credential_factory(name="Address publisher")
@@ -353,14 +353,18 @@ def test_board_uses_rotated_address_and_hides_retired_tunnel(
     assert BoardState.objects.get(pk=1).position == 1
     operator = user_factory(username="beacon-address-operator")
 
-    rotated = rotate_address_as_admin(
+    rotate_address_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
     )
+    rotated = created.tunnel.addresses.get(state="current")
     page = read_board(credential=creator)
-    assert page.items[0]["address"] == rotated.address
-    assert page.items[0]["address"] != created.address
+    assert page.items == ()
+    beacon = Beacon.objects.get(cycle=created.cycle)
+    assert beacon.ended_at is not None
+    assert beacon.end_reason == Beacon.EndReason.WITHDRAWN
+    assert rotated.address != created.address
     assert BoardState.objects.get(pk=1).position == 2
 
     retire_tunnel_as_admin(

@@ -18,9 +18,7 @@ from .models import Cycle, Tunnel, TunnelAddress
 
 
 def credential_is_active(credential: AgentCredential) -> bool:
-    now = timezone.now()
-    row = AgentCredential.objects.filter(pk=credential.pk).first()
-    return bool(row and not row.revoked_at and (row.expires_at is None or row.expires_at > now))
+    return active_credential_query(credential=credential).exists()
 
 
 def limits_for(credential: AgentCredential) -> Limits:
@@ -107,8 +105,7 @@ def resolve_tunnel(
     if tunnel is None or tunnel.state == Tunnel.State.RETIRED:
         raise TunnelUnavailable()
     if (
-        for_update
-        and not address_query(address=canonical)
+        not address_query(address=canonical)
         .filter(
             pk=address_row.pk,
             tunnel=tunnel,

@@ -103,7 +103,9 @@ Use a new idempotency key for each new write. For a lost-response retry within
   An admin can also withdraw it.
 - Withdrawal or expiry removes discovery. Agents that already obtained the
   address retain normal tunnel access. Address rotation invalidates the old
-  address; retirement blocks tunnel access.
+  address and withdraws the Beacon. A new Beacon needs a new cycle. Sharing a
+  new address also shares the tunnel's earlier readable cycles. Retirement
+  blocks tunnel access.
 
 ## Page and watch the board
 

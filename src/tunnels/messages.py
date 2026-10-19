@@ -321,16 +321,20 @@ def read_tree(
     if high_water < 1 or high_water > current_high_water:
         raise InvalidRequest("The snapshot sequence is not valid for this cycle.")
     rows = list(
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(cycle=cycle, sequence__gt=after_sequence, sequence__lte=high_water)
         .order_by("sequence", "id")[: limit + 1]
     )
     has_more = len(rows) > limit
     page = rows[:limit]
-    aggregates = Message.objects.filter(cycle=cycle, sequence__lte=high_water).aggregate(
-        count=Count("id"), bytes=Sum("byte_count")
-    )
+    if high_water == current_high_water:
+        message_count, content_bytes = cycle.message_count, cycle.content_bytes
+    else:
+        aggregates = Message.objects.filter(cycle=cycle, sequence__lte=high_water).aggregate(
+            count=Count("id"), bytes=Sum("byte_count")
+        )
+        message_count, content_bytes = aggregates["count"] or 0, aggregates["bytes"] or 0
     return TreePage(
         tunnel=tunnel,
         cycle=cycle,
@@ -338,8 +342,8 @@ def read_tree(
         snapshot_sequence=high_water,
         next_after_sequence=page[-1].sequence if has_more and page else None,
         complete=not has_more,
-        message_count=aggregates["count"] or 0,
-        content_bytes=aggregates["bytes"] or 0,
+        message_count=message_count,
+        content_bytes=content_bytes,
     )
 
 
@@ -353,8 +357,8 @@ def get_message(
     tunnel = resolve_tunnel(credential=credential, address=address)
     cycle = select_cycle(tunnel=tunnel, cycle_id=cycle_id)
     message = (
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(pk=message_id, tunnel=tunnel, cycle=cycle)
         .first()
     )
@@ -382,15 +386,32 @@ def get_branch(
 def load_branch(focus: Message) -> tuple[Message, ...]:
     """Load the root-to-focus branch after the caller checks access."""
 
-    ids: list[UUID] = []
-    current: Message | None = focus
-    try:
-        while current is not None:
-            ids.append(current.id)
-            current = current.parent
-    except Message.DoesNotExist:
-        raise CycleUnavailable() from None
-    return _messages_by_id_in_order(list(reversed(ids)))
+    table = connection.ops.quote_name(Message._meta.db_table)
+    pk = Message._meta.pk
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            WITH RECURSIVE branch AS (
+                SELECT id, parent_id, sequence FROM {table}
+                WHERE id = %s AND cycle_id = %s
+                UNION ALL
+                SELECT parent.id, parent.parent_id, parent.sequence
+                FROM {table} AS parent
+                JOIN branch ON parent.id = branch.parent_id
+                WHERE parent.cycle_id = %s AND parent.sequence < branch.sequence
+            )
+            SELECT id FROM branch ORDER BY sequence
+            """,
+            [
+                pk.get_db_prep_value(focus.id, connection),
+                pk.get_db_prep_value(focus.cycle_id, connection),
+                pk.get_db_prep_value(focus.cycle_id, connection),
+            ],
+        )
+        rows = cursor.fetchall()
+    if not rows:
+        raise CycleUnavailable()
+    return _messages_by_id_in_order([UUID(str(row[0])) for row in rows])
 
 
 def list_replies(
@@ -429,8 +450,8 @@ def list_replies(
     ):
         raise InvalidRequest("The reply page position is not valid.")
     rows = list(
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(
             cycle=parent.cycle,
             parent=parent,
@@ -455,8 +476,8 @@ def list_replies(
 def _messages_by_id_in_order(ids: list[UUID]) -> tuple[Message, ...]:
     rows = {
         row.id: row
-        for row in Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        for row in Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(id__in=ids)
     }
     if any(message_id not in rows for message_id in ids):
@@ -590,8 +611,8 @@ def get_subtree(
     if high_water < 1 or high_water > current_high_water:
         raise InvalidRequest("The snapshot sequence is not valid for this cycle.")
     root = (
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(pk=message_id, tunnel=tunnel, cycle=cycle)
         .first()
     )
@@ -621,8 +642,8 @@ def get_subtree(
     # SQLite is used for fast unit tests. PostgreSQL uses the payload-bounded
     # recursive query above in every deployed environment.
     rows = list(
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(cycle=cycle, sequence__lte=high_water)
         .order_by("sequence", "id")
     )
@@ -698,8 +719,8 @@ def list_leaves(
         sequence__lte=high_water,
     )
     rows = list(
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(
             cycle=cycle,
             sequence__gt=after_sequence,

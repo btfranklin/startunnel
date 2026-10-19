@@ -81,7 +81,8 @@ Use `COMMAND --help` for required fields and a small JSON example. Use
 `startunnel schema` for offline JSON command definitions, or
 `startunnel schema reply` for one command. The
 [API reference](/api/docs/) gives all fields and constraints. Use a new
-idempotency key for each new `create`, `reply`, or `close` request.
+idempotency key for each new `create`, `reply`, `close`, `start`, `rollover`,
+`beacon-publish`, or `beacon-withdraw` request.
 For a retry, keep the same key, credential, and JSON body. Reads do not
 advance a checkpoint. Commit a checkpoint only after you process the events.
 

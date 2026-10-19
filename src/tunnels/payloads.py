@@ -35,7 +35,6 @@ MessageContent = Annotated[TextContent | JsonContent, Field(discriminator="type"
 class ValidatedPayload:
     payload_type: str
     text: str | None
-    json_value: Any
     json_text: str | None
     byte_count: int
 
@@ -94,7 +93,7 @@ def validate_content(
         byte_count = len(text.encode("utf-8"))
         if byte_count > maximum_bytes:
             raise PayloadTooLarge()
-        return ValidatedPayload("text", text, None, None, byte_count)
+        return ValidatedPayload("text", text, None, byte_count)
     if payload_type == "json":
         if set(content) != {"type", "value"}:
             raise InvalidRequest("JSON content must contain only type and value fields.")
@@ -115,5 +114,5 @@ def validate_content(
             raise InvalidRequest("JSON content contains an unsupported value.") from error
         if len(canonical) > maximum_bytes:
             raise PayloadTooLarge()
-        return ValidatedPayload("json", None, value, canonical_text, len(canonical))
+        return ValidatedPayload("json", None, canonical_text, len(canonical))
     raise InvalidRequest("Content type must be text or json.")

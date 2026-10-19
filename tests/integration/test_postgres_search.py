@@ -322,7 +322,7 @@ def test_search_byte_budget_stops_before_the_next_full_hit(
         (0, "2026-10-18T12:34:56Z"),
     ],
 )
-def test_public_search_preserves_timestamp_wire_format_and_counts_full_precision(
+def test_public_search_preserves_timestamp_wire_format_and_counts_response_bytes(
     client: Client,
     credential_factory: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -377,6 +377,11 @@ def test_public_search_preserves_timestamp_wire_format_and_counts_full_precision
         ).encode("utf-8")
     )
     assert response.json()["used_bytes"] == expected_bytes
+    assert expected_bytes == len(
+        json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
+    )
 
 
 def test_exclusion_search_keeps_zero_rank_matches_across_pages(credential_factory: Any) -> None:

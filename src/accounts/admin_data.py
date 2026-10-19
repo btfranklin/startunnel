@@ -6,8 +6,10 @@ from typing import Any, NotRequired, TypedDict, cast
 
 from agents.models import AgentCredential
 from core.models import AuditEvent
+from tunnels.access import cycle_is_readable
 from tunnels.admin_actions import retirement_confirmation
-from tunnels.models import Cycle, Tunnel, TunnelAddress
+from tunnels.beacons import beacon_data
+from tunnels.models import Beacon, Cycle, Tunnel, TunnelAddress
 
 from .models import AdminCredential, User
 
@@ -138,3 +140,12 @@ class AdminStatusData(TypedDict):
 class AdminPageData(TypedDict):
     items: list[dict[str, Any]]
     next_cursor: str | None
+
+
+def beacon_resource(beacon: Beacon) -> dict[str, Any]:
+    """Keep Beacon history metadata after its cycle content expires."""
+
+    data = beacon_data(beacon)
+    if not cycle_is_readable(beacon.cycle):
+        data["text"] = ""
+    return data

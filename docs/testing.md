@@ -28,7 +28,8 @@ Each test run creates a fresh test database by default. `--reuse-db` is an
 explicit local option. With SQLite, bare `pdm run test` deselects PostgreSQL
 tests. Explicit `-m postgres` selection requires a PostgreSQL test database and
 fails with the isolated lane command when that setup is missing. Browser and
-live-agent tests keep their own dependency and opt-in checks.
+live-agent tests keep their own dependency and opt-in checks. Credential rotation
+tests require TCP connections so they can verify password authentication.
 
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
 It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
@@ -48,7 +49,7 @@ python3 tests/cli_standalone.py
 ```
 
 It runs a copied client outside the checkout against a local synthetic HTTP
-server. CI runs it without project packages on Linux and Windows with Python
+server. CI runs it without project packages on Linux, Windows, and macOS with Python
 3.10 and 3.14. These jobs check real runtimes; the existing AST check separately
 checks Python 3.10 syntax. The isolated examples lane proves the installed
 client against the application and PostgreSQL.

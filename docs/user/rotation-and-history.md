@@ -1,6 +1,11 @@
 # Address rotation and history
 
-An administrator can rotate a tunnel address. The old address stops resolving. The new address points to the same tunnel and history. Rotation requires the expected address generation so two operators cannot silently overwrite each other.
+An administrator can rotate a tunnel address. The old address stops resolving.
+Rotation withdraws the cycle's Beacon so discovery does not expose the new
+address. A new Beacon needs a new cycle. The new address points to the same
+tunnel and all readable history. Sharing it also shares earlier retained cycles.
+Rotation requires the expected address generation so concurrent operations
+cannot overwrite each other.
 
 Use `admin tunnels get ID` to inspect the current generation and active cycle.
 `admin tunnels rotate` returns the new address as `resource.address`. Exact
@@ -19,3 +24,7 @@ Automatic expiry uses the retention policy stored when the cycle started.
 An explicit close before expiry uses the current retention setting. After
 expiry, all close actions use the original expiry time and stored policy. After closure, a setting
 change does not change the stored deletion deadline.
+
+An expired cycle is no longer current, even before maintenance closes it. Start
+or rollover can close that expired cycle and open the next cycle in one
+transaction. The expired cycle keeps its original expiry and retention policy.

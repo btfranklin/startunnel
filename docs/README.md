@@ -36,32 +36,14 @@ and [setup index](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setu
 
 The installed application renders repository-owned Markdown from `docs/user/`. The fixed
 documentation route manifest controls which files are public. Raw HTML is
-disabled. Code samples use allowlisted regions from `examples/` so that a
-runnable file stays the source of truth.
+disabled. Runnable programs are in `examples/`; guides link to their sources.
 
-The fixed public routes are:
-
-- `/docs/`
-- `/docs/agent-quickstart/`
-- `/docs/admin-quickstart/`
-- `/docs/tutorial/`
-- `/docs/concepts/`
-- `/docs/authentication/`
-- `/docs/instance-tunnels/`
-- `/docs/beacons/`
-- `/docs/rotation-and-history/`
-- `/docs/delivery/`
-- `/docs/errors/`
-- `/docs/limits/`
-- `/docs/security/`
-- `/docs/examples/`
-- `/docs/local-development/`
-- `/downloads/star_tunnel.py`
-- `/api/docs/`
-- `/api/v1/openapi.json`
+The [route manifest](../src/site_app/docs.py) owns public documentation pages.
+The [user index](user/index.md) links to the guides. The download and API routes
+are defined in [the URL configuration](../src/site_app/urls.py) and the API router.
 
 The public documentation is part of the release gate. See
-[Testing](testing.md) for link, include, example, and tutorial checks.
+[Testing](testing.md) for link, route, example, and tutorial checks.
 
 The download route serves only `cli/star_tunnel.py`. The response is
 an attachment and sets `X-Content-Type-Options: nosniff`.

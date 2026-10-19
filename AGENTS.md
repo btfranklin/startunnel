@@ -77,7 +77,8 @@ runtime inspection and recovery commands.
 
 ## Definition of done
 
-Markdown changes also require `pdm run docs-structure` with Perfect Doc installed.
+Markdown changes require the Perfect Doc gate included in `pdm run check`.
+Run `pdm run docs-structure` for a focused check.
 
 A change is done when its domain tests pass, `pdm run check` passes, generated
 artifacts are current, affected documentation is current, and no secret is

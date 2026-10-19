@@ -33,7 +33,7 @@ from core.errors import (
     TunnelUnavailable,
 )
 from core.idempotency import begin as begin_idempotency
-from core.idempotency import find_replay, finish
+from core.idempotency import finish
 from core.limits import (
     DEFAULT_BOARD_LIMIT,
     MAX_BEACON_CHARACTERS,
@@ -126,6 +126,11 @@ def beacon_data(beacon: Beacon) -> dict[str, Any]:
     """Serialize the public summary without an address."""
 
     response_count = beacon.response_count or 0  # type: ignore[attr-defined]
+    ended_at = beacon.ended_at
+    end_reason = beacon.end_reason
+    if ended_at is None and beacon.expires_at <= timezone.now():
+        ended_at = beacon.expires_at
+        end_reason = Beacon.EndReason.EXPIRED
     return {
         "id": str(beacon.id),
         "tunnel_id": str(beacon.cycle.tunnel_id),
@@ -136,8 +141,8 @@ def beacon_data(beacon: Beacon) -> dict[str, Any]:
         "board_position": beacon.board_position,
         "published_at": beacon.published_at.isoformat(),
         "expires_at": beacon.expires_at.isoformat(),
-        "ended_at": beacon.ended_at.isoformat() if beacon.ended_at else None,
-        "end_reason": beacon.end_reason,
+        "ended_at": ended_at.isoformat() if ended_at else None,
+        "end_reason": end_reason,
         "response_count": response_count,
     }
 
@@ -291,21 +296,6 @@ def publish_beacon(
     canonical = canonical_address(address)
     request_data = {"address": canonical, "text": text, "lifetime_seconds": lifetime_seconds}
     tunnel, cycle = _locked_tunnel_and_cycle(credential=credential, address=address)
-    beacon = Beacon.objects.select_for_update().filter(cycle=cycle).first()
-    replay = find_replay(
-        credential=credential,
-        operation="publish_beacon",
-        key=idempotency_key,
-        request_data=request_data,
-    )
-    if replay:
-        return _replayed_beacon(replay.record), True
-    if cycle.state != Cycle.State.ACTIVE or tunnel.state != Tunnel.State.ACTIVE:
-        raise CycleClosed()
-    if cycle.creator_id != credential.id:
-        raise TunnelUnavailable()
-    if beacon is not None:
-        raise LifecycleConflict("This cycle already has a Beacon.")
     idempotency = begin_idempotency(
         credential=credential,
         operation="publish_beacon",
@@ -314,6 +304,13 @@ def publish_beacon(
     )
     if idempotency.replay:
         return _replayed_beacon(idempotency.record), True
+    beacon = Beacon.objects.select_for_update().filter(cycle=cycle).first()
+    if cycle.state != Cycle.State.ACTIVE or tunnel.state != Tunnel.State.ACTIVE:
+        raise CycleClosed()
+    if cycle.creator_id != credential.id:
+        raise TunnelUnavailable()
+    if beacon is not None:
+        raise LifecycleConflict("This cycle already has a Beacon.")
     position = _advance_board_position()
     now = _database_now()
     if cycle.expires_at <= now:
@@ -366,17 +363,6 @@ def withdraw_beacon(
     canonical = canonical_address(address)
     request_data = {"address": canonical, "beacon_id": str(beacon_id)}
     tunnel, cycle = _locked_tunnel_and_cycle(credential=credential, address=address)
-    beacon = Beacon.objects.select_for_update().filter(pk=beacon_id, cycle=cycle).first()
-    replay = find_replay(
-        credential=credential,
-        operation="withdraw_beacon",
-        key=idempotency_key,
-        request_data=request_data,
-    )
-    if replay:
-        return _replayed_beacon(replay.record), True
-    if beacon is None or beacon.publisher_id != credential.id or cycle.creator_id != credential.id:
-        raise TunnelUnavailable()
     idempotency = begin_idempotency(
         credential=credential,
         operation="withdraw_beacon",
@@ -385,6 +371,9 @@ def withdraw_beacon(
     )
     if idempotency.replay:
         return _replayed_beacon(idempotency.record), True
+    beacon = Beacon.objects.select_for_update().filter(pk=beacon_id, cycle=cycle).first()
+    if beacon is None or beacon.publisher_id != credential.id or cycle.creator_id != credential.id:
+        raise TunnelUnavailable()
     now = _database_now()
     if (
         cycle.state != Cycle.State.ACTIVE
@@ -424,7 +413,9 @@ def withdraw_beacon_as_admin(*, actor: User, beacon_id: UUID) -> dict[str, Any]:
         raise TunnelUnavailable()
     cycle = Cycle.objects.select_for_update().filter(beacon__pk=beacon_id).first()
     beacon = Beacon.objects.select_for_update().filter(pk=beacon_id).first()
-    if cycle is None or beacon is None or beacon.ended_at is not None:
+    if cycle is None or beacon is None or not cycle_is_readable(cycle):
+        raise TunnelUnavailable()
+    if beacon.ended_at is not None:
         raise LifecycleConflict()
     _end_locked(
         tunnel=tunnel,

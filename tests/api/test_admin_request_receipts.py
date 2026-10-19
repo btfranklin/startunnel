@@ -134,3 +134,15 @@ def test_existing_agent_receipt_keeps_omitted_browser_defaults(
         assert response["X-Startunnel-Operation-Id"] == str(receipt.id)
         assert response.content.decode().strip() == secret
     assert AdminReceipt.objects.count() == 1
+
+
+def test_cleared_operation_result_is_unavailable(client: Client, user_factory: Any) -> None:
+    actor = user_factory()
+    _, key = issue_admin_key(owner=actor, name="Receipt reader")
+    receipt = _old_receipt(actor, "agents.create", {"name": "Expired"}, "cleared-result")
+    response = client.get(
+        f"/api/v1/admin/operations/{receipt.id}",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"

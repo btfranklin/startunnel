@@ -266,6 +266,7 @@ def revoke_agent(request: HttpRequest) -> HttpResponseRedirect:
     return redirect("site:agents")
 
 
+@never_cache
 @login_required
 @require_http_methods(["GET", "POST"])
 def tunnels(request: HttpRequest) -> HttpResponse:
@@ -340,7 +341,18 @@ def tunnels(request: HttpRequest) -> HttpResponse:
             ),
             Prefetch(
                 "cycles",
-                queryset=Cycle.objects.select_related("root_message").order_by("-number")[:10],
+                queryset=Cycle.objects.select_related("root_message")
+                .only(
+                    "id",
+                    "tunnel_id",
+                    "number",
+                    "state",
+                    "message_count",
+                    "root_message_id",
+                    "root_message__sender_name",
+                    "root_message__session",
+                )
+                .order_by("-number")[:10],
                 to_attr="history_cycles",
             ),
         ),

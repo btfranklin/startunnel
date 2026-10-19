@@ -9,7 +9,8 @@ import pytest
 from core.errors import InvalidRequest
 from core.limits import Limits
 from tunnels.cycles import create_tunnel
-from tunnels.messages import get_subtree, post_reply
+from tunnels.message_data import message_payload
+from tunnels.messages import get_branch, get_subtree, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -116,3 +117,15 @@ def test_subtree_continuation_must_belong_to_selected_descendants(
             max_depth=depth,
             after_sequence=after,
         )
+
+
+def test_branch_loads_ordered_ancestors_with_bounded_queries(
+    branched_tree: tuple[Any, Any, list[Any]], django_assert_num_queries: Any
+) -> None:
+    credential, created, messages = branched_tree
+    with django_assert_num_queries(7, exact=False):
+        branch = get_branch(
+            credential=credential, address=created.address, message_id=messages[-1].id
+        )
+        payloads = [message_payload(message) for message in branch]
+    assert [item["sequence"] for item in payloads] == [1, 2, 4, 6]

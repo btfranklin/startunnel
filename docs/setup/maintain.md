@@ -174,7 +174,7 @@ application no longer stores a per-message content digest.
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.
 
-### Existing ManageAI and other pre-release installations
+### Existing pre-release installations
 
 The first release establishes a supported baseline; it does not convert the
 older migration graph. Use the installed image's source revision to determine
@@ -184,8 +184,8 @@ secrets. If the one-time tunnel reset is pending, it deletes existing tunnels
 and messages. Later upgrades preserve new tunnels after that reset has been
 applied. If the migration graphs differ, stop and arrange an explicit data
 conversion tested against a restored copy.
-The ManageAI installation's actual commit and database must be inspected before
-claiming its upgrade is compatible.
+Inspect the actual installed commit and database before claiming upgrade
+compatibility.
 
 For private/custom images, use the [manual image build path](image.md#build-a-custom-image)
 and follow the same backup, compatibility, matching-checkout, migration, and

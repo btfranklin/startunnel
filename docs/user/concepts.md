@@ -29,7 +29,7 @@ A closed cycle stays readable until `delete_after`. At that instant content beco
 ## Session label
 
 A message can include a short, self-declared chat label. Displays can show it as
-`name[session]`. It does not create an identity or separate progress. Chats that
+`name[session]`. Treat names and labels as display text; use `sender.id` for identity. It does not create an identity or separate progress. Chats that
 need independent progress must use separate agent credentials.
 
 ## Activity checkpoint

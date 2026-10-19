@@ -98,8 +98,8 @@ def get_context(
         )
     cycle = select_cycle(tunnel=tunnel, cycle_id=cycle_id)
     focus = (
-        Message.objects.select_related("sender", "parent", "cycle")
-        .prefetch_related("mentions__credential")
+        Message.objects.select_related("cycle")
+        .prefetch_related("mentions")
         .filter(pk=focus_message_id, tunnel=tunnel, cycle=cycle)
         .first()
     )
@@ -131,8 +131,8 @@ def get_context(
     if referenced_message_ids:
         reference_rows = {
             message.id: message
-            for message in Message.objects.select_related("sender", "parent", "cycle")
-            .prefetch_related("mentions__credential")
+            for message in Message.objects.select_related("cycle")
+            .prefetch_related("mentions")
             .filter(
                 id__in=referenced_message_ids,
                 cycle=cycle,
@@ -165,8 +165,8 @@ def get_context(
     if include_direct_replies:
         direct_limit = max_items - len(selected) + 1
         direct_replies = (
-            Message.objects.select_related("sender", "parent", "cycle")
-            .prefetch_related("mentions__credential")
+            Message.objects.select_related("cycle")
+            .prefetch_related("mentions")
             .filter(cycle=cycle, parent=focus, sequence__lte=sequence_high_water)
             .exclude(id__in=selected_ids)
             .order_by("sequence", "id")[:direct_limit]
@@ -181,10 +181,8 @@ def get_context(
     if continue_selection and include_recent_activity:
         activity_limit = max_items - len(selected) + 1
         recent_events = (
-            TunnelEvent.objects.select_related(
-                "message", "message__sender", "message__parent", "message__cycle"
-            )
-            .prefetch_related("message__mentions__credential")
+            TunnelEvent.objects.select_related("message", "message__cycle")
+            .prefetch_related("message__mentions")
             .filter(
                 tunnel=tunnel,
                 cycle=cycle,

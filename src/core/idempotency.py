@@ -10,7 +10,6 @@ from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
 from django.utils import timezone
 
 from agents.models import AgentCredential
@@ -49,36 +48,11 @@ def _request_digest(request_data: dict[str, Any]) -> bytes:
     return hashlib.sha256(canonical).digest()
 
 
-def find_replay(
-    *, credential: AgentCredential, operation: str, key: str, request_data: dict[str, Any]
-) -> IdempotencyResult | None:
-    """Return an exact current replay without creating a record for a new request."""
-
-    validate_idempotency_key(key)
-    now = timezone.now()
-    key_hash = _key_digest(key)
-    request_hash = _request_digest(request_data)
-    record = (
-        AgentReceipt.objects.select_for_update()
-        .filter(
-            credential=credential,
-            operation=operation,
-            key_digest=key_hash,
-            expires_at__gt=now,
-        )
-        .first()
-    )
-    if not record:
-        return None
-    if not hmac.compare_digest(bytes(record.request_digest), request_hash):
-        raise IdempotencyConflict()
-    return IdempotencyResult(record=record, replay=True)
-
-
-@transaction.atomic
 def begin(
     *, credential: AgentCredential, operation: str, key: str, request_data: dict[str, Any]
 ) -> IdempotencyResult:
+    """Reserve or replay a receipt inside the caller's write transaction."""
+
     validate_idempotency_key(key)
     now = timezone.now()
     key_hash = _key_digest(key)

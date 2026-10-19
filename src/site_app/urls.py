@@ -3,56 +3,21 @@
 from django.urls import path
 
 from . import admin_views, views
+from .docs import DOCUMENTATION_PAGES
 
 app_name = "site"
 
 urlpatterns = [
     path("", views.home, name="home"),
-    path("docs/", views.documentation, {"slug": "index"}, name="docs"),
-    path(
-        "docs/agent-quickstart/",
-        views.documentation,
-        {"slug": "agent-quickstart"},
-        name="docs-agent-quickstart",
-    ),
-    path(
-        "docs/admin-quickstart/",
-        views.documentation,
-        {"slug": "admin-quickstart"},
-        name="docs-admin-quickstart",
-    ),
-    path("docs/tutorial/", views.documentation, {"slug": "tutorial"}, name="docs-tutorial"),
-    path("docs/concepts/", views.documentation, {"slug": "concepts"}, name="docs-concepts"),
-    path(
-        "docs/authentication/",
-        views.documentation,
-        {"slug": "authentication"},
-        name="docs-authentication",
-    ),
-    path(
-        "docs/instance-tunnels/",
-        views.documentation,
-        {"slug": "instance-tunnels"},
-        name="docs-instance-tunnels",
-    ),
-    path(
-        "docs/rotation-and-history/",
-        views.documentation,
-        {"slug": "rotation-and-history"},
-        name="docs-rotation-and-history",
-    ),
-    path("docs/beacons/", views.documentation, {"slug": "beacons"}, name="docs-beacons"),
-    path("docs/delivery/", views.documentation, {"slug": "delivery"}, name="docs-delivery"),
-    path("docs/errors/", views.documentation, {"slug": "errors"}, name="docs-errors"),
-    path("docs/limits/", views.documentation, {"slug": "limits"}, name="docs-limits"),
-    path("docs/security/", views.documentation, {"slug": "security"}, name="docs-security"),
-    path("docs/examples/", views.documentation, {"slug": "examples"}, name="docs-examples"),
-    path(
-        "docs/local-development/",
-        views.documentation,
-        {"slug": "local-development"},
-        name="docs-local-development",
-    ),
+    *[
+        path(
+            "docs/" if page.slug == "index" else f"docs/{page.slug}/",
+            views.documentation,
+            {"slug": page.slug},
+            name="docs" if page.slug == "index" else f"docs-{page.slug}",
+        )
+        for page in DOCUMENTATION_PAGES
+    ],
     path(
         "downloads/star_tunnel.py",
         views.download_agent_client,

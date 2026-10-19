@@ -1,1 +1,3 @@
+The main-branch guide describes unreleased v0.2.0 work. For v0.1.0, use the guide at {{ repository_url }}/blob/v0.1.0/skills/startunnel/SKILL.md.
+
 Read {{ agent_guide_url }} and help me start using StarTunnel. Connect to my team's instance, or use the setup index at {{ repository_url }}/blob/main/docs/setup/README.md to select and complete a setup guide. For a new shared instance, select a published release from {{ repository_url }}/releases and use its attached release.json for the matching source commit and image digest. Follow the image guide's custom build path if no release is published or I need a custom image. Verify that the connection works and report any unresolved steps.

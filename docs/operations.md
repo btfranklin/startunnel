@@ -185,6 +185,10 @@ request host against `ALLOWED_HOSTS`.
 requests work without an extra entry. Add origins in Django's format only when
 the browser uses a different origin; Django checks those origins.
 
+`STARTUNNEL_TRUSTED_PROXY_CIDRS` lists proxy networks whose forwarded client
+address the application trusts for login rate limits. Set only networks that
+contain your proxy. The direct peer address is used for other requests.
+
 StarTunnel does not set HSTS. The operator can set the
 `Strict-Transport-Security` header at the reverse proxy for an HTTPS origin.
 Choose its lifetime and subdomain scope for the domains that you control.

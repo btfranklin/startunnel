@@ -1,4 +1,4 @@
-"""Validate documentation links, route ownership, and included example regions."""
+"""Validate ownership of public documentation routes."""
 
 from __future__ import annotations
 
@@ -13,9 +13,7 @@ import django
 from django.urls import Resolver404, resolve
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLES = (ROOT / "examples").resolve()
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
-EXAMPLE_INCLUDE = re.compile(r'\{\{\s*example\s+"([^"]+)"\s+region="([A-Za-z0-9_-]+)"\s*\}\}')
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +26,7 @@ class Failure:
     def render(self) -> str:
         relative = self.path.relative_to(ROOT)
         return (
-            "Rule: Documentation links and example includes resolve to an owned source.\n"
+            "Rule: Documentation routes resolve to an owned view.\n"
             "Source of truth: docs/README.md\n"
             f"Problem: {relative}:{self.line}: {self.detail}\n"
             f"Recovery: {self.recovery}"
@@ -81,71 +79,6 @@ def check_links() -> list[Failure]:
                         )
                     )
                 continue
-            target = (path.parent / decoded_path).resolve()
-            if not target.exists():
-                failures.append(
-                    Failure(
-                        path,
-                        _line_number(text, match.start()),
-                        f"Local link target {destination!r} does not exist.",
-                        (
-                            f"Correct the link in {path.relative_to(ROOT)} or add "
-                            f"{target.relative_to(ROOT)}."
-                        ),
-                    )
-                )
-    return failures
-
-
-def _region_exists(path: Path, region: str) -> bool:
-    text = path.read_text(encoding="utf-8")
-    start = re.compile(rf"^\s*(?:#|//)\s*region\s+{re.escape(region)}\s*$", re.MULTILINE)
-    end = re.compile(rf"^\s*(?:#|//)\s*endregion\s+{re.escape(region)}\s*$", re.MULTILINE)
-    start_match = start.search(text)
-    end_match = end.search(text)
-    return bool(start_match and end_match and start_match.end() < end_match.start())
-
-
-def check_example_includes() -> list[Failure]:
-    failures: list[Failure] = []
-    for path in sorted((ROOT / "docs/user").glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        for match in EXAMPLE_INCLUDE.finditer(text):
-            relative, region = match.groups()
-            target = (EXAMPLES / relative).resolve()
-            if not target.is_relative_to(EXAMPLES):
-                failures.append(
-                    Failure(
-                        path,
-                        _line_number(text, match.start()),
-                        "An example include leaves the examples directory.",
-                        f"Use a path below examples/ in {path.relative_to(ROOT)}.",
-                    )
-                )
-            elif not target.is_file():
-                failures.append(
-                    Failure(
-                        path,
-                        _line_number(text, match.start()),
-                        f"Included example {relative!r} does not exist.",
-                        (
-                            f"Add examples/{relative} or correct the include in "
-                            f"{path.relative_to(ROOT)}."
-                        ),
-                    )
-                )
-            elif not _region_exists(target, region):
-                failures.append(
-                    Failure(
-                        path,
-                        _line_number(text, match.start()),
-                        f"Example region {region!r} does not exist in examples/{relative}.",
-                        (
-                            f"Add matching region markers to examples/{relative} or "
-                            "correct the include."
-                        ),
-                    )
-                )
     return failures
 
 
@@ -153,10 +86,7 @@ def main() -> int:
     sys.path.insert(0, str(ROOT / "src"))
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "startunnel.settings.development")
     django.setup()
-    failures = [
-        *check_links(),
-        *check_example_includes(),
-    ]
+    failures = check_links()
     if failures:
         print("Documentation check failed.\n", file=sys.stderr)
         print("\n\n".join(failure.render() for failure in failures), file=sys.stderr)

@@ -9,12 +9,13 @@ from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST, require_safe
+from pydantic import ValidationError
 
 from accounts.admin_commands import AccountPassword, AdminCommand, KeyCreate, KeyRevoke
 from accounts.admin_data import AdminOperationResult, OperationReference
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import User
-from core.errors import DomainError
+from core.errors import DomainError, InvalidRequest
 
 
 def private_download(
@@ -35,9 +36,18 @@ def browser_operation(
 ) -> AdminOperationResult:
     if not isinstance(request.user, User):
         raise Http404
+    try:
+        command = command_type.model_validate(data)
+    except ValidationError as error:
+        details = error.errors(include_url=False, include_input=False)
+        raise InvalidRequest(
+            " ".join(
+                f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}." for item in details
+            )
+        ) from error
     return execute_admin_operation(
         actor=request.user,
-        command=command_type.model_validate(data),
+        command=command,
         key=request.POST.get("idempotency_key", ""),
         request_data=data,
     )

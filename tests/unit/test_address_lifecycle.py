@@ -30,11 +30,12 @@ def test_any_active_admin_can_rotate_an_address(credential_factory: Any, user_fa
     administrator = user_factory()
     created = _create(creator)
 
-    rotated = rotate_address_as_admin(
+    rotate_address_as_admin(
         actor=administrator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
     )
+    rotated = created.tunnel.addresses.get(state="current")
 
     assert rotated.generation == 2
     assert rotated.address != created.address

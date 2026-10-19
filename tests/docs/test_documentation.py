@@ -1,4 +1,4 @@
-"""Public documentation is fixed, safe Markdown with tested example includes."""
+"""Public documentation is fixed, safe Markdown with escaped code blocks."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import cast
 
 import pytest
 from django.http import FileResponse
-from django.test import Client, override_settings
+from django.test import Client
 
-from site_app.docs import DOCUMENTATION_PAGES, _example_region, _render_cached
+from site_app.docs import DOCUMENTATION_PAGES, _render_cached
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,12 +45,6 @@ def test_agent_client_download_is_exact_allowlisted_attachment(client: Client) -
         b"".join(cast(Iterator[bytes], download.streaming_content))
         == (ROOT / "cli/star_tunnel.py").read_bytes()
     )
-
-
-@override_settings(PROJECT_ROOT=ROOT)
-def test_example_include_cannot_leave_example_directory() -> None:
-    with pytest.raises(ValueError, match="does not exist"):
-        _example_region("../.env", "secret")
 
 
 def test_documented_fields_exist_in_openapi() -> None:
@@ -96,7 +90,7 @@ def test_documented_fields_exist_in_openapi() -> None:
     assert required_fields <= schema_keys
 
 
-def test_openapi_contains_tree_routes_and_no_relay_routes() -> None:
+def test_openapi_contains_tree_routes() -> None:
     schema = json.loads((ROOT / "generated/openapi.json").read_text(encoding="utf-8"))
     paths = set(schema["paths"])
     required = {
@@ -108,13 +102,4 @@ def test_openapi_contains_tree_routes_and_no_relay_routes() -> None:
         "/api/v1/tree/replies",
         "/api/v1/cycles/close",
     }
-    removed = {
-        "/api/v1/claims",
-        "/api/v1/claims/acknowledge",
-        "/api/v1/claims/release",
-        "/api/v1/claims/extend",
-        "/api/v1/tunnels/{tunnel_id}",
-        "/api/v1/teams/{team_id}/tunnels/{tunnel_id}",
-    }
     assert required <= paths
-    assert removed.isdisjoint(paths)

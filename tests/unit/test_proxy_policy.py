@@ -23,7 +23,7 @@ def test_untrusted_peer_cannot_spoof_forwarded_client_address() -> None:
 
     middleware = TrustedProxyMiddleware(endpoint)
     request = RequestFactory().get(
-        "/api/v1/claims",
+        "/api/v1/tunnels",
         HTTP_X_FORWARDED_FOR="198.51.100.10",
         HTTP_X_FORWARDED_PROTO="https",
         REMOTE_ADDR="203.0.113.8",
@@ -45,7 +45,7 @@ def test_trusted_peer_can_supply_one_replaced_client_address() -> None:
 
     middleware = TrustedProxyMiddleware(endpoint)
     request = RequestFactory().get(
-        "/api/v1/claims",
+        "/api/v1/tunnels",
         HTTP_X_FORWARDED_FOR="198.51.100.10",
         HTTP_X_FORWARDED_PROTO="https",
         REMOTE_ADDR="10.4.3.2",

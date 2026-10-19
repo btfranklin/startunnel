@@ -224,6 +224,9 @@ LOGGING = {
     },
     "root": {"handlers": ["console"], "level": LOG_LEVEL},
     "loggers": {
+        "uvicorn": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        "uvicorn.error": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        "uvicorn.access": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
         "django.server": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
         "django.request": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
     },

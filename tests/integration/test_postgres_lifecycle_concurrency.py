@@ -314,11 +314,11 @@ def test_retirement_racing_start_always_ends_retired(credential_factory: Any) ->
     assert len(cycles) == (2 if outcomes[1] == "started" else 1)
 
 
-@pytest.mark.parametrize("operation", ["close", "rollover"])
+@pytest.mark.parametrize("operation", ["start", "close", "rollover"])
 def test_concurrent_identical_lifecycle_retries_replay_success(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
-    from core.idempotency import find_replay
+    from tunnels.access import resolve_tunnel
 
     creator, _ = credential_factory()
     created = create_tunnel(
@@ -326,14 +326,20 @@ def test_concurrent_identical_lifecycle_retries_replay_success(
         idempotency_key="pg-exact-retry-create",
         root_content={"type": "text", "text": "First root."},
     )
+    if operation == "start":
+        close_cycle(
+            credential=creator,
+            idempotency_key="pg-exact-retry-close",
+            address=created.address,
+            expected_cycle_id=created.cycle.id,
+        )
     barrier = threading.Barrier(2)
 
-    def synchronized_initial_replay(**kwargs: Any) -> Any:
-        found = find_replay(**kwargs)
+    def synchronized_resolution(**kwargs: Any) -> Any:
         barrier.wait(timeout=15)
-        return found
+        return resolve_tunnel(**kwargs)
 
-    monkeypatch.setattr("tunnels.cycles.find_idempotency_replay", synchronized_initial_replay)
+    monkeypatch.setattr("tunnels.cycles.resolve_tunnel", synchronized_resolution)
 
     def attempt(_: int) -> UUID | None:
         close_old_connections()
@@ -347,23 +353,23 @@ def test_concurrent_identical_lifecycle_retries_replay_success(
                     idempotency_key="pg-identical-lifecycle-retry",
                 )
                 return None
-            return rollover_cycle(
+            arguments: dict[str, Any] = dict(
                 credential=credential,
                 address=created.address,
-                expected_cycle_id=created.cycle.id,
                 idempotency_key="pg-identical-lifecycle-retry",
                 expected_address_generation=1,
                 root_content={"type": "text", "text": "Next root."},
-            ).cycle.id
+            )
+            if operation == "start":
+                return start_cycle(**arguments).cycle.id
+            return rollover_cycle(**arguments, expected_cycle_id=created.cycle.id).cycle.id
         finally:
             close_old_connections()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(attempt, range(2)))
     assert results[0] == results[1]
-    assert Cycle.objects.filter(tunnel=created.tunnel).count() == (
-        2 if operation == "rollover" else 1
-    )
+    assert Cycle.objects.filter(tunnel=created.tunnel).count() == (1 if operation == "close" else 2)
     assert (
         TunnelEvent.objects.filter(
             tunnel=created.tunnel, event_type=TunnelEvent.Type.CYCLE_CLOSED

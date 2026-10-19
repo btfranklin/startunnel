@@ -8,8 +8,10 @@ from typing import Any
 from uuid import UUID
 
 from django.contrib.postgres.search import SearchHeadline, SearchQuery, SearchRank, SearchVector
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection, transaction
 from django.db.models import BigIntegerField, F, Q, QuerySet, TextField, Value
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import Cast, Coalesce
 
 from agents.models import AgentCredential
@@ -47,7 +49,7 @@ def search_hit_payload(hit: SearchHit) -> dict[str, Any]:
         "correlation_id": message.correlation_id or None,
         "sequence": message.sequence,
         "depth": message.depth,
-        "created_at": message.created_at.isoformat(),
+        "created_at": DjangoJSONEncoder().default(message.created_at),
         "rank": hit.rank,
         "snippet": hit.snippet,
     }
@@ -66,19 +68,32 @@ class SearchPage:
     used_bytes: int
 
 
-def _branch_message_ids(*, cycle: Cycle, root_id: UUID, high_water: int) -> set[UUID]:
-    rows = list(
-        Message.objects.filter(cycle=cycle, sequence__lte=high_water)
-        .order_by("sequence", "id")
-        .values_list("id", "parent_id")
-    )
-    if not any(message_id == root_id for message_id, _parent_id in rows):
+def _branch_message_ids(*, cycle: Cycle, root_id: UUID, high_water: int) -> RawSQL:
+    if not Message.objects.filter(pk=root_id, cycle=cycle, sequence__lte=high_water).exists():
         raise CycleUnavailable()
-    descendants = {root_id}
-    for message_id, parent_id in rows:
-        if parent_id in descendants:
-            descendants.add(message_id)
-    return descendants
+    table = connection.ops.quote_name(Message._meta.db_table)
+    pk = Message._meta.pk
+    return RawSQL(
+        f"""
+        WITH RECURSIVE branch AS (
+            SELECT id, sequence FROM {table}
+            WHERE id = %s AND cycle_id = %s AND sequence <= %s
+            UNION ALL
+            SELECT child.id, child.sequence FROM {table} AS child
+            JOIN branch ON child.parent_id = branch.id
+            WHERE child.cycle_id = %s AND child.sequence <= %s
+              AND child.sequence > branch.sequence
+        )
+        SELECT id FROM branch
+        """,
+        [
+            pk.get_db_prep_value(root_id, connection),
+            pk.get_db_prep_value(cycle.id, connection),
+            high_water,
+            pk.get_db_prep_value(cycle.id, connection),
+            high_water,
+        ],
+    )
 
 
 def _base_query(
@@ -92,10 +107,8 @@ def _base_query(
     sequence_after: int | None,
     sequence_before: int | None,
 ) -> QuerySet[Message]:
-    result = (
-        Message.objects.select_related("sender", "parent")
-        .prefetch_related("mentions__credential")
-        .filter(cycle=cycle, sequence__lte=high_water)
+    result = Message.objects.prefetch_related("mentions").filter(
+        cycle=cycle, sequence__lte=high_water
     )
     if sender_id is not None:
         result = result.filter(sender_id=sender_id)

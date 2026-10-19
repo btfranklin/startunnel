@@ -12,9 +12,10 @@ from django.test.utils import CaptureQueriesContext
 from core.errors import ContextBudgetTooSmall, CycleUnavailable
 from tunnels.activity import commit_checkpoint
 from tunnels.context import context_item_payload, get_context
-from tunnels.cycles import create_tunnel
-from tunnels.messages import post_reply
+from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.messages import get_branch, get_message, load_branch, post_reply, read_tree
 from tunnels.models import ActivityCheckpoint
+from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
 
@@ -203,3 +204,78 @@ def test_context_does_not_advance_the_saved_checkpoint(credential_factory: Any) 
     checkpoint.refresh_from_db()
     assert checkpoint.last_event_position == 2
     assert ActivityCheckpoint.objects.count() == 1
+
+
+@pytest.mark.parametrize("depth", [1, 32])
+def test_branch_and_context_query_counts_do_not_grow_with_depth(
+    credential_factory: Any, depth: int
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator)
+    expected_ids = [created.root.id]
+    focus = created.root
+    for index in range(depth):
+        focus = _reply(created, creator, f"context-depth-{index}", "Reply.", focus.id)
+        expected_ids.append(focus.id)
+
+    with CaptureQueriesContext(connection) as branch_queries:
+        branch = get_branch(credential=creator, address=created.address, message_id=focus.id)
+        assert [message.id for message in branch] == expected_ids
+        for message in branch:
+            context_item_payload(message, "ancestor")
+    assert len(branch_queries) <= 7
+
+    with CaptureQueriesContext(connection) as context_queries:
+        context = get_context(
+            credential=creator,
+            address=created.address,
+            focus_message_id=focus.id,
+            include_direct_replies=False,
+            include_recent_activity=False,
+        )
+    assert [item.message.id for item in context.items] == expected_ids
+    assert len(context_queries) <= 10
+
+
+def test_tree_counts_match_current_and_older_snapshots(credential_factory: Any) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator)
+    first = _reply(created, creator, "tree-count-first", "Café 🜣.")
+    second = _reply(created, creator, "tree-count-second", "Later.")
+
+    with CaptureQueriesContext(connection) as queries:
+        current = read_tree(credential=creator, address=created.address, limit=1)
+    assert current.message_count == 3
+    assert current.content_bytes == created.root.byte_count + first.byte_count + second.byte_count
+    assert len(queries) <= 5
+
+    snapshot = read_tree(
+        credential=creator,
+        address=created.address,
+        snapshot_sequence=first.sequence,
+        after_sequence=created.root.sequence,
+    )
+    assert snapshot.message_count == 2
+    assert snapshot.content_bytes == created.root.byte_count + first.byte_count
+    assert [message.id for message in snapshot.messages] == [first.id]
+
+
+def test_branch_reports_unavailable_when_retention_removes_its_focus(
+    credential_factory: Any, settings: Any
+) -> None:
+    settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 60
+    creator, _ = credential_factory()
+    created = _create(creator)
+    focus = get_message(credential=creator, address=created.address, message_id=created.root.id)
+    close_cycle(
+        credential=creator,
+        address=created.address,
+        expected_cycle_id=created.cycle.id,
+        idempotency_key="context-retained-close",
+    )
+    created.cycle.refresh_from_db()
+    assert created.cycle.delete_after is not None
+    assert delete_due_cycle_content(cycle_id=created.cycle.id, now=created.cycle.delete_after)
+
+    with pytest.raises(CycleUnavailable):
+        load_branch(focus)

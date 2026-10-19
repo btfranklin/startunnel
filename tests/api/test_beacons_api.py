@@ -329,3 +329,101 @@ def test_board_wait_rejects_invalid_requests(
 ) -> None:
     _, key = credential_factory()
     assert _post(client, "/api/v1/beacons/wait", body, key).status_code == 400
+
+
+def test_admin_beacon_reads_apply_deadlines_without_maintenance(
+    client: Any, credential_factory: Any, user_factory: Any
+) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from tunnels.beacons import publish_beacon
+    from tunnels.cycles import create_tunnel
+    from tunnels.models import Beacon, Cycle
+
+    creator, _ = credential_factory()
+    _, key = issue_admin_key(owner=user_factory(), name="Beacon reader")
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="admin-deadline-create",
+        root_content={"type": "text", "text": "Root"},
+    )
+    published, _ = publish_beacon(
+        credential=creator,
+        idempotency_key="admin-deadline-publish",
+        address=created.address,
+        text="Retained summary",
+    )
+    beacon_id = published["id"]
+    expiry = timezone.now() - timedelta(seconds=1)
+    Beacon.objects.filter(pk=beacon_id).update(expires_at=expiry)
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
+    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", **headers)
+    assert detail.status_code == 200
+    assert detail.json()["text"] == "Retained summary"
+    assert detail.json()["end_reason"] == "expired"
+    assert detail.json()["ended_at"] is not None
+    assert Beacon.objects.get(pk=beacon_id).ended_at is None
+
+    Cycle.objects.filter(pk=created.cycle.id).update(
+        expires_at=expiry,
+        retention_seconds=0,
+    )
+    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", **headers)
+    listing = client.get("/api/v1/admin/beacons", **headers)
+    assert detail.json()["text"] == ""
+    assert listing.json()["items"][0]["text"] == ""
+    assert Beacon.objects.get(pk=beacon_id).text == "Retained summary"
+    unavailable = _post(
+        client,
+        "/api/v1/admin/beacons/withdraw",
+        {"beacon_id": beacon_id},
+        key,
+        "withdraw-unreadable-summary",
+    )
+    assert unavailable.status_code == 404
+    assert b"Retained summary" not in unavailable.content
+    assert Beacon.objects.get(pk=beacon_id).ended_at is None
+
+
+def test_admin_beacon_receipt_stops_at_cycle_read_deadline(
+    client: Any, credential_factory: Any, user_factory: Any
+) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from tunnels.beacons import publish_beacon
+    from tunnels.cycles import create_tunnel
+    from tunnels.models import Cycle
+
+    creator, _ = credential_factory()
+    _, key = issue_admin_key(owner=user_factory(), name="Withdraw reader")
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="receipt-deadline-create",
+        root_content={"type": "text", "text": "Root"},
+    )
+    published, _ = publish_beacon(
+        credential=creator,
+        idempotency_key="receipt-deadline-publish",
+        address=created.address,
+        text="Summary for withdrawal",
+    )
+    body = {"beacon_id": published["id"]}
+    withdrawn = _post(client, "/api/v1/admin/beacons/withdraw", body, key, "deadline-withdraw")
+    assert withdrawn.status_code == 200
+    operation_id = withdrawn.json()["operation"]["id"]
+    operation_url = f"/api/v1/admin/operations/{operation_id}"
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
+    assert client.get(operation_url, **headers).status_code == 200
+    Cycle.objects.filter(pk=created.cycle.id).update(
+        expires_at=timezone.now() - timedelta(seconds=1),
+        retention_seconds=0,
+    )
+    assert client.get(operation_url, **headers).status_code == 400
+    assert (
+        _post(client, "/api/v1/admin/beacons/withdraw", body, key, "deadline-withdraw").status_code
+        == 400
+    )

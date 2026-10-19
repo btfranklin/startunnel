@@ -2,26 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models.functions import Now
 from django.utils import timezone
 
 from accounts.models import User
 from core import limits as instance_limits
 from core.audit import record_event
 from core.errors import (
+    CycleClosed,
     InvalidRequest,
     LifecycleConflict,
     TunnelUnavailable,
 )
 from core.logging import current_request_id
 
-from .access import active_cycle
-from .codec import display_address
 from .cycles import (
     StartedCycle,
     _allocate_random_address,
@@ -39,14 +36,6 @@ from .models import (
     TunnelAddress,
     TunnelEvent,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class RotatedAddress:
-    tunnel: Tunnel
-    address: str
-    display_address: str
-    generation: int
 
 
 @transaction.atomic
@@ -99,7 +88,13 @@ def _start_cycle_as_admin_locked(
     )
     session = _validate_session(root_session)
     if expected_cycle_id is not None:
-        cycle = active_cycle(tunnel=tunnel, for_update=True)
+        cycle = (
+            Cycle.objects.select_for_update()
+            .filter(tunnel=tunnel, state=Cycle.State.ACTIVE)
+            .first()
+        )
+        if cycle is None:
+            raise CycleClosed()
         if cycle.id != expected_cycle_id:
             raise LifecycleConflict()
         _close_for_rollover_locked(
@@ -176,7 +171,7 @@ def retirement_confirmation(tunnel: Tunnel) -> str:
 
 def _rotate_locked_address(
     *, tunnel: Tunnel, actor: User, expected_address_generation: int
-) -> RotatedAddress:
+) -> None:
     if tunnel.state == Tunnel.State.RETIRED:
         raise LifecycleConflict()
     cycle = (
@@ -191,7 +186,7 @@ def _rotate_locked_address(
     current.retirement_reason = "operator_rotation"
     current.save(update_fields=["state", "retired_at", "retirement_reason"])
     generation = current.generation + 1
-    _row, address = _allocate_random_address(tunnel=tunnel, generation=generation)
+    _allocate_random_address(tunnel=tunnel, generation=generation)
     event_position = tunnel.next_event_position
     tunnel.next_event_position = event_position + 1
     tunnel.save(update_fields=["next_event_position"])
@@ -201,21 +196,10 @@ def _rotate_locked_address(
         event_type=TunnelEvent.Type.ADDRESS_ROTATED,
         metadata={"generation": generation},
     )
-    if cycle is not None and tunnel.state == Tunnel.State.ACTIVE:
-        beacon = (
-            Beacon.objects.select_for_update(of=("self",))
-            .filter(
-                cycle=cycle,
-                ended_at__isnull=True,
-                expires_at__gt=Now(),
-                cycle__expires_at__gt=Now(),
-            )
-            .first()
-        )
-        if beacon is not None:
-            from .beacons import _advance_board_position
+    if cycle is not None:
+        from .beacons import end_beacon_for_cycle_locked
 
-            _advance_board_position()
+        end_beacon_for_cycle_locked(tunnel=tunnel, cycle=cycle, reason=Beacon.EndReason.WITHDRAWN)
     record_event(
         actor_user=actor,
         action="tunnel.address_rotated",
@@ -223,12 +207,6 @@ def _rotate_locked_address(
         target_id=tunnel.id,
         request_id=current_request_id(),
         metadata={"generation": generation},
-    )
-    return RotatedAddress(
-        tunnel=tunnel,
-        address=address,
-        display_address=display_address(address),
-        generation=generation,
     )
 
 
@@ -238,9 +216,9 @@ def rotate_address_as_admin(
     actor: User,
     tunnel_id: UUID,
     expected_address_generation: int,
-) -> RotatedAddress:
+) -> None:
     tunnel = _locked_admin_tunnel(actor=actor, tunnel_id=tunnel_id)
-    return _rotate_locked_address(
+    _rotate_locked_address(
         tunnel=tunnel,
         actor=actor,
         expected_address_generation=expected_address_generation,

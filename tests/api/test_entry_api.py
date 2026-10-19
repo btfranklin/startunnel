@@ -219,11 +219,12 @@ def test_entry_rechecks_rotated_and_retired_addresses(
     creator, key = credential_factory(name="Lifecycle entry creator")
     operator = user_factory()
     created = _create(creator, "entry-lifecycle-create")
-    rotated = rotate_address_as_admin(
+    rotate_address_as_admin(
         actor=operator,
         tunnel_id=created.tunnel.id,
         expected_address_generation=1,
     )
+    rotated = created.tunnel.addresses.get(state="current")
 
     old_address = _post(client, "/api/v1/enter", {"address": created.address}, key=key)
     current_address = _post(client, "/api/v1/enter", {"address": rotated.address}, key=key)

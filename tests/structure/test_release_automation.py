@@ -1189,7 +1189,7 @@ def test_pull_request_workflow_has_all_non_live_release_lanes() -> None:
     )
     matrix = jobs["standalone-cli"]["strategy"]["matrix"]
     assert set(matrix["python"]) == {"3.10", "3.14"}
-    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest"}
+    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest", "macos-latest"}
     for job in jobs.values():
         assert not job.get("secrets")
         for environment in [

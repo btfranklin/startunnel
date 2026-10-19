@@ -179,3 +179,58 @@ def test_cycle_close_racing_withdraw_ends_beacon_once(credential_factory: Any) -
     )
     events = list(TunnelEvent.objects.filter(tunnel=created.tunnel).order_by("position"))
     assert [event.position for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.parametrize("operation", ["publish", "withdraw"])
+def test_concurrent_identical_beacon_retries_return_one_result(
+    credential_factory: Any, operation: str
+) -> None:
+    creator, _ = credential_factory()
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="pg-beacon-retry-create",
+        root_content={"type": "text", "text": "Root."},
+    )
+    beacon_id = None
+    if operation == "withdraw":
+        published, _ = publish_beacon(
+            credential=creator,
+            idempotency_key="pg-beacon-retry-initial-publish",
+            address=created.address,
+            text="Review this.",
+        )
+        beacon_id = UUID(published["id"])
+    barrier = threading.Barrier(2)
+
+    def attempt(_: int) -> tuple[dict[str, Any], bool]:
+        close_old_connections()
+        try:
+            credential = _credential(creator.id)
+            barrier.wait(timeout=15)
+            if operation == "publish":
+                return publish_beacon(
+                    credential=credential,
+                    idempotency_key="pg-identical-beacon-retry",
+                    address=created.address,
+                    text="Review this.",
+                )
+            assert beacon_id is not None
+            return withdraw_beacon(
+                credential=credential,
+                idempotency_key="pg-identical-beacon-retry",
+                address=created.address,
+                beacon_id=beacon_id,
+            )
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(attempt, range(2)))
+    assert results[0][0] == results[1][0]
+    assert sorted(replayed for _, replayed in results) == [False, True]
+    expected_position = 2 if operation == "withdraw" else 1
+    assert BoardState.objects.get(pk=1).position == expected_position
+    event_type = (
+        TunnelEvent.Type.BEACON_ENDED if operation == "withdraw" else TunnelEvent.Type.BEACON_LIT
+    )
+    assert created.tunnel.events.filter(event_type=event_type).count() == 1

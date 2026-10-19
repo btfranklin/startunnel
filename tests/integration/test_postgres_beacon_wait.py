@@ -255,7 +255,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
         waiting = await _start_board_wait(
             credential=reader, cursor=empty_cursor, board_listener=board_listener
         )
-        result, _ = await sync_to_async(_worker)(
+        await sync_to_async(_worker)(
             lambda: publish_beacon(
                 credential=publisher,
                 idempotency_key="wait-wakes-publish-0001",
@@ -284,7 +284,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
         waiting = await _start_board_wait(
             credential=reader, cursor=after_reply, board_listener=board_listener
         )
-        rotated = await sync_to_async(_worker)(
+        await sync_to_async(_worker)(
             lambda: rotate_address_as_admin(
                 actor=operator,
                 tunnel_id=created.tunnel.id,
@@ -293,15 +293,26 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
         )
         assert (await asyncio.wait_for(waiting, timeout=5))["refresh_required"] is True
 
-        after_rotation = (await sync_to_async(read_board)(credential=reader)).board_cursor
+        assert (await sync_to_async(read_board)(credential=reader)).items == ()
+
+        next_tunnel = await sync_to_async(_worker)(lambda: _create(publisher, key="wait-withdraw"))
+        result, _ = await sync_to_async(_worker)(
+            lambda: publish_beacon(
+                credential=publisher,
+                idempotency_key="wait-wakes-withdraw-publish",
+                address=next_tunnel.address,
+                text="Review the next proposal.",
+            )
+        )
+        after_publish = (await sync_to_async(read_board)(credential=reader)).board_cursor
         waiting = await _start_board_wait(
-            credential=reader, cursor=after_rotation, board_listener=board_listener
+            credential=reader, cursor=after_publish, board_listener=board_listener
         )
         await sync_to_async(_worker)(
             lambda: withdraw_beacon(
                 credential=publisher,
                 idempotency_key="wait-wakes-withdraw-0001",
-                address=rotated.address,
+                address=next_tunnel.address,
                 beacon_id=UUID(result["id"]),
             )
         )

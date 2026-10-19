@@ -102,9 +102,8 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     )
     path = f"/api/v1/admin/tunnels/{created.tunnel.id}"
     assert client.get(path, **headers).json()["address"] == created.address
-    rotated = rotate_address_as_admin(
-        actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
-    )
+    rotate_address_as_admin(actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1)
+    rotated = created.tunnel.addresses.get(state="current")
     listed = client.get("/api/v1/admin/tunnels", **headers).json()["items"]
     assert listed[0]["address"] == rotated.address
     assert client.get(path, **headers).json()["address"] == rotated.address
@@ -383,3 +382,16 @@ def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
         client.get("/api/v1/admin/status", HTTP_AUTHORIZATION="Bearer " + second).status_code == 200
     )
     assert AdminReceipt.objects.count() == 1
+
+
+def test_missing_tunnel_admin_mutation_returns_domain_404(client: Any, user_factory: Any) -> None:
+    _, key = issue_admin_key(owner=user_factory(), name="Missing tunnel")
+    response = client.post(
+        "/api/v1/admin/tunnels/close",
+        data=json.dumps({"tunnel_id": str(uuid4()), "expected_cycle_id": str(uuid4())}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION="Bearer " + key,
+        HTTP_IDEMPOTENCY_KEY="missing-admin-tunnel",
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "tunnel_unavailable"
