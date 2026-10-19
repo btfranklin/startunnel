@@ -367,6 +367,13 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         assert "--rm" in migration_check
         assert "exec" not in migration_check
         pull_index = next(index for index, command in enumerate(commands) if "pull" in command)
+        assert commands[pull_index] == [
+            "docker",
+            "pull",
+            "--platform",
+            candidate["platform"],
+            candidate["image"],
+        ]
         assert pull_index < commands.index(migration_check)
     else:
         assert not any("--plan" in command for command in commands)

@@ -74,7 +74,8 @@ def _branch_message_ids(*, cycle: Cycle, root_id: UUID, high_water: int) -> RawS
         raise CycleUnavailable()
     table = connection.ops.quote_name(Message._meta.db_table)
     pk = Message._meta.pk
-    return RawSQL(
+    # The table name is model metadata; values use parameters.
+    return RawSQL(  # nosec B611
         f"""
         WITH RECURSIVE branch AS (
             SELECT id, sequence FROM {table}

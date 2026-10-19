@@ -26,8 +26,9 @@ def reset_tunnels(apps: Any, schema_editor: Any) -> None:
         if schema_editor.connection.vendor == "postgresql":
             cursor.execute("TRUNCATE TABLE " + ", ".join(tables))
         else:
+            # Table names come from the fixed list above.
             for table in tables:
-                cursor.execute(f"DELETE FROM {table}")
+                cursor.execute(f"DELETE FROM {table}")  # nosec B608
 
 
 def replace_address_guard(apps: Any, schema_editor: Any) -> None:

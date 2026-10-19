@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_rendered_images(rendered_images(command))
         if rendered_web_image(command) != record["image"]:
             raise ValueError("The selected Compose web image differs from the candidate image.")
-        run(["docker", "pull", record["image"]])
+        run(["docker", "pull", "--platform", record["platform"], record["image"]])
         revision = run(
             [
                 "docker",

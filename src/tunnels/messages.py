@@ -386,6 +386,7 @@ def load_branch(focus: Message) -> tuple[Message, ...]:
     table = connection.ops.quote_name(Message._meta.db_table)
     pk = Message._meta.pk
     with connection.cursor() as cursor:
+        # Only the quoted model table name is interpolated; values use parameters.
         cursor.execute(
             f"""
             WITH RECURSIVE branch AS (
@@ -398,7 +399,7 @@ def load_branch(focus: Message) -> tuple[Message, ...]:
                 WHERE parent.cycle_id = %s AND parent.sequence < branch.sequence
             )
             SELECT id FROM branch ORDER BY sequence
-            """,
+            """,  # nosec B608
             [
                 pk.get_db_prep_value(focus.id, connection),
                 pk.get_db_prep_value(focus.cycle_id, connection),
