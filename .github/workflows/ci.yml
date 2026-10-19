@@ -1,7 +1,6 @@
 name: Continuous integration
 
 on:
-  workflow_call:
   pull_request:
   push:
     branches:
@@ -60,18 +59,6 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check "pdm==2.28.0"
           pdm install --frozen-lockfile --no-self
-      - name: Install Perfect Doc
-        run: |
-          tool_dir="$RUNNER_TEMP/perfect-doc"
-          mkdir -p "$tool_dir"
-          cd "$tool_dir"
-          archive=perfect-doc-0.1.0-x86_64-unknown-linux-gnu.tar.gz
-          base=https://github.com/btfranklin/perfect-doc/releases/download/v0.1.0
-          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
-          curl --fail --location --silent --show-error "$base/SHA256SUMS" --output SHA256SUMS
-          sha256sum --check --ignore-missing SHA256SUMS
-          tar -xzf "$archive"
-          echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
       - name: Install the source secret scanner
         run: |
           tool_dir="$RUNNER_TEMP/gitleaks"
@@ -94,6 +81,18 @@ jobs:
           path: artifacts/security/
           if-no-files-found: warn
           retention-days: 90
+      - name: Install Perfect Doc
+        run: |
+          tool_dir="$RUNNER_TEMP/perfect-doc"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=perfect-doc-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+          base=https://github.com/btfranklin/perfect-doc/releases/download/v0.1.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/SHA256SUMS" --output SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$archive"
+          echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
       - name: Run the canonical gate
         run: pdm run check
 
@@ -122,7 +121,7 @@ jobs:
       - name: Prove admin upgrade on a restored initial baseline
         run: pdm run python scripts/prove_admin_upgrade.py
       - name: Prove upgrade and recovery from published v0.1.0
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -165,12 +164,3 @@ jobs:
         run: >-
           python3 scripts/run_isolated_test_lane.py browser
           --project-name stci-browser-${{ github.run_id }}-${{ github.run_attempt }}
-
-  release-candidate:
-    name: Validate the distribution image
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: [canonical, standalone-cli, postgres, external-proofs, browser]
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/release-candidate.yml

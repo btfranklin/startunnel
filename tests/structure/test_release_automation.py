@@ -1222,17 +1222,11 @@ def test_system_report_records_every_used_service_image(
     assert services == list(image_ids)
 
 
-def test_pull_request_workflow_has_all_non_live_release_lanes() -> None:
+def test_source_workflow_checks_service_lanes_and_cli_platforms() -> None:
     workflow = load_workflow("ci.yml")
     assert {"pull_request", "push", "workflow_dispatch"} <= workflow["on"].keys()
     jobs = workflow["jobs"]
     assert set(jobs["external-proofs"]["strategy"]["matrix"]["lane"]) == {"examples", "agents"}
-    assert {"canonical", "standalone-cli", "postgres", "external-proofs", "browser"} == set(
-        jobs["release-candidate"]["needs"]
-    )
-    assert jobs["release-candidate"]["if"] == (
-        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
-    )
     matrix = jobs["standalone-cli"]["strategy"]["matrix"]
     assert set(matrix["python"]) == {"3.10", "3.14"}
     assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest", "macos-latest"}
@@ -1245,7 +1239,7 @@ def test_pull_request_workflow_has_all_non_live_release_lanes() -> None:
             assert {"OPENAI_API_KEY", "OPENAI_MODEL"}.isdisjoint(environment)
 
 
-def test_source_scan_failure_blocks_service_and_release_builds() -> None:
+def test_source_scan_failure_blocks_service_builds() -> None:
     jobs = load_workflow("ci.yml")["jobs"]
     steps = jobs["canonical"]["steps"]
     source = next(step for step in steps if step.get("run") == "pdm run security-release source")

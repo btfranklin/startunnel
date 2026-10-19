@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -30,19 +31,90 @@ def validate_candidate(candidate: dict[str, Any], *, commit: str, version: str) 
         raise ValueError("Candidate must use the official repository and an immutable digest.")
     if candidate.get("platform") != "linux/amd64":
         raise ValueError("Candidate platform must be linux/amd64.")
+    source_run = candidate.get("source_validation_run_id")
+    if type(source_run) is not int or source_run <= 0:
+        raise ValueError("Candidate must record its successful source CI run.")
 
 
-def successful_run(response: dict[str, Any], commit: str) -> int:
-    for run in response.get("workflow_runs", []):
-        if (
-            run.get("head_sha") == commit
-            and run.get("head_branch") == "main"
-            and run.get("event") == "workflow_dispatch"
-            and run.get("status") == "completed"
-            and run.get("conclusion") == "success"
-        ):
+def successful_run(
+    run: dict[str, Any], commit: str, workflow: str, *, events: tuple[str, ...]
+) -> bool:
+    return (
+        run.get("head_sha") == commit
+        and run.get("head_branch") == "main"
+        and run.get("path") == f".github/workflows/{workflow}"
+        and run.get("event") in events
+        and run.get("status") == "completed"
+        and run.get("conclusion") == "success"
+    )
+
+
+def github_api(repository: str, path: str, *, paginate: bool = False) -> Any:
+    command = ["gh", "api", f"repos/{repository}/{path}"]
+    if paginate:
+        command.extend(["--paginate", "--slurp"])
+    return json.loads(subprocess.check_output(command, text=True))
+
+
+def source_run(repository: str, commit: str) -> int:
+    response = github_api(
+        repository,
+        f"actions/workflows/ci.yml/runs?branch=main&head_sha={commit}&status=success&per_page=100",
+    )
+    for run in response["workflow_runs"]:
+        if successful_run(run, commit, "ci.yml", events=("push", "workflow_dispatch")):
             return int(run["id"])
-    raise ValueError("No completed successful manual CI run on main exists for this exact commit.")
+    raise ValueError(
+        "Wait for successful source CI on main for this exact commit, or rerun ci.yml."
+    )
+
+
+def validated_run(repository: str, commit: str) -> int | None:
+    pages = github_api(
+        repository, "actions/artifacts?name=release-candidate&per_page=100", paginate=True
+    )
+    for page in pages:
+        for artifact in page["artifacts"]:
+            source = artifact.get("workflow_run", {})
+            if (
+                artifact.get("name") != "release-candidate"
+                or artifact.get("expired") is not False
+                or source.get("head_sha") != commit
+                or source.get("head_branch") != "main"
+            ):
+                continue
+            run_id = int(source["id"])
+            run = github_api(repository, f"actions/runs/{run_id}")
+            if successful_run(run, commit, "release-candidate.yml", events=("workflow_dispatch",)):
+                return run_id
+    return None
+
+
+def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
+    run_id = validated_run(repository, commit)
+    if run_id is not None:
+        with tempfile.TemporaryDirectory(prefix="startunnel-candidate-") as directory:
+            subprocess.run(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    str(run_id),
+                    "--repo",
+                    repository,
+                    "--name",
+                    "release-candidate",
+                    "--dir",
+                    directory,
+                ],
+                check=True,
+            )
+            verify_evidence(Path(directory), commit=commit, version=version)
+        print(f"Reusing validated candidate: https://github.com/{repository}/actions/runs/{run_id}")
+        return {"reuse_run_id": run_id, "source_run_id": ""}
+    run_id = source_run(repository, commit)
+    print(f"Reusing source CI: https://github.com/{repository}/actions/runs/{run_id}")
+    return {"reuse_run_id": "", "source_run_id": run_id}
 
 
 def one_report(directory: Path, pattern: str) -> tuple[Path, dict[str, Any]]:
@@ -111,7 +183,9 @@ def main() -> int:
     action.add_argument("--record", metavar="IMAGE")
     action.add_argument("--verify", type=Path, metavar="DIRECTORY")
     action.add_argument("--find-run", metavar="TAG")
+    action.add_argument("--prepare", action="store_true")
     action.add_argument("--check-digest", nargs=2, metavar=("INSPECTION_FILE", "IMAGE"))
+    parser.add_argument("--source-run-id", type=int)
     args = parser.parse_args()
     try:
         if args.check_digest:
@@ -128,6 +202,7 @@ def main() -> int:
                 "source_commit": commit,
                 "image": args.record,
                 "platform": "linux/amd64",
+                "source_validation_run_id": args.source_run_id,
             }
             validate_candidate(candidate, commit=commit, version=version)
             directory = ROOT / "artifacts"
@@ -138,23 +213,23 @@ def main() -> int:
             (args.verify / "release-candidate.json").write_text(
                 json.dumps(candidate, indent=2) + "\n"
             )
-        elif args.find_run:
-            if args.find_run != version:
+        elif args.find_run or args.prepare:
+            if args.find_run and args.find_run != version:
                 raise ValueError("Release tag must match VERSION.")
             repository = os.environ["GITHUB_REPOSITORY"]
-            output = subprocess.check_output(
-                [
-                    "gh",
-                    "api",
-                    f"repos/{repository}/actions/workflows/ci.yml/runs"
-                    f"?branch=main&event=workflow_dispatch&head_sha={commit}&status=success&per_page=100",
-                ],
-                text=True,
-            )
-            run_id = successful_run(json.loads(output), commit)
+            if args.prepare:
+                outputs = prepare(repository, commit, version)
+            else:
+                run_id = validated_run(repository, commit)
+                if run_id is None:
+                    raise ValueError(
+                        "No retained validated candidate exists for this exact commit."
+                    )
+                outputs = {"run_id": run_id}
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as destination:
-                destination.write(f"run_id={run_id}\n")
-            print(f"Using successful CI run {run_id} for {commit}.")
+                for name, value in outputs.items():
+                    destination.write(f"{name}={value}\n")
+            print(f"Candidate selection for {commit}: {outputs}")
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f"Candidate evidence failed: {error}")
         return 2

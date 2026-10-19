@@ -1,14 +1,38 @@
 name: Release candidate
 
 on:
-  workflow_call:
+  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: read
 
+concurrency:
+  group: release-candidate-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Reuse completed validation
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      reuse_run_id: ${{ steps.select.outputs.reuse_run_id }}
+      source_run_id: ${{ steps.select.outputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Select validation for this exact commit
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_candidate.py --prepare
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.reuse_run_id == ''
     name: Build one release image
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -37,6 +61,8 @@ jobs:
           target: runtime
           platforms: linux/amd64
           push: true
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
           tags: ghcr.io/btfranklin/startunnel:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
             STARTUNNEL_CLIENT_VERSION=${{ steps.version.outputs.version }}
@@ -49,8 +75,9 @@ jobs:
         id: record
         env:
           CANDIDATE_IMAGE: ghcr.io/btfranklin/startunnel@${{ steps.build.outputs.digest }}
+          SOURCE_VALIDATION_RUN_ID: ${{ needs.prepare.outputs.source_run_id }}
         run: |
-          python3 scripts/release_candidate.py --record "$CANDIDATE_IMAGE"
+          python3 scripts/release_candidate.py --record "$CANDIDATE_IMAGE" --source-run-id "$SOURCE_VALIDATION_RUN_ID"
           echo "image=$CANDIDATE_IMAGE" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:

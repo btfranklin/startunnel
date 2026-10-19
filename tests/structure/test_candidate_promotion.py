@@ -27,8 +27,40 @@ def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None
     for name in ("security", "system", "full-load"):
         assert not validation[name].get("needs")
     workflow = load_workflow("release-candidate.yml")["jobs"]
+    assert workflow["build"]["needs"] == "prepare"
+    assert workflow["build"]["if"] == "needs.prepare.outputs.reuse_run_id == ''"
+    assert workflow["validation"]["needs"] == "build"
     assert workflow["validation"]["uses"] == "./.github/workflows/release-validation.yml"
     assert set(workflow["evidence"]["needs"]) == {"build", "validation"}
+
+
+def test_candidate_writer_keeps_the_reused_source_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(candidate, "ROOT", tmp_path)
+    monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
+    monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
+    monkeypatch.setattr(
+        sys, "argv", ["release_candidate.py", "--record", IMAGE, "--source-run-id", "42"]
+    )
+    assert candidate.main() == 0
+    record = json.loads((tmp_path / "artifacts/candidate-image.json").read_text())
+    assert record["source_commit"] == COMMIT
+    assert record["source_validation_run_id"] == 42
+    assert record["image"] == IMAGE
+
+
+def test_failed_artifact_lookup_does_not_trigger_new_build_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(*args: Any, **kwargs: Any) -> Any:
+        raise subprocess.CalledProcessError(1, ["gh", "api"])
+
+    monkeypatch.setattr(candidate, "github_api", unavailable)
+    monkeypatch.setattr(candidate, "source_run", lambda *args: pytest.fail("lookup error ignored"))
+    with pytest.raises(subprocess.CalledProcessError):
+        candidate.prepare("owner/repository", COMMIT, "v0.1.0")
 
 
 def evidence(directory: Path) -> dict[str, Any]:
@@ -37,6 +69,7 @@ def evidence(directory: Path) -> dict[str, Any]:
         "version": "v0.1.0",
         "image": IMAGE,
         "platform": "linux/amd64",
+        "source_validation_run_id": 7,
     }
     files = {
         "candidate-image.json": record,
@@ -111,29 +144,52 @@ def test_retained_evidence_hashes_are_checked(tmp_path: Path) -> None:
         candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
 
 
-def test_ci_selection_requires_completed_manual_main_run_for_exact_commit() -> None:
-    valid = {
+def run_record(
+    *, workflow: str = "release-candidate.yml", event: str = "workflow_dispatch"
+) -> dict[str, Any]:
+    return {
         "id": 42,
         "head_sha": COMMIT,
         "head_branch": "main",
-        "event": "workflow_dispatch",
+        "path": f".github/workflows/{workflow}",
+        "event": event,
         "status": "completed",
         "conclusion": "success",
     }
-    assert candidate.successful_run({"workflow_runs": [valid]}, COMMIT) == 42
-    for field, value in (
+
+
+def artifact(*, expired: bool = False) -> dict[str, Any]:
+    return {
+        "name": "release-candidate",
+        "expired": expired,
+        "workflow_run": {"id": 42, "head_sha": COMMIT, "head_branch": "main"},
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
         ("head_sha", "other"),
         ("head_branch", "feature"),
-        ("event", "push"),
+        ("path", ".github/workflows/other.yml"),
+        ("event", "pull_request"),
         ("status", "in_progress"),
         ("conclusion", "failure"),
-    ):
-        with pytest.raises(ValueError, match="exact commit"):
-            candidate.successful_run({"workflow_runs": [{**valid, field: value}]}, COMMIT)
+    ],
+)
+def test_validation_requires_completed_main_run_for_exact_commit(field: str, value: str) -> None:
+    valid = run_record()
+    assert candidate.successful_run(
+        valid, COMMIT, "release-candidate.yml", events=("workflow_dispatch",)
+    )
+    assert not candidate.successful_run(
+        {**valid, field: value}, COMMIT, "release-candidate.yml", events=("workflow_dispatch",)
+    )
 
 
-def test_promotion_queries_manual_ci_runs_for_the_exact_commit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_promotion_finds_retained_candidate_across_artifact_pages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
     monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
@@ -141,32 +197,138 @@ def test_promotion_queries_manual_ci_runs_for_the_exact_commit(
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repository")
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    calls: list[list[str]] = []
 
-    def github_runs(command: list[str], **kwargs: Any) -> str:
-        assert command == [
-            "gh",
-            "api",
-            "repos/owner/repository/actions/workflows/ci.yml/runs"
-            f"?branch=main&event=workflow_dispatch&head_sha={COMMIT}&status=success&per_page=100",
-        ]
-        return json.dumps(
-            {
-                "workflow_runs": [
-                    {
-                        "id": 42,
-                        "head_sha": COMMIT,
-                        "head_branch": "main",
-                        "event": "workflow_dispatch",
-                        "status": "completed",
-                        "conclusion": "success",
-                    }
-                ]
-            }
-        )
+    def github(command: list[str], **kwargs: Any) -> str:
+        calls.append(command)
+        if "actions/artifacts?" in command[2]:
+            assert command[-2:] == ["--paginate", "--slurp"]
+            wrong = {**artifact(), "workflow_run": {"head_sha": "other"}}
+            return json.dumps(
+                [{"artifacts": [artifact(expired=True), wrong]}, {"artifacts": [artifact()]}]
+            )
+        assert command[2] == "repos/owner/repository/actions/runs/42"
+        return json.dumps(run_record())
 
-    monkeypatch.setattr("scripts.release_candidate.subprocess.check_output", github_runs)
+    monkeypatch.setattr("scripts.release_candidate.subprocess.check_output", github)
     assert candidate.main() == 0
     assert output.read_text() == "run_id=42\n"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("head_sha", "other"),
+        ("head_branch", "feature"),
+        ("path", ".github/workflows/ci.yml"),
+        ("event", "push"),
+        ("status", "in_progress"),
+        ("conclusion", "failure"),
+    ],
+)
+def test_retained_artifact_cannot_make_an_unrelated_or_failed_run_eligible(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    def github(repository: str, path: str, **kwargs: Any) -> Any:
+        if path.startswith("actions/artifacts?"):
+            return [{"artifacts": [artifact()]}]
+        return {**run_record(), field: value}
+
+    monkeypatch.setattr(candidate, "github_api", github)
+    assert candidate.validated_run("owner/repository", COMMIT) is None
+
+
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
+def test_prepare_reuses_completed_source_ci_without_running_tests(
+    monkeypatch: pytest.MonkeyPatch,
+    event: str,
+) -> None:
+    def github(repository: str, path: str, **kwargs: Any) -> Any:
+        if path.startswith("actions/artifacts?"):
+            return [{"artifacts": [artifact(expired=True)]}]
+        return {"workflow_runs": [run_record(workflow="ci.yml", event=event)]}
+
+    monkeypatch.setattr(candidate, "github_api", github)
+    monkeypatch.setattr(
+        "scripts.release_candidate.subprocess.run",
+        lambda *args, **kwargs: pytest.fail("unexpected subprocess"),
+    )
+    assert candidate.prepare("owner/repository", COMMIT, "v0.1.0") == {
+        "reuse_run_id": "",
+        "source_run_id": 42,
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("head_sha", "other"),
+        ("head_branch", "feature"),
+        ("path", ".github/workflows/other.yml"),
+        ("event", "pull_request"),
+        ("status", "in_progress"),
+        ("conclusion", "failure"),
+    ],
+)
+def test_source_reuse_rejects_unfinished_failed_or_unrelated_ci(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    monkeypatch.setattr(
+        candidate,
+        "github_api",
+        lambda *args, **kwargs: {
+            "workflow_runs": [{**run_record(workflow="ci.yml", event="push"), field: value}]
+        },
+    )
+    with pytest.raises(ValueError, match="successful source CI"):
+        candidate.source_run("owner/repository", COMMIT)
+
+
+@pytest.mark.parametrize("tampered", [False, True])
+def test_candidate_reuse_verifies_downloaded_evidence_before_skipping_work(
+    monkeypatch: pytest.MonkeyPatch,
+    tampered: bool,
+) -> None:
+    monkeypatch.setattr(candidate, "validated_run", lambda *args: 42)
+    monkeypatch.setattr(candidate, "source_run", lambda *args: pytest.fail("source CI repeated"))
+
+    def download(command: list[str], **kwargs: Any) -> None:
+        assert command[:6] == ["gh", "run", "download", "42", "--repo", "owner/repository"]
+        directory = Path(command[-1])
+        evidence(directory)
+        retained = candidate.verify_evidence(directory, commit=COMMIT, version="v0.1.0")
+        (directory / "release-candidate.json").write_text(json.dumps(retained))
+        if tampered:
+            path = directory / "validated-image.json"
+            path.write_text(path.read_text() + "\n")
+
+    monkeypatch.setattr("scripts.release_candidate.subprocess.run", download)
+    if tampered:
+        with pytest.raises(ValueError, match="checksums"):
+            candidate.prepare("owner/repository", COMMIT, "v0.1.0")
+    else:
+        assert candidate.prepare("owner/repository", COMMIT, "v0.1.0") == {
+            "reuse_run_id": 42,
+            "source_run_id": "",
+        }
+
+
+@pytest.mark.parametrize("run_id", [None, 0, -1, True])
+def test_candidate_records_a_real_source_validation_run(run_id: Any) -> None:
+    document = {
+        "version": "v0.1.0",
+        "source_commit": COMMIT,
+        "image": IMAGE,
+        "platform": "linux/amd64",
+        "source_validation_run_id": run_id,
+    }
+    with pytest.raises(ValueError, match="source CI run"):
+        candidate.validate_candidate(document, commit=COMMIT, version="v0.1.0")
 
 
 def test_promotion_must_preserve_registry_digest() -> None:

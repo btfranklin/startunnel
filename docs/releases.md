@@ -47,35 +47,37 @@ commands do not check for updates. There is no package-manager release.
 
 ## Prepare and validate on main
 
-1. Work directly on `main`. Update `VERSION`, the release specification, and
-   the reviewed deployment notes. Record actual upgrade and recovery evidence
-   for every supported predecessor; do not infer database compatibility from
-   fresh-install tests.
-2. Run the repository gates and `pdm run docs-structure`, then commit and push.
-   CI checks Markdown structure with the checksummed Perfect Doc native release.
-   The existing route, example, template, and browser checks remain in place.
-   Perfect Doc does not grade prose or execute documented commands.
-3. Normal pushes check source secrets, lock files, Bandit, and npm dependencies
-   before service builds. They then run source, PostgreSQL, agent, example, and
-   browser checks.
-   They also run the standalone CLI on Linux and Windows with Python 3.10 and
-   3.14, without project dependencies.
-   When the commit is ready for release, select **Run workflow** for `ci.yml`
-   on `main`, or run `gh workflow run ci.yml --ref main`. This manual run checks
-   the selected commit and builds one Linux amd64 `runtime` image under a
-   unique candidate tag in `ghcr.io/btfranklin/startunnel`. Its source revision
-   and planned version labels are set at this build.
-   The same values are embedded in the downloadable client and are available
-   through `startunnel version`. Do not give the client a separate release version.
-4. Security scanning, the isolated clean-stack system proof, and fixed-load
-   testing run in parallel against the candidate digest. Application services run the candidate
-   image with development settings and isolated test data. Test-helper images
-   are separate builds; they are not the release artifact. The runners verify
-   that web, migration, and maintenance services used the candidate image.
-5. CI retains `release-candidate` for 90 days. This artifact contains the image
-   digest, exact source commit, planned version, safe validation reports, and
-   evidence checksums. Only a complete successful manual run on `main` is eligible
-   for promotion. A candidate from a failed or incomplete run is not a release.
+1. Work on `main`. Update `VERSION`, the release specification, and the reviewed
+   notes. Keep upgrade and recovery evidence for every supported predecessor.
+2. Run local gates and `pdm run docs-structure`, then commit and push. Wait for
+   CI to pass on that exact commit. CI checks source secrets, lock files, Bandit,
+   and npm dependencies before service builds. It also checks documentation
+   structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
+   Linux, macOS, and Windows with Python 3.10 and 3.14. Main CI includes both
+   synthetic and published-v0.1.0 upgrade proofs.
+3. Select **Run workflow** for `release-candidate.yml` on `main`, or run:
+
+   ```sh
+   gh workflow run release-candidate.yml --ref main
+   ```
+
+   Preparation reuses successful source CI for the same commit. If a validated
+   candidate already has retained evidence, it checks those reports and skips
+   the build and image tests. No successful source CI means preparation stops;
+   wait for CI or rerun `ci.yml` first.
+4. A new candidate builds one Linux amd64 `runtime` image under a unique GHCR
+   candidate tag. The build reuses cached layers. Version and source labels are
+   also embedded in the downloadable client for `startunnel version`.
+   Image scanning, the system proof, and fixed-load testing then run in parallel
+   against that digest. All must pass. Browser and example suites stay in source
+   CI; the system proof checks runtime contents, restart behavior, and recovery.
+5. The candidate workflow retains `release-candidate` for 90 days. It records
+   the digest, exact commit, version, source CI run, reports, and evidence
+   checksums. Only a successful manual candidate run on `main` with retained
+   evidence can be promoted. Expired evidence requires a new candidate run.
+
+A fresh candidate includes a fixed five-minute load test plus setup. Prepare it
+before tagging. Tag promotion reuses completed validation and the tested image.
 
 Candidate validation also runs through the manual release-validation workflow.
 Without a candidate argument, that manual workflow builds its own diagnostic
@@ -85,16 +87,17 @@ remain opt-in and do not receive provider credentials during candidate validatio
 ## Tag and promote
 
 Check that the release tag is unused, then tag the exact successful commit.
-For v0.2.0:
+For example, after preparing v0.2.1:
 
 ```sh
-git tag -a v0.2.0 TESTED_COMMIT -m "StarTunnel v0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 TESTED_COMMIT -m "StarTunnel v0.2.1"
+git push origin v0.2.1
 ```
 
-Replace `TESTED_COMMIT` with its full SHA. The release workflow checks the tag
-against `VERSION`, finds a completed successful manual `ci.yml` run on `main` for
-that exact source commit, and downloads its retained `release-candidate`.
+Use the prepared version and replace `TESTED_COMMIT` with its full SHA. The
+release workflow checks the tag against `VERSION`, finds retained evidence from
+a successful `release-candidate.yml` run on `main` for that exact commit, and
+downloads its `release-candidate` artifact.
 It checks report status, candidate identity, runtime image IDs, cleanup, and
 retained evidence checksums before promotion.
 
@@ -117,8 +120,8 @@ The workflow creates a **draft** GitHub release with `release.json`. Use manual
 dispatch with the existing tag to retry or recover a draft. Recovery uses the
 retained exact-commit CI evidence and does not rebuild. An existing draft must
 keep the same source commit and image digest. Published releases are never
-modified. If the retained CI artifact has expired, promotion fails; prepare
-new successful evidence for that commit before retrying. Keep candidate images
+modified. If the retained candidate artifact has expired, promotion fails;
+prepare new successful evidence for that commit before retrying. Keep candidate images
 in the registry until promotion completes.
 
 The official workflow writes a Linux amd64 record for its tested GHCR image.

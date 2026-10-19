@@ -49,8 +49,9 @@ its current session after a successful password change.
 
 Use [testing](testing.md) for the required checks and focused proof commands.
 Use [release policy](releases.md) for candidate selection, validation,
-promotion, and recovery. A manual CI run on `main` selects a distribution
-candidate. Normal pushes run the development checks.
+promotion, and recovery. Normal pushes run source and service checks. The manual
+`release-candidate.yml` workflow reuses those checks and retained candidate
+evidence for the exact commit.
 
 Release validation tests one immutable application image. Promotion uses its
 retained exact-commit evidence without rebuilding. Generated release summaries

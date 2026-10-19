@@ -202,8 +202,8 @@ This mode seeds and fully migrates the actual published v0.1.0 image, checks
 its source and version labels, and restores its dump into a separate database.
 The old image must authenticate existing passwords and keys and read the old
 messages from that restored database. The forward upgrade must pass the reset,
-new-write, repeat-migration, and recovery checks above. Manual candidate CI runs
-include both proof modes. This supports v0.1.0 in `supported_from`; it does not
+new-write, repeat-migration, and recovery checks above. Source CI on `main`
+includes both proof modes. This supports v0.1.0 in `supported_from`; it does not
 verify a particular production backup or reverse migrations. Test a restored
 copy of the actual installed database before an installation upgrade.
 
@@ -266,15 +266,16 @@ wakeups, energy use, or watts from CPU or probe counts.
 
 ## Candidate image evidence
 
-A manual CI run on `main` builds and validates a distribution candidate.
-Normal pushes run the source and service checks. Candidate proof uses the
-release image's immutable digest:
+Normal pushes run source and service checks, including browser and example
+suites. After CI passes, `release-candidate.yml` on `main` reuses that completed
+run and prepares the image. A repeated request reuses retained, verified
+candidate evidence for the same commit. These checks use the immutable digest:
 
 ```shell
-pdm run python scripts/run_isolated_test_lane.py system --candidate-image IMAGE_DIGEST
-pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST
 pdm run security-release source
 pdm run security-release image --skip-build --image IMAGE_DIGEST
+pdm run python scripts/run_isolated_test_lane.py system --candidate-image IMAGE_DIGEST
+pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST
 ```
 
 The source check runs before expensive CI builds. It checks lock files, Bandit,
