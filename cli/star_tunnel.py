@@ -54,9 +54,6 @@ SAFE_ERROR_MESSAGES = {
     "usage_error": "The command arguments are not valid. Run --help for usage.",
 }
 PUBLIC_ERROR_CODES = {
-    "admin_unavailable",
-    "credential_unavailable",
-    "state_conflict",
     "checkpoint_regression",
     "context_budget_too_small",
     "entry_budget_too_small",
@@ -366,10 +363,7 @@ def _safe_server_error(error: HTTPError) -> CliError:
                         for item in candidate_field_errors
                     ]
             if isinstance(candidate_request_id, str):
-                try:
-                    request_id = str(uuid.UUID(candidate_request_id))
-                except ValueError:
-                    request_id = None
+                request_id = candidate_request_id
     except (OSError, HTTPException, UnicodeDecodeError, json.JSONDecodeError):
         pass
     if isinstance(request_id, str):
@@ -411,7 +405,8 @@ class StarTunnelTransport:
     ) -> dict[str, Any]:
         """Retry transient admin failures with the same request and retry key."""
 
-        for attempt in range(3 if retry else 1):
+        attempt = 0
+        while True:
             try:
                 return self._request_once(
                     method,
@@ -434,7 +429,7 @@ class StarTunnelTransport:
                 if delay > 10:
                     raise
                 time.sleep(delay)
-        raise CliError("connection_failed")
+                attempt += 1
 
     def _request_once(
         self,
@@ -1331,6 +1326,8 @@ def print_error(error: CliError) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if sys.stdout is None:
+        return 1
     try:
         arguments = build_parser().parse_args(argv)
         if arguments.action == "install":

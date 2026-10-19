@@ -223,6 +223,30 @@ class StandaloneClientTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(result.stderr, b"")
 
+    @unittest.skipIf(os.name == "nt", "Windows uses handles instead of file descriptors.")
+    def test_missing_stdout_fails_before_running_a_command(self) -> None:
+        launcher = (
+            "import os, sys; os.close(1); "
+            "os.execv(sys.executable, [sys.executable, '-I', *sys.argv[1:]])"
+        )
+        for arguments in (("version",), ("--help",), ("me",)):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [sys.executable, "-I", "-c", launcher, str(self.client), *arguments],
+                    cwd=self.directory,
+                    env={
+                        **self.environment,
+                        "STARTUNNEL_BASE_URL": self.base_url,
+                        "STARTUNNEL_AGENT_KEY": "st_agent-test-key",
+                    },
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stderr, b"")
+        self.assertEqual(self.requests, [])
+
     def test_invalid_json_integer_is_a_structured_request_error(self) -> None:
         result = subprocess.run(
             [sys.executable, "-I", "-X", "int_max_str_digits=4300", str(self.client), "read-tree"],
