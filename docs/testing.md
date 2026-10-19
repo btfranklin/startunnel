@@ -273,16 +273,20 @@ release image's immutable digest:
 ```shell
 pdm run python scripts/run_isolated_test_lane.py system --candidate-image IMAGE_DIGEST
 pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST
-pdm run security-release --skip-build --image IMAGE_DIGEST
+pdm run security-release source
+pdm run security-release image --skip-build --image IMAGE_DIGEST
 ```
 
-The security lane scans tracked and nonignored candidate files, or source files
-in a Git-free export. It scans current security reports and the runtime image
-separately. Ignored local reports and private input files are outside the
-candidate scan. The lane also checks locked dependencies and blocks high and
-critical image vulnerabilities.
-Tool errors appear in the job log. CI uploads reports that were written before
-a failure. A missing report does not make a failed security job pass.
+The source check runs before expensive CI builds. It checks lock files, Bandit,
+npm dependencies, and tracked or nonignored source files. Git-free source
+exports are also supported. Ignored local reports and private input files are
+outside this scan.
+
+The image check scans the runtime image and its reports. It blocks high and
+critical image vulnerabilities. It does not repeat source or dependency checks.
+Both commands scan their current reports for secrets. Tool errors appear in the
+job log. CI uploads reports written before a failure; a missing report cannot
+make a failed job pass.
 
 For official release promotion, use the official digest reference. Self-hosted
 operators can use an image from their own registry pinned with `@sha256:`.

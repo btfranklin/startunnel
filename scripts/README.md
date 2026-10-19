@@ -63,7 +63,7 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | [release_candidate.py](release_candidate.py) | Validate retained candidate evidence |
 | [release_record.py](release_record.py) | Validate specifications and write deployment records |
 | [release_draft.py](release_draft.py) | Verify draft-release identity and recovery |
-| [run_security_release.py](run_security_release.py) | Run the candidate security lane |
+| [run_security_release.py](run_security_release.py) | Run separate source and image security checks |
 
 Follow the [release policy](../docs/releases.md). These tools do not make
 normal source pushes into releases.

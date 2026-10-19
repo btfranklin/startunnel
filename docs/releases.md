@@ -55,7 +55,9 @@ commands do not check for updates. There is no package-manager release.
    CI checks Markdown structure with the checksummed Perfect Doc native release.
    The existing route, example, template, and browser checks remain in place.
    Perfect Doc does not grade prose or execute documented commands.
-3. Normal pushes run source, PostgreSQL, agent, example, and browser checks.
+3. Normal pushes check source secrets, lock files, Bandit, and npm dependencies
+   before service builds. They then run source, PostgreSQL, agent, example, and
+   browser checks.
    They also run the standalone CLI on Linux and Windows with Python 3.10 and
    3.14, without project dependencies.
    When the commit is ready for release, select **Run workflow** for `ci.yml`

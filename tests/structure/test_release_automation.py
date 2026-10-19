@@ -1241,6 +1241,17 @@ def test_pull_request_workflow_has_all_non_live_release_lanes() -> None:
             assert {"OPENAI_API_KEY", "OPENAI_MODEL"}.isdisjoint(environment)
 
 
+def test_source_scan_failure_blocks_service_and_release_builds() -> None:
+    jobs = load_workflow("ci.yml")["jobs"]
+    steps = jobs["canonical"]["steps"]
+    source = next(step for step in steps if step.get("run") == "pdm run security-release source")
+    checks = next(step for step in steps if step.get("run") == "pdm run check")
+    assert steps.index(source) < steps.index(checks)
+    assert not source.get("continue-on-error")
+    for job in ("postgres", "external-proofs", "browser"):
+        assert jobs[job]["needs"] == "canonical"
+
+
 def test_website_publication_is_separate_and_opt_in() -> None:
     workflow = load_workflow("website.yml")
     build = workflow["jobs"]["build"]

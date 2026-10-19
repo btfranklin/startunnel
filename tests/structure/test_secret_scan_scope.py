@@ -95,37 +95,141 @@ def test_security_artifact_upload_runs_after_gate_failure() -> None:
     assert upload["with"]["if-no-files-found"] == "warn"
 
 
-@pytest.mark.parametrize("image_scan_fails", [False, True])
-def test_runtime_scan_controls_candidate_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image_scan_fails: bool
+def test_source_failure_stops_before_image_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(run_security_release, "ROOT", tmp_path)
+    monkeypatch.setattr(run_security_release, "_candidate_tree", lambda path: None)
+    image_actions: list[str] = []
+
+    def run(label: str, command: list[str], *, output: Path | None = None) -> None:
+        del command, output
+        if label == "PDM lock validation":
+            raise run_security_release.SecurityGateError("lock mismatch")
+        image_actions.append(label)
+
+    monkeypatch.setattr(run_security_release, "_run", run)
+    monkeypatch.setattr(
+        run_security_release,
+        "_validate_runtime_image",
+        lambda value: image_actions.append("runtime inspection"),
+    )
+    assert run_security_release.main(["source"]) == 1
+    assert "lock mismatch" in capsys.readouterr().out
+    assert image_actions == []
+
+
+@pytest.mark.parametrize("report_scan_fails", [False, True])
+def test_source_lane_scans_generated_reports_before_passing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    report_scan_fails: bool,
+) -> None:
+    scans: list[str] = []
+    monkeypatch.setattr(run_security_release, "ROOT", tmp_path)
+    monkeypatch.setattr(run_security_release, "_candidate_tree", lambda path: None)
+
+    def run(label: str, command: list[str], *, output: Path | None = None) -> None:
+        del label, command
+        if output:
+            output.write_text("Safe source report")
+
+    def scan_secrets(source: Path, report: Path, *, archive_depth: int = 0) -> None:
+        del source, archive_depth
+        scans.append(report.name)
+        if report.name == "report-secrets.json" and report_scan_fails:
+            raise run_security_release.SecurityGateError("generated report secret")
+        report.write_text("[]")
+
+    monkeypatch.setattr(run_security_release, "_run", run)
+    monkeypatch.setattr(run_security_release, "_scan_secrets", scan_secrets)
+    result = run_security_release.main(["source"])
+    assert result == (1 if report_scan_fails else 0)
+    assert scans == ["candidate-secrets.json", "report-secrets.json"]
+    output = capsys.readouterr().out
+    if report_scan_fails:
+        assert "generated report secret" in output
+    else:
+        assert "Security source gate passed" in output
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        None,
+        "runtime inspection",
+        "Application image SBOM",
+        "Application image vulnerability scan",
+        "Application image export",
+        "Application image history inspection",
+        "image-layer-secrets.json",
+        "image-history-secrets.json",
+        "report-secrets.json",
+    ],
+)
+def test_image_lane_is_independent_and_validates_only_after_all_scans(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None
 ) -> None:
     image = "registry.example/startunnel@sha256:" + "a" * 64
     commands: list[list[str]] = []
+    labels: list[str] = []
+    secret_scans: list[tuple[str, int]] = []
     monkeypatch.setattr(run_security_release, "ROOT", tmp_path)
-    monkeypatch.setattr(run_security_release, "_candidate_tree", lambda path: None)
-    monkeypatch.setattr(run_security_release, "_validate_runtime_image", lambda value: None)
+    monkeypatch.setattr(
+        run_security_release,
+        "_candidate_tree",
+        lambda path: pytest.fail("source candidate created"),
+    )
+
+    def validate_runtime_image(value: str) -> None:
+        del value
+        labels.append("runtime inspection")
+        if failure == "runtime inspection":
+            raise run_security_release.SecurityGateError("invalid runtime environment")
+
+    monkeypatch.setattr(run_security_release, "_validate_runtime_image", validate_runtime_image)
 
     def scan_secrets(source: Path, report: Path, *, archive_depth: int = 0) -> None:
+        secret_scans.append((report.name, archive_depth))
+        if failure == report.name:
+            raise run_security_release.SecurityGateError("image secret scan failed")
         report.write_text("[]")
 
     def run(label: str, command: list[str], *, output: Path | None = None) -> None:
-        del label
+        labels.append(label)
+        source_tools = {
+            "PDM lock validation",
+            "npm lock validation",
+            "Bandit",
+            "npm dependency audit",
+        }
+        if label in source_tools:
+            pytest.fail(f"source action ran in image lane: {label}")
         commands.append(command)
-        if "--severity" in command and image_scan_fails:
-            raise run_security_release.SecurityGateError("Runtime image vulnerability found.")
+        if failure == label:
+            raise run_security_release.SecurityGateError("injected image failure")
         if output:
             output.write_text("Safe test report")
 
     monkeypatch.setattr(run_security_release, "_scan_secrets", scan_secrets)
     monkeypatch.setattr(run_security_release, "_run", run)
-    result = run_security_release.main(["--skip-build", "--image", image])
+    result = run_security_release.main(["image", "--skip-build", "--image", image])
 
-    assert result == (1 if image_scan_fails else 0)
-    scan = next(command for command in commands if "--severity" in command)
-    assert scan[-1] == image
-    assert scan[scan.index("--image-src") + 1] == "remote"
-    assert scan[scan.index("--severity") + 1] == "CRITICAL,HIGH"
-    assert scan[scan.index("--exit-code") + 1] == "1"
-    assert next(command for command in commands if "cyclonedx" in command)[-1] == image
+    assert result == (0 if failure is None else 1)
+    assert "runtime inspection" in labels
+    if failure is None:
+        scan = next(command for command in commands if "--severity" in command)
+        assert scan[-1] == image
+        assert scan[scan.index("--image-src") + 1] == "remote"
+        assert scan[scan.index("--severity") + 1] == "CRITICAL,HIGH"
+        assert scan[scan.index("--exit-code") + 1] == "1"
+        assert next(command for command in commands if "cyclonedx" in command)[-1] == image
     evidence = list((tmp_path / "artifacts" / "security").glob("*/validated-image.json"))
-    assert bool(evidence) is not image_scan_fails
+    assert bool(evidence) is (failure is None)
+    if failure is None:
+        assert secret_scans == [
+            ("image-layer-secrets.json", 4),
+            ("image-history-secrets.json", 0),
+            ("report-secrets.json", 0),
+        ]

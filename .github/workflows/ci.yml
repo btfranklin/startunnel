@@ -60,7 +60,6 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check "pdm==2.28.0"
           pdm install --frozen-lockfile --no-self
-          npm ci --ignore-scripts
       - name: Install Perfect Doc
         run: |
           tool_dir="$RUNNER_TEMP/perfect-doc"
@@ -73,6 +72,28 @@ jobs:
           sha256sum --check --ignore-missing SHA256SUMS
           tar -xzf "$archive"
           echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      - name: Install the source secret scanner
+        run: |
+          tool_dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=gitleaks_8.28.0_linux_x64.tar.gz
+          base=https://github.com/gitleaks/gitleaks/releases/download/v8.28.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/gitleaks_8.28.0_checksums.txt" --output checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf "$archive" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+      - name: Check source before service builds
+        run: pdm run security-release source
+      - name: Upload source scan reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-security-${{ github.run_id }}
+          path: artifacts/security/
+          if-no-files-found: warn
+          retention-days: 90
       - name: Run the canonical gate
         run: pdm run check
 
