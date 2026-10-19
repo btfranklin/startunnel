@@ -76,6 +76,13 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
+These steps describe planned v0.2.0. Apply them only after v0.2.0 is published
+and its release record lists the installed version as supported. The current
+v0.1.0 release record does not contain these pending changes. For published
+v0.1.0, use its [tagged maintenance guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/maintain.md).
+Test current source on a new instance with a
+[custom image](image.md#build-a-custom-image).
+
 For a database that still stores address digests, this upgrade performs a
 [one-time tunnel reset](address-storage.md). It deletes all existing tunnels
 and their message data. Accounts and credentials remain. Read that notice and
@@ -85,7 +92,7 @@ For databases that already store glyph addresses, removing the unused
 per-message content digest preserves existing messages and payloads. The
 application no longer stores a per-message content digest.
 
-1. Select a published version from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
+1. After v0.2.0 is published, select it from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.
    Keep the source commit and immutable image digest together.
@@ -137,7 +144,7 @@ application no longer stores a per-message content digest.
    printed snapshot, configuration, migrations, and service state. Retry from
    the old configuration only if the database and writers remain unchanged.
 6. Tell each CLI user to install the client from the upgraded instance. The
-   command installation is unreleased work after v0.1.0. Existing script users
+   command installation is planned for v0.2.0. Existing v0.1.0 script users
    must perform this initial installation on each CLI machine:
 
    ```shell

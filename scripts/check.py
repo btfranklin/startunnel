@@ -142,6 +142,7 @@ GATES = [
         (
             "pytest",
             "tests/unit",
+            "tests/tools",
             "tests/api",
             "tests/docs",
             "tests/load",

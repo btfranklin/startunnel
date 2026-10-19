@@ -6,7 +6,9 @@ import base64
 import hmac
 import re
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 from django.conf import settings
@@ -61,3 +63,12 @@ def credential_factory(
         return credential, key
 
     return create
+
+
+@pytest.fixture
+def executable_dir() -> Iterator[Path]:
+    """Keep executable fixtures outside the container's noexec /tmp mount."""
+    artifacts = Path(__file__).resolve().parents[1] / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    with TemporaryDirectory(prefix="executable-test-", dir=artifacts) as directory:
+        yield Path(directory)

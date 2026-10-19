@@ -459,16 +459,18 @@ def test_surrogate_input_reaches_server_unicode_validation() -> None:
 
 @pytest.mark.parametrize("arguments", [("version",), ("schema",), ("--help",)])
 def test_closed_output_pipe_exits_without_a_traceback(arguments: tuple[str, ...]) -> None:
-    with subprocess.Popen(
-        [sys.executable, str(CLI), *arguments],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    ) as process:
-        assert process.stdout is not None
-        assert process.stderr is not None
-        process.stdout.close()
-        assert process.wait(timeout=5) == 1
-        assert process.stderr.read() == b""
+    reader, writer = os.pipe()
+    os.close(reader)
+    with os.fdopen(writer, "wb") as output:
+        result = subprocess.run(
+            [sys.executable, str(CLI), *arguments],
+            stdout=output,
+            stderr=subprocess.PIPE,
+            timeout=5,
+            check=False,
+        )
+    assert result.returncode == 1
+    assert result.stderr == b""
 
 
 @pytest.mark.parametrize(

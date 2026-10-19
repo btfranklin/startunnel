@@ -126,6 +126,11 @@ class JsonArgumentParser(argparse.ArgumentParser):
                 ),
             ) from error
 
+    def _print_message(self, message: str, file: Any = None) -> None:
+        # argparse can discard write errors before exit() flushes.
+        if message:
+            (file if file is not None else sys.stderr).write(message)
+
     def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
         sys.stdout.flush()
         super().exit(status, message)

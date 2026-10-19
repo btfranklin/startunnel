@@ -5,9 +5,12 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
-Changes after v0.1.0 are recorded in [unreleased notes](../releases/UNRELEASED.md).
-Do not describe these changes as part of the published v0.1.0 client. Before
-the next release, include the completed notes in its versioned release guide.
+The next planned release is v0.2.0. It is not released. Its changes are recorded
+in [unreleased notes](../releases/UNRELEASED.md). Published v0.1.0 keeps its own
+[tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
+and release records. Do not use its `release.json` to deploy pending changes.
+Use current source for a local trial or a
+[custom image](setup/image.md#build-a-custom-image) for a new instance.
 
 ## Versions and supported databases
 
@@ -26,8 +29,9 @@ source before compatibility is claimed. Inspect ManageAI's actual
 installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 
-The root `VERSION` file owns the next release version. For each subsequent
-release, update it and commit `releases/VERSION.json` and `releases/VERSION.md`. The specification names every supported predecessor in
+When preparing v0.2.0, set the root `VERSION` file to `0.2.0`. Create
+`releases/v0.2.0.json` and reviewed `releases/v0.2.0.md` from the unreleased notes. For each later release, update the same files for that
+version. The specification names every supported predecessor in
 `supported_from`, configuration changes, database requirements, and rollback
 steps. Preserve applied migration files; add forward migrations. Before listing
 a predecessor, test upgrading a restored database from that exact version,
@@ -81,11 +85,12 @@ remain opt-in and do not receive provider credentials during candidate validatio
 
 ## Tag and promote
 
-Check that the version tag is unused, then tag the exact successful commit:
+During v0.2.0 release preparation, check that its tag is unused, then tag the
+exact successful commit. These are release steps, not an update available now:
 
 ```sh
-git tag -a v0.1.0 TESTED_COMMIT -m "StarTunnel v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 TESTED_COMMIT -m "StarTunnel v0.2.0"
+git push origin v0.2.0
 ```
 
 Replace `TESTED_COMMIT` with its full SHA. The release workflow checks the tag

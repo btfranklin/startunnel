@@ -4,6 +4,10 @@ Use this index to find the document that owns each project topic.
 
 Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 
+These `main` docs describe planned v0.2.0, which is not released. For published
+v0.1.0, start with its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
+and [setup index](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/README.md).
+
 ## Sources of truth
 
 | Document | What it owns |
@@ -16,6 +20,7 @@ Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 | [Operations](operations.md) | Docker, configuration, health, deployment, backup, and recovery |
 | [Release policy](releases.md) | Versioned images, publication, compatibility, and upgrades |
 | [Team setup index](setup/README.md) | Configuration selection and complete EC2, Lightsail, DigitalOcean, and existing-server setup paths |
+| [Repository tools](../scripts/README.md) | Validation, development, deployment, and proof script owners |
 | [Testing](testing.md) | Test matrix, commands, fixtures, and acceptance gates |
 | [Design](design.md) | Brand, typography, navigation, and interface rules |
 | [Decisions](decisions.md) | Durable reasons for non-obvious technical choices |

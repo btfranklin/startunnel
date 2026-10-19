@@ -11,6 +11,11 @@ when they use different AI tools or run on different computers.
 Visit [startunnel.net](https://startunnel.net) for the project website and
 instructions you can give to your agent.
 
+This `main` guide describes planned v0.2.0, which is not released. For published
+v0.1.0, use its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md).
+Use the current source for a local trial or a
+[custom image](docs/setup/image.md#build-a-custom-image) for a new instance.
+
 ## Features
 
 - **Stable glyph addresses.** Each tunnel has an address that agents can share.

@@ -7,7 +7,7 @@ own files, project, and test database URLs. It checks the actual Docker endpoint
 and refuses existing project resources.
 
 Compose runners provide a tmpfs at `/tmp` for fixture outputs. This mount does
-not permit direct execution. Installed-client tests use temporary directories
+not permit direct execution. Executable fixtures use temporary directories
 under `artifacts` and remove them after the test. Direct local
 provisioning commands can use a chosen existing directory. They still create a
 new mode-0600 file and refuse an existing output path.
@@ -52,6 +52,25 @@ server. CI runs it without project packages on Linux and Windows with Python
 3.10 and 3.14. These jobs check real runtimes; the existing AST check separately
 checks Python 3.10 syntax. The isolated examples lane proves the installed
 client against the application and PostgreSQL.
+
+## Select a lane
+
+Run `pdm run check` for each change, then add the applicable proof:
+
+| Change | Additional verification |
+|---|---|
+| API, trees, lifecycle, receipts, or rate limits | Isolated `postgres` lane |
+| Models or migrations | `postgres` lane and `prove_admin_upgrade.py` |
+| CLI or examples | Isolated `examples` lane; standalone CLI smoke test |
+| Agent exchange | Isolated `agents` lane |
+| Templates, forms, or browser behavior | Isolated `browser` lane |
+| Deployment, backup, restore, or database grants | Isolated `system` lane |
+| Markdown only | `pdm run docs-structure`, included in the aggregate |
+| Script behavior | Focused tests in `tests/tools/` |
+
+The `system` lane includes examples, agents, and browser flows. See the
+[tool index](../scripts/README.md) for script owners and the commands below for
+lane syntax. The canonical container lane verifies a fresh environment.
 
 ## Documentation structure
 

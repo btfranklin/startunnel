@@ -1,5 +1,7 @@
 # One-time tunnel reset
 
+This reset is planned for v0.2.0, which is not released.
+
 The upgrade from address digests to stored glyph addresses deletes all existing
 tunnels. This is a breaking upgrade. It deletes their addresses, cycles, messages,
 mentions, activity events, checkpoints, and agent retry records. It also removes

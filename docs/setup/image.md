@@ -4,6 +4,12 @@
 
 ## Use an official release
 
+These `main` instructions describe planned v0.2.0. No v0.2.0 image or release
+record is available until publication. Use the
+[tagged setup guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/README.md)
+for published v0.1.0. To test current source on a new instance, use the custom
+build path below.
+
 For a shared installation, select a published version from
 [StarTunnel releases](https://github.com/btfranklin/startunnel/releases).
 Download its attached `release.json`. It supplies the exact `source_commit`,

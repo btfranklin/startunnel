@@ -39,18 +39,18 @@ raise SystemExit(int(os.environ['PROBE_STATUS']))
     ],
 )
 def test_runtime_role_probe_requires_permission_denial_and_normal_writes(
-    tmp_path: Path, state: str, status: int, allowed_status: int, expected: int
+    executable_dir: Path, state: str, status: int, allowed_status: int, expected: int
 ) -> None:
-    executable = tmp_path / "psql"
+    executable = executable_dir / "psql"
     executable.write_text(PSQL, encoding="utf-8")
     executable.chmod(0o755)
-    commands = tmp_path / "commands.jsonl"
+    commands = executable_dir / "commands.jsonl"
     password = "synthetic-probe-password"
     result = subprocess.run(
         [str(PROBE), "restored_database"],
         env={
             **os.environ,
-            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "PATH": str(executable_dir) + os.pathsep + os.environ["PATH"],
             "STARTUNNEL_DB_RUNTIME_PASSWORD": password,
             "PROBE_PASSWORD": password,
             "PROBE_COMMANDS": str(commands),
