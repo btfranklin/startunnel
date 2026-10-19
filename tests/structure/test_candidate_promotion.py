@@ -14,11 +14,21 @@ import pytest
 from scripts import compose_isolation as isolation
 from scripts import release_candidate as candidate
 from scripts import release_draft as draft
+from tests.structure.workflows import load_workflow
 
 IMAGE = "ghcr.io/btfranklin/startunnel@sha256:" + "a" * 64
 CUSTOM_IMAGE = "registry.example:5000/team/startunnel@sha256:" + "a" * 64
 COMMIT = "b" * 40
 IMAGE_ID = "sha256:" + "c" * 64
+
+
+def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None:
+    validation = load_workflow("release-validation.yml")["jobs"]
+    for name in ("security", "system", "full-load"):
+        assert not validation[name].get("needs")
+    workflow = load_workflow("release-candidate.yml")["jobs"]
+    assert workflow["validation"]["uses"] == "./.github/workflows/release-validation.yml"
+    assert set(workflow["evidence"]["needs"]) == {"build", "validation"}
 
 
 def evidence(directory: Path) -> dict[str, Any]:

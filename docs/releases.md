@@ -67,8 +67,8 @@ commands do not check for updates. There is no package-manager release.
    and planned version labels are set at this build.
    The same values are embedded in the downloadable client and are available
    through `startunnel version`. Do not give the client a separate release version.
-4. The candidate digest passes security scanning, the isolated clean-stack
-   system proof, and fixed-load testing. Application services run the candidate
+4. Security scanning, the isolated clean-stack system proof, and fixed-load
+   testing run in parallel against the candidate digest. Application services run the candidate
    image with development settings and isolated test data. Test-helper images
    are separate builds; they are not the release artifact. The runners verify
    that web, migration, and maintenance services used the candidate image.

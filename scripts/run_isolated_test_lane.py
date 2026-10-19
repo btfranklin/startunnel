@@ -129,9 +129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     system_report: dict[str, Any] | None = None
     try:
-        profiles: tuple[str, ...] = (
-            ("browser", "examples", "agents") if arguments.lane == "system" else ()
-        )
+        profiles: tuple[str, ...] = ("examples", "agents") if arguments.lane == "system" else ()
         if arguments.lane in LANES:
             profiles = LANES[arguments.lane].profiles
         with (

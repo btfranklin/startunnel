@@ -51,7 +51,6 @@ SYSTEM_SERVICES = (
     "maintenance",
     "example-tests",
     "agent-e2e",
-    "browser-tests",
 )
 
 
@@ -594,7 +593,6 @@ def run_system_proof(
                 "build",
                 "example-tests",
                 "agent-e2e",
-                "browser-tests",
                 timeout_seconds=3_600,
             ),
         )
@@ -619,7 +617,6 @@ def run_system_proof(
             "create",
             "example-tests",
             "agent-e2e",
-            "browser-tests",
             timeout_seconds=300,
         ),
     )
@@ -637,40 +634,7 @@ def run_system_proof(
             timeout_seconds=60,
         ),
     )
-    step(
-        "clean-stack examples",
-        lambda: stack.run(
-            "Run clean-stack examples",
-            "run",
-            "--rm",
-            "--no-deps",
-            "example-tests",
-            timeout_seconds=2_400,
-        ),
-    )
-    step(
-        "deterministic external agents",
-        lambda: stack.run(
-            "Run deterministic external agents",
-            "run",
-            "--rm",
-            "--no-deps",
-            "agent-e2e",
-            timeout_seconds=2_400,
-        ),
-    )
     step("active tree-reader web restart", lambda: _run_activity_restart_proof(stack))
-    step(
-        "three-browser application flow",
-        lambda: stack.run(
-            "Run three-browser application flow",
-            "run",
-            "--rm",
-            "--no-deps",
-            "browser-tests",
-            timeout_seconds=4_800,
-        ),
-    )
     step(
         "runtime database permissions",
         lambda: stack.run(

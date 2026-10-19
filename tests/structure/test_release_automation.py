@@ -59,6 +59,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
         availability_checked = False
         database_loss_started = False
         builds: list[tuple[str, ...]] = []
+        proof_service_creations: list[tuple[str, ...]] = []
 
         def pull_candidate(self) -> None:
             pass
@@ -70,6 +71,8 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
             del label, kwargs
             if args[0] == "build":
                 self.builds.append(args)
+            if args[0] == "create":
+                self.proof_service_creations.append(args)
             if args[0] == "up" and "--wait" in args:
                 self.running = True
             if args[-1] == "runtime-contents-proof":
@@ -113,12 +116,13 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     assert report["status"] == "passed"
     assert stack.runtime_contents_checked
     assert stack.availability_checked
+    assert stack.proof_service_creations == [("create", "example-tests", "agent-e2e")]
     if candidate_image:
-        assert stack.builds == [("build", "example-tests", "agent-e2e", "browser-tests")]
+        assert stack.builds == [("build", "example-tests", "agent-e2e")]
     elif build_images:
         assert stack.builds == [
             ("build", "--no-cache", "web", "maintenance"),
-            ("build", "example-tests", "agent-e2e", "browser-tests"),
+            ("build", "example-tests", "agent-e2e"),
         ]
     else:
         assert stack.builds == []
@@ -801,7 +805,8 @@ def test_system_report_is_written_only_after_volume_cleanup(
             profiles: Sequence[str],
             include_openai: bool,
         ) -> None:
-            del project_name, profiles, include_openai
+            del project_name, include_openai
+            assert tuple(profiles) == ("examples", "agents")
             events.append("init")
 
         def __enter__(self) -> FakeStack:
@@ -1213,7 +1218,6 @@ def test_system_report_records_every_used_service_image(
         "maintenance",
         "example-tests",
         "agent-e2e",
-        "browser-tests",
     }
     assert services == list(image_ids)
 

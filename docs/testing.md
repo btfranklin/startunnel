@@ -293,9 +293,13 @@ operators can use an image from their own registry pinned with `@sha256:`.
 Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
 proof helpers, and verify application service image IDs. Helper builds use the
-Docker cache; changed source files still cause their copy layers to rebuild. The system proof covers
-health, runtime image contents, agent exchanges, browser flows, runtime database privileges, backup,
-restore, database loss, and restarts. It tests the exact runtime image in an
+Docker cache; changed source files still cause their copy layers to rebuild.
+Browser and example suites run once in source CI. The system proof checks
+health, runtime image contents, an active reader across a web restart, a
+post-restart agent exchange, database privileges, backup, restore, and database
+loss and recovery. It builds only the two client helpers it uses.
+Image scanning, system proof, and load testing run in parallel. All three must
+pass for promotion. The system proof tests the exact runtime image in an
 isolated development configuration; it does not prove a particular public
 server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
