@@ -497,3 +497,28 @@ def test_expired_cycle_can_be_replaced_without_maintenance(
         get_tunnel_status(credential=creator, address=created.address).current_cycle
         == started.cycle
     )
+
+
+def test_expired_tunnel_keeps_its_reported_dormancy_time_after_maintenance(
+    credential_factory: Any,
+) -> None:
+    from core.maintenance import cleanup_once
+    from tunnels.cycles import get_tunnel_status
+
+    creator, _ = credential_factory()
+    created = _create(creator, key="dormancy-time-create")
+    expiry = timezone.now() - timedelta(minutes=10)
+    Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=3600)
+
+    before = get_tunnel_status(credential=creator, address=created.address)
+    assert before.tunnel.state == Tunnel.State.DORMANT
+    assert before.tunnel.dormant_at == expiry
+
+    cleanup_once()
+
+    after = get_tunnel_status(credential=creator, address=created.address)
+    created.cycle.refresh_from_db()
+    assert after.tunnel.state == Tunnel.State.DORMANT
+    assert after.tunnel.dormant_at == before.tunnel.dormant_at
+    assert created.cycle.closed_at == expiry
+    assert created.cycle.delete_after == expiry + timedelta(hours=1)

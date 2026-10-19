@@ -358,6 +358,34 @@ def test_cursors_reject_tampering_wrong_purpose_oversize_and_wrong_tunnel(
     _safe_error(wrong_tunnel, status=404, code="tunnel_unavailable")
 
 
+@pytest.mark.parametrize("wait_seconds", [0, 20])
+def test_activity_rejects_another_tunnels_cursor_before_registering_a_wait(
+    client: Client,
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    wait_seconds: int,
+) -> None:
+    _, key = credential_factory()
+    first = _create(client, key=key, operation="cursor-source")
+    second = _create(client, key=key, operation="cursor-target")
+
+    def reject_wait(tunnel_id: Any) -> None:
+        pytest.fail("An invalid cursor must not register an activity wait.")
+
+    monkeypatch.setattr("tunnels.activity.activity_listener.register", reject_wait)
+    response = _post(
+        client,
+        "/api/v1/activity",
+        {
+            "address": second["tunnel"]["address"],
+            "after_cursor": first["activity_cursor"],
+            "wait_seconds": wait_seconds,
+        },
+        key=key,
+    )
+    _safe_error(response, status=404, code="tunnel_unavailable")
+
+
 def test_checkpoint_accepts_forward_and_exact_positions_but_rejects_regression(
     client: Client, credential_factory: Any
 ) -> None:

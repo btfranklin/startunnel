@@ -805,7 +805,7 @@ def _close_locked_cycle(
     if reason != "expired":
         transaction.on_commit(notify_maintenance)
     tunnel.state = Tunnel.State.DORMANT
-    tunnel.dormant_at = now
+    tunnel.dormant_at = closed_at
     append_events(
         tunnel=tunnel,
         events=[

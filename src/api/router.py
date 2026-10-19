@@ -784,9 +784,6 @@ async def read_tunnel_activity(request: HttpRequest, payload: ActivityRequest) -
         wait_seconds=payload.wait_seconds,
         limit=payload.limit,
         event_types=tuple(payload.event_types) if payload.event_types is not None else None,
-    )
-    _require_cursor_tunnel(
-        tunnel=page.tunnel,
         expected_tunnel_id=expected_tunnel_id,
     )
     return ActivityResponse(

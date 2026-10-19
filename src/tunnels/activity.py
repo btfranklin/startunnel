@@ -17,7 +17,7 @@ from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.activity_listener import activity_listener
 from core.async_database import ASYNC_DATABASE_EXECUTOR
-from core.errors import CheckpointRegression, InvalidRequest
+from core.errors import CheckpointRegression, InvalidRequest, TunnelUnavailable
 from core.limits import DEFAULT_LIMITS
 
 from .access import (
@@ -81,6 +81,7 @@ def _read_activity_once_for_async(
     after_position: int | None,
     limit: int,
     event_types: tuple[str, ...] | None,
+    expected_tunnel_id: UUID | None = None,
 ) -> ActivityPage:
     """Resolve and read one activity page in a database worker."""
 
@@ -91,6 +92,7 @@ def _read_activity_once_for_async(
             after_position=after_position,
             limit=limit,
             event_types=event_types,
+            expected_tunnel_id=expected_tunnel_id,
         )
         query = _activity_query(
             tunnel=start.tunnel,
@@ -117,6 +119,7 @@ def _resolve_activity_start(
     after_position: int | None,
     limit: int,
     event_types: tuple[str, ...] | None,
+    expected_tunnel_id: UUID | None = None,
 ) -> _ActivityStart:
     limits = instance_limits.effective_limits()
     if after_position is not None and after_position < 0:
@@ -129,6 +132,8 @@ def _resolve_activity_start(
         credential=credential,
         address=address,
     )
+    if expected_tunnel_id is not None and tunnel.id != expected_tunnel_id:
+        raise TunnelUnavailable()
     if after_position is None:
         after_position = (
             ActivityCheckpoint.objects.filter(tunnel=tunnel, credential=credential)
@@ -153,6 +158,7 @@ def _begin_activity_wait_for_async(
     after_position: int | None,
     limit: int,
     event_types: tuple[str, ...] | None,
+    expected_tunnel_id: UUID | None = None,
 ) -> _ActivityStart:
     """Resolve and validate one wait before it registers for a database notice."""
 
@@ -163,6 +169,7 @@ def _begin_activity_wait_for_async(
             after_position=after_position,
             limit=limit,
             event_types=event_types,
+            expected_tunnel_id=expected_tunnel_id,
         )
     finally:
         connection.close()
@@ -290,6 +297,7 @@ async def read_activity_async(
     wait_seconds: int = 0,
     limit: int = DEFAULT_LIMITS.default_list_page,
     event_types: tuple[str, ...] | None = None,
+    expected_tunnel_id: UUID | None = None,
 ) -> ActivityPage:
     """Read activity without holding a synchronous worker during the wait."""
 
@@ -309,6 +317,7 @@ async def read_activity_async(
                 after_position=after_position,
                 limit=limit,
                 event_types=event_types,
+                expected_tunnel_id=expected_tunnel_id,
             ),
             thread_sensitive=sqlite_backend,
             executor=executor,
@@ -331,6 +340,7 @@ async def read_activity_async(
             after_position=after_position,
             limit=limit,
             event_types=event_types,
+            expected_tunnel_id=expected_tunnel_id,
         ),
         thread_sensitive=sqlite_backend,
         executor=executor,
