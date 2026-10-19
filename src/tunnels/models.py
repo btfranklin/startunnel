@@ -213,6 +213,7 @@ class Message(models.Model):
         ]
         indexes = [
             models.Index(fields=["cycle", "parent", "sequence"], name="message_reply_order"),
+            models.Index(fields=["cycle", "sender", "sequence"], name="message_beacon_responders"),
             models.Index(fields=["tunnel", "created_at"], name="message_tunnel_activity"),
             GinIndex(
                 SearchVector("text_payload", "json_payload", config="simple"),

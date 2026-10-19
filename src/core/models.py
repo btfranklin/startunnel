@@ -40,7 +40,7 @@ class AgentReceipt(models.Model):
     key_digest = models.BinaryField(max_length=32)
     request_digest = models.BinaryField(max_length=32)
     response = models.JSONField(default=dict)
-    resource_id = models.UUIDField(null=True, blank=True)
+    resource_id = models.UUIDField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(db_index=True)
 

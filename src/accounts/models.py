@@ -90,6 +90,13 @@ class AdminReceipt(models.Model):
 
     class Meta:
         db_table = "accounts_adminoperation"
+        indexes = [
+            models.Index(
+                models.F("response__resource__id"),
+                condition=models.Q(operation="beacons.withdraw"),
+                name="admin_beacon_receipt_resource",
+            )
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["owner", "key_digest"], name="unique_admin_operation_key"
