@@ -60,7 +60,9 @@ def test_tunnel_inspection_shows_stored_data_but_rejects_changes(
         else {"type": "json", "value": {"detail": marker}}
     )
     created = create_tunnel(
-        credential=credential, idempotency_key="inspection-create", root_content=content
+        credential=credential,
+        idempotency_key="inspect01",
+        root_content=content,
     )
     rotate_address_as_admin(
         actor=administrator, tunnel_id=created.tunnel.pk, expected_address_generation=1

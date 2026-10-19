@@ -74,7 +74,7 @@ def test_metrics_token_must_be_distinct_from_cryptographic_secrets() -> None:
 def test_production_preserves_printable_text_secrets_without_decoding() -> None:
     environment = _environment()
     values = {
-        "STARTUNNEL_API_KEY_PEPPER": "0123456789abcdef" * 4,
+        "STARTUNNEL_API_KEY_PEPPER": "ab" * 32,
         "STARTUNNEL_IDEMPOTENCY_SECRET": base64.urlsafe_b64encode(b"x" * 64)
         .decode("ascii")
         .rstrip("="),

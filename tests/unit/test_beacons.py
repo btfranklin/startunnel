@@ -74,13 +74,13 @@ def test_publish_retry_is_exact_and_cycle_has_one_final_publication(
     created = _create(creator)
     result, replay = publish_beacon(
         credential=creator,
-        idempotency_key="publish-key-0001",
+        idempotency_key="publish-1",
         address=created.address,
         text="Review this.",
     )
     retry, retried = publish_beacon(
         credential=creator,
-        idempotency_key="publish-key-0001",
+        idempotency_key="publish-1",
         address=created.address,
         text="Review this.",
     )
@@ -91,28 +91,28 @@ def test_publish_retry_is_exact_and_cycle_has_one_final_publication(
     with pytest.raises(IdempotencyConflict):
         publish_beacon(
             credential=creator,
-            idempotency_key="publish-key-0001",
+            idempotency_key="publish-1",
             address=created.address,
             text="Different text.",
         )
     with pytest.raises(LifecycleConflict):
         publish_beacon(
             credential=creator,
-            idempotency_key="publish-key-0002",
+            idempotency_key="publish-2",
             address=created.address,
             text="Second publication.",
         )
 
     end, _ = withdraw_beacon(
         credential=creator,
-        idempotency_key="withdraw-key-0001",
+        idempotency_key="withdraw1",
         address=created.address,
         beacon_id=UUID(result["id"]),
     )
     assert end["end_reason"] == Beacon.EndReason.WITHDRAWN
     retry_end, replay_end = withdraw_beacon(
         credential=creator,
-        idempotency_key="withdraw-key-0001",
+        idempotency_key="withdraw1",
         address=created.address,
         beacon_id=UUID(result["id"]),
     )
@@ -146,7 +146,7 @@ def test_board_counts_distinct_nonpublisher_credentials_that_reply_after_publish
     _reply(created, responder, "reply-before-0001", session="early-chat")
     result, _ = publish_beacon(
         credential=creator,
-        idempotency_key="publish-count-0001",
+        idempotency_key="count0001",
         address=created.address,
         text="Need review.",
     )
@@ -234,7 +234,7 @@ def test_cycle_close_ends_beacon_after_cycle_events(credential_factory: Any) -> 
     created = _create(creator, "beacon-close")
     result, _ = publish_beacon(
         credential=creator,
-        idempotency_key="publish-close-0001",
+        idempotency_key="close0001",
         address=created.address,
         text="Join review.",
     )
@@ -297,7 +297,7 @@ def test_only_current_cycle_creator_can_publish_or_withdraw(
     with pytest.raises(TunnelUnavailable):
         publish_beacon(
             credential=other,
-            idempotency_key="publish-other-0001",
+            idempotency_key="other0001",
             address=created.address,
             text="Join this work.",
         )
@@ -323,7 +323,7 @@ def test_expiry_hides_beacon_before_maintenance_and_cleanup_records_end(
     created = _create(creator, "beacon-expiry")
     result, _ = publish_beacon(
         credential=creator,
-        idempotency_key="publish-expiry-0001",
+        idempotency_key="expiry001",
         address=created.address,
         text="Need review.",
         lifetime_seconds=60,
@@ -381,13 +381,13 @@ def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_facto
     created = _create(creator, "beacon-retention")
     result, _ = publish_beacon(
         credential=creator,
-        idempotency_key="publish-retention-0001",
+        idempotency_key="retain001",
         address=created.address,
         text="Need review.",
     )
     withdraw_beacon(
         credential=creator,
-        idempotency_key="withdraw-retention-0001",
+        idempotency_key="endret001",
         address=created.address,
         beacon_id=UUID(result["id"]),
     )
@@ -409,21 +409,21 @@ def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_facto
     with pytest.raises(TunnelUnavailable):
         publish_beacon(
             credential=creator,
-            idempotency_key="publish-retention-0001",
+            idempotency_key="retain001",
             address=created.address,
             text="Need review.",
         )
     with pytest.raises(TunnelUnavailable):
         withdraw_beacon(
             credential=creator,
-            idempotency_key="withdraw-retention-0001",
+            idempotency_key="endret001",
             address=created.address,
             beacon_id=UUID(result["id"]),
         )
     with pytest.raises(IdempotencyConflict):
         publish_beacon(
             credential=creator,
-            idempotency_key="publish-retention-0001",
+            idempotency_key="retain001",
             address=created.address,
             text="Changed request.",
         )

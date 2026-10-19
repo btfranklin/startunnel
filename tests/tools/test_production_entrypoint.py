@@ -135,7 +135,7 @@ def test_production_secret_preflight_accepts_only_complete_safe_sources(
 
 def test_production_secret_preflight_preserves_operator_text_formats(tmp_path: Path) -> None:
     values = {
-        "startunnel_api_key_pepper": "0123456789abcdef" * 4,
+        "startunnel_api_key_pepper": "ab" * 32,
         "startunnel_idempotency_secret": "operator secret / with spaces and punctuation!",
         "startunnel_metrics_token": "f" * 64,
     }

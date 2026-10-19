@@ -258,7 +258,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
         await sync_to_async(_worker)(
             lambda: publish_beacon(
                 credential=publisher,
-                idempotency_key="wait-wakes-publish-0001",
+                idempotency_key="wpub0001",
                 address=created.address,
                 text="Review this proposal.",
             )
@@ -272,7 +272,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
         await sync_to_async(_worker)(
             lambda: post_reply(
                 credential=responder,
-                idempotency_key="wait-wakes-reply-0001",
+                idempotency_key="wrep0001",
                 address=created.address,
                 parent_id=created.root.id,
                 content={"type": "text", "text": "I reviewed it."},
@@ -352,7 +352,7 @@ async def test_wait_observes_commit_between_registration_and_database_reread(
         await sync_to_async(_worker)(
             lambda: publish_beacon(
                 credential=publisher,
-                idempotency_key="wait-race-publish-0001",
+                idempotency_key="rpub0001",
                 address=created.address,
                 text="Committed during registration.",
             )
