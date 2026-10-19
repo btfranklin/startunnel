@@ -98,7 +98,12 @@ pdm run python scripts/run_isolated_test_lane.py agents
 pdm run python scripts/run_isolated_test_lane.py browser
 ```
 
-The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions. The privilege test grants the runtime role normal table permissions before it checks the migration's history-delete revocation.
+The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions.
+The privilege test executes the production grant SQL with `psql` and compares
+its permissions with the migration. Both use the same history-table list.
+System and restore proofs run one shared role check. It verifies normal writes
+and requires SQLSTATE `42501` for denied operations. Other database failures do
+not count as permission denial.
 Subtree tests check deep preorder pages, fixed snapshots, depth limits, and
 invalid continuations. Lifecycle tests force both post/close lock orders and
 both expiry-close/post orders, with PostgreSQL lock-wait evidence. Retention

@@ -37,7 +37,6 @@ from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
 from core.rate_limits import _consume, consume_login_attempt
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.migrations.sql.guards import revoke_runtime_history_delete
 from tunnels.models import Cycle, Tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -429,54 +428,6 @@ def test_batch_delete_preserves_a_concurrent_expiry_refresh(
     query = type(row).objects.filter(**{field + "__lte": now})
     assert _delete_batch(query, ordered_field=field) == 0
     assert type(row).objects.filter(pk=row.pk).exists()
-
-
-def test_runtime_role_has_no_direct_history_delete_privilege() -> None:
-    history_tables = (
-        "tunnels_tunnel",
-        "tunnels_tunneladdress",
-        "tunnels_cycle",
-        "tunnels_message",
-        "tunnels_messagemention",
-        "tunnels_tunnelevent",
-        "tunnels_activitycheckpoint",
-        "tunnels_auditevent",
-    )
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO startunnel"
-        )
-        for table in history_tables:
-            cursor.execute(
-                "SELECT has_table_privilege('startunnel', %s, 'DELETE')",
-                [f"public.{table}"],
-            )
-            assert cursor.fetchone() == (True,)
-
-    with connection.schema_editor() as schema_editor:
-        revoke_runtime_history_delete(None, schema_editor)
-
-    with connection.cursor() as cursor:
-        for table in history_tables:
-            for privilege in ("SELECT", "INSERT", "UPDATE"):
-                cursor.execute(
-                    "SELECT has_table_privilege('startunnel', %s, %s)",
-                    [f"public.{table}", privilege],
-                )
-                assert cursor.fetchone() == (True,)
-            cursor.execute(
-                "SELECT has_table_privilege('startunnel', %s, 'DELETE')",
-                [f"public.{table}"],
-            )
-            assert cursor.fetchone() == (False,)
-        cursor.execute(
-            "SELECT has_table_privilege('startunnel', 'public.tunnels_idempotencyrecord', 'DELETE')"
-        )
-        assert cursor.fetchone() == (True,)
-        cursor.execute(
-            "SELECT has_table_privilege(current_user, 'public.tunnels_message', 'DELETE')"
-        )
-        assert cursor.fetchone() == (True,)
 
 
 def test_normal_api_request_reuses_its_authentication_connection(credential_factory: Any) -> None:

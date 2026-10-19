@@ -72,24 +72,7 @@ if [ "$table_count" -lt 1 ] || [ "$migration_count" -lt 1 ]; then
     exit 1
 fi
 
-runtime_query() {
-    query="$1"
-    docker compose exec -T postgres \
-        sh -c 'PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD" exec psql --set=ON_ERROR_STOP=1 --username startunnel --dbname "$1" --command "$2"' \
-        sh "$restore_database" "$query"
-}
-runtime_query "SELECT count(*) FROM django_migrations; BEGIN; INSERT INTO django_session (session_key, session_data, expire_date) VALUES ('restore-check-session', 'restore-check-data', now() + interval '5 minutes'); UPDATE django_session SET session_data = 'restore-check-updated' WHERE session_key = 'restore-check-session'; DELETE FROM django_session WHERE session_key = 'restore-check-session'; ROLLBACK;" >/dev/null
-expect_runtime_operation_denied() {
-    label="$1"
-    query="$2"
-    if runtime_query "$query" >/dev/null 2>&1; then
-        echo "The restore check found that runtime ${label} is allowed." >&2
-        exit 1
-    fi
-}
-expect_runtime_operation_denied "schema changes" \
-    "CREATE TABLE startunnel_forbidden_schema (id integer);"
-expect_runtime_operation_denied "immutable history deletion" \
-    "DELETE FROM tunnels_message;"
+docker compose exec -T postgres \
+    /usr/local/bin/startunnel-check-runtime-role "$restore_database"
 
 echo "The PostgreSQL restore check passed with ${table_count} tables."

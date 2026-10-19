@@ -117,21 +117,6 @@ print('Runtime image contents passed.')
 """.strip()
 
 
-def _runtime_select_script() -> str:
-    return (
-        'PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD" exec psql '
-        "--set=ON_ERROR_STOP=1 --tuples-only --no-align "
-        '--username startunnel --dbname startunnel --command "'
-        "SELECT count(*) FROM django_migrations; "
-        "BEGIN; "
-        "INSERT INTO django_migrations (app, name, applied) "
-        "VALUES ('system_proof', 'runtime_dml', now()); "
-        "DELETE FROM django_migrations "
-        "WHERE app = 'system_proof' AND name = 'runtime_dml'; "
-        'ROLLBACK;"'
-    )
-
-
 def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
     """Back up and restore the PostgreSQL database."""
 
@@ -171,45 +156,6 @@ def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
                 raise LaneError(label, f"The {label} did not finish.") from error
             if result.returncode:
                 raise LaneError(label, f"The {label} failed with exit code {result.returncode}.")
-
-
-def _runtime_restriction_script() -> str:
-    return """
-deny_operation() {
-  label="$1"
-  query="$2"
-  if PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD" psql \
-    --set=ON_ERROR_STOP=1 --username startunnel --dbname startunnel \
-    --command "$query" >/dev/null 2>&1; then
-    echo "The runtime role accepted forbidden ${label}." >&2
-    exit 1
-  fi
-}
-deny_operation "schema changes" \
-  "CREATE TABLE startunnel_forbidden_system_proof (id integer);"
-deny_operation "temporary tables" \
-  "CREATE TEMP TABLE startunnel_forbidden_system_temp (id integer);"
-deny_operation "database creation" \
-  "CREATE DATABASE startunnel_forbidden_system_database;"
-deny_operation "immutable history deletion" "DELETE FROM tunnels_message;"
-deny_operation "audit history deletion" "DELETE FROM tunnels_auditevent;"
-""".strip()
-
-
-def _runtime_session_dml_script() -> str:
-    return """
-PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD" psql \
-  --set=ON_ERROR_STOP=1 --username startunnel --dbname startunnel <<'SQL'
-BEGIN;
-INSERT INTO django_session (session_key, session_data, expire_date)
-VALUES ('system-proof-session', 'system-proof-data', now() + interval '5 minutes');
-UPDATE django_session
-SET session_data = 'system-proof-updated'
-WHERE session_key = 'system-proof-session';
-DELETE FROM django_session WHERE session_key = 'system-proof-session';
-ROLLBACK;
-SQL
-""".strip()
 
 
 def _recorded_step(
@@ -726,41 +672,14 @@ def run_system_proof(
         ),
     )
     step(
-        "runtime database connection",
+        "runtime database permissions",
         lambda: stack.run(
-            "Verify runtime database connection",
+            "Verify runtime database permissions",
             "exec",
             "-T",
             "postgres",
-            "sh",
-            "-ec",
-            _runtime_select_script(),
-            timeout_seconds=60,
-        ),
-    )
-    step(
-        "runtime DDL denial",
-        lambda: stack.run(
-            "Verify runtime DDL denial",
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-ec",
-            _runtime_restriction_script(),
-            timeout_seconds=60,
-        ),
-    )
-    step(
-        "runtime session DML",
-        lambda: stack.run(
-            "Verify runtime session DML",
-            "exec",
-            "-T",
-            "postgres",
-            "sh",
-            "-ec",
-            _runtime_session_dml_script(),
+            "/usr/local/bin/startunnel-check-runtime-role",
+            "startunnel",
             timeout_seconds=60,
         ),
     )

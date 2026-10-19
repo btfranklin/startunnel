@@ -30,6 +30,7 @@ dev = [
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
     "linkbust>=0.1.0",
+    "PyYAML>=6.0.3",
 ]
 live-agents = [
     "openai-agents>=0.20.0",

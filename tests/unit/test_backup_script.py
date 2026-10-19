@@ -72,3 +72,51 @@ def test_failed_dump_removes_partial_backup(tmp_path: Path) -> None:
     assert not backup.exists()
     assert not list(private.glob("*.partial.*"))
     assert len(commands.read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("probe_status", [0, 1])
+def test_restore_runs_production_grants_and_shared_role_probe(
+    tmp_path: Path, probe_status: int
+) -> None:
+    backup = tmp_path / "instance.backup"
+    backup.mkdir()
+    dump = b"synthetic database dump"
+    (backup / "postgres.dump").write_bytes(dump)
+    (backup / "manifest.sha256").write_text(hashlib.sha256(dump).hexdigest() + "  postgres.dump\n")
+    commands = tmp_path / "commands"
+    fake_docker = r"""
+docker() {
+    printf '%s\n' "$*" >> "$RESTORE_COMMANDS"
+    case "$*" in
+        *startunnel-check-runtime-role*) return "$RESTORE_PROBE_STATUS" ;;
+        *information_schema.tables*) printf '5\n' ;;
+        *'SELECT count(*) FROM django_migrations;'*) printf '8\n' ;;
+        *pg_restore*) cat >/dev/null ;;
+    esac
+}
+. "$0"
+"""
+    result = subprocess.run(
+        ["sh", "-c", fake_docker, str(ROOT / "scripts/verify-startunnel-restore.sh"), str(backup)],
+        env={
+            **os.environ,
+            "RESTORE_COMMANDS": str(commands),
+            "RESTORE_PROBE_STATUS": str(probe_status),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == probe_status
+    calls = commands.read_text().splitlines()
+    restore = next(call.split() for call in calls if "pg_restore" in call.split())
+    assert "--no-owner" in restore and "--no-acl" in restore
+    grants = next(call.split() for call in calls if "--file" in call.split())
+    assert grants[-2:] == ["--file", "/usr/local/share/startunnel/runtime-grants.sql"]
+    probe = next(
+        call.split()
+        for call in calls
+        if "/usr/local/bin/startunnel-check-runtime-role" in call.split()
+    )
+    assert probe[-1].startswith("startunnel_restore_check_")
+    assert calls[-1].split()[4:7] == ["dropdb", "--if-exists", "--force"]

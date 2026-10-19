@@ -17,19 +17,4 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO startunnel;
 
--- The web role cannot delete collaboration history. The supervised maintenance
--- service uses the separate database administrator connection for due deletion.
-SELECT format('REVOKE DELETE ON TABLE public.%I FROM startunnel', table_name)
-FROM information_schema.tables
-WHERE table_schema = 'public'
-  AND table_name IN (
-      'tunnels_tunnel',
-      'tunnels_tunneladdress',
-      'tunnels_cycle',
-      'tunnels_message',
-      'tunnels_messagemention',
-      'tunnels_tunnelevent',
-      'tunnels_activitycheckpoint',
-      'tunnels_auditevent'
-  )
-\gexec
+\ir history-grants.sql

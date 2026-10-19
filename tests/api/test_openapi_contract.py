@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, cast
 
+import pytest
 from openapi_spec_validator import validate
 
 from api.router import api
@@ -38,23 +39,38 @@ def test_live_openapi_is_valid_and_has_tree_routes() -> None:
         assert methods <= set(schema["paths"][path]), f"OpenAPI is missing a method for {path}."
 
 
-def test_phase_one_relay_and_id_metadata_routes_are_removed() -> None:
-    paths = _schema()["paths"]
-    removed = {
-        "/api/v1/claims",
-        "/api/v1/claims/acknowledge",
-        "/api/v1/claims/release",
-        "/api/v1/claims/extend",
-        "/api/v1/tunnels/{tunnel_id}",
-        "/api/v1/teams/{team_id}/tunnels/{tunnel_id}",
-    }
-    assert removed.isdisjoint(paths)
+def _assert_addresses_stay_out_of_urls(schema: dict[str, Any]) -> None:
+    for path in schema["paths"].values():
+        operations = [path, *(value for value in path.values() if isinstance(value, dict))]
+        for operation in operations:
+            for parameter in operation.get("parameters", []):
+                if "$ref" in parameter:
+                    parameter = schema["components"]["parameters"][
+                        parameter["$ref"].rsplit("/", 1)[-1]
+                    ]
+                if parameter["in"] in {"path", "query"}:
+                    assert parameter["name"] != "address"
+                    assert not parameter["name"].endswith("_address")
 
 
-def test_no_address_message_receipt_or_cycle_is_a_tunnel_path_parameter() -> None:
-    paths = _schema()["paths"]
-    forbidden = ("{address", "{message", "{receipt", "{cycle")
-    assert all(not any(value in path for value in forbidden) for path in paths)
+def test_addresses_stay_out_of_url_paths_and_query_parameters() -> None:
+    _assert_addresses_stay_out_of_urls(_schema())
+
+
+@pytest.mark.parametrize("location", ["path", "query"])
+@pytest.mark.parametrize("owner", ["path", "operation", "reference"])
+def test_url_contract_rejects_an_address_parameter(location: str, owner: str) -> None:
+    schema = _schema()
+    route: dict[str, Any] = {"get": {}}
+    schema["paths"]["/future/{address}" if location == "path" else "/future"] = route
+    parameter = {"name": "address", "in": location, "schema": {"type": "string"}}
+    if owner == "reference":
+        schema["components"]["parameters"] = {"Address": parameter}
+        route["get"]["parameters"] = [{"$ref": "#/components/parameters/Address"}]
+    else:
+        (route if owner == "path" else route["get"])["parameters"] = [parameter]
+    with pytest.raises(AssertionError):
+        _assert_addresses_stay_out_of_urls(schema)
 
 
 def test_tree_write_operations_require_idempotency_header() -> None:

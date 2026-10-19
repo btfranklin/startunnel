@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from scripts import check_secrets, run_security_release
+from tests.structure.workflows import load_workflow
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="Git-checkout scan needs the Git CLI.")
@@ -83,15 +84,15 @@ def test_failed_security_tool_shows_diagnostics_and_keeps_report(
 
 
 def test_security_artifact_upload_runs_after_gate_failure() -> None:
-    workflow = (run_security_release.ROOT / ".github/workflows/release-validation.yml").read_text(
-        encoding="utf-8"
+    security = load_workflow("release-validation.yml")["jobs"]["security"]
+    upload = next(
+        step
+        for step in security["steps"]
+        if step.get("uses", "").split("@")[0] == "actions/upload-artifact"
     )
-    security_job = workflow.split("  security:\n", maxsplit=1)[1]
-    security_job = security_job.split("  system:\n", maxsplit=1)[0]
-    upload = security_job.split("      - name: Upload security reports\n", maxsplit=1)[1]
-    assert "        if: always()\n" in upload
-    assert "          path: artifacts/security/\n" in upload
-    assert "          if-no-files-found: warn\n" in upload
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == "artifacts/security/"
+    assert upload["with"]["if-no-files-found"] == "warn"
 
 
 @pytest.mark.parametrize("image_scan_fails", [False, True])
@@ -99,7 +100,7 @@ def test_runtime_scan_controls_candidate_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image_scan_fails: bool
 ) -> None:
     image = "registry.example/startunnel@sha256:" + "a" * 64
-    commands: dict[str, list[str]] = {}
+    commands: list[list[str]] = []
     monkeypatch.setattr(run_security_release, "ROOT", tmp_path)
     monkeypatch.setattr(run_security_release, "_candidate_tree", lambda path: None)
     monkeypatch.setattr(run_security_release, "_validate_runtime_image", lambda value: None)
@@ -108,8 +109,9 @@ def test_runtime_scan_controls_candidate_validation(
         report.write_text("[]")
 
     def run(label: str, command: list[str], *, output: Path | None = None) -> None:
-        commands[label] = command
-        if label == "Application image vulnerability scan" and image_scan_fails:
+        del label
+        commands.append(command)
+        if "--severity" in command and image_scan_fails:
             raise run_security_release.SecurityGateError("Runtime image vulnerability found.")
         if output:
             output.write_text("Safe test report")
@@ -119,11 +121,11 @@ def test_runtime_scan_controls_candidate_validation(
     result = run_security_release.main(["--skip-build", "--image", image])
 
     assert result == (1 if image_scan_fails else 0)
-    scan = commands["Application image vulnerability scan"]
+    scan = next(command for command in commands if "--severity" in command)
     assert scan[-1] == image
     assert scan[scan.index("--image-src") + 1] == "remote"
     assert scan[scan.index("--severity") + 1] == "CRITICAL,HIGH"
     assert scan[scan.index("--exit-code") + 1] == "1"
-    assert commands["Application image SBOM"][-1] == image
+    assert next(command for command in commands if "cyclonedx" in command)[-1] == image
     evidence = list((tmp_path / "artifacts" / "security").glob("*/validated-image.json"))
     assert bool(evidence) is not image_scan_fails

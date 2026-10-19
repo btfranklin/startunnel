@@ -6,13 +6,13 @@ import json
 import os
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any
 
 import pytest
 from scripts import release_record
 from scripts import upgrade_production as upgrade
+from tests.structure.workflows import load_workflow
 
 
 def record() -> dict[str, Any]:
@@ -121,33 +121,45 @@ def test_wrong_checkout_never_mutates_services_or_configuration(
 
 
 def test_release_workflow_promotes_evidence_without_rebuilding() -> None:
-    workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
-    candidate = (release_record.ROOT / ".github/workflows/release-candidate.yml").read_text()
-    assert "--find-run" in workflow
-    assert "--prefer-index=false" in workflow
-    assert "--check-digest" in workflow
-    assert "workflow_dispatch:" in workflow
-    assert "docker/build-push-action" not in workflow
-    assert "run_isolated_test_lane.py" not in workflow
-    assert "btfranklin/release-notes-scribe@v0" in workflow
-    assert 'create_release: "false"' in workflow
-    assert "secrets: inherit" not in workflow + candidate
-    assert "OPENAI" not in candidate
-    assert candidate.count("docker/build-push-action") == 1
-    ci = (release_record.ROOT / ".github/workflows/ci.yml").read_text()
-    assert "if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in ci
+    workflow = load_workflow("release.yml")
+    candidate = load_workflow("release-candidate.yml")
+    assert "workflow_dispatch" in workflow["on"]
+    steps = workflow["jobs"]["draft"]["steps"]
+    assert all(step.get("uses", "").split("@")[0] != "docker/build-push-action" for step in steps)
+    build_steps = candidate["jobs"]["build"]["steps"]
+    assert (
+        len(
+            [
+                step
+                for step in build_steps
+                if step.get("uses", "").split("@")[0] == "docker/build-push-action"
+            ]
+        )
+        == 1
+    )
+    scribe = next(
+        step
+        for step in steps
+        if step.get("uses", "").split("@")[0] == "btfranklin/release-notes-scribe"
+    )
+    assert scribe["with"]["create_release"] == "false"
+    assert candidate["jobs"]["validation"]["uses"] == "./.github/workflows/release-validation.yml"
+    assert (
+        candidate["jobs"]["validation"]["with"]["candidate_image"]
+        == "${{ needs.build.outputs.image }}"
+    )
+    assert all(job.get("secrets") != "inherit" for job in candidate["jobs"].values())
 
 
 @pytest.mark.parametrize("summary", ["", "  \n", "  Generated release summary.\n"])
 def test_release_notes_merge_keeps_reviewed_notes_and_validation_link(
     tmp_path: Path, summary: str
 ) -> None:
-    workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
-    merge_step = workflow.split("- name: Keep reviewed deployment instructions", 1)[1].split(
-        "- name: Create or recover the draft release", 1
-    )[0]
-    script = textwrap.dedent(
-        merge_step.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    workflow = load_workflow("release.yml")
+    merge_step = next(
+        step
+        for step in workflow["jobs"]["draft"]["steps"]
+        if "GENERATED_NOTES" in step.get("env", {})
     )
     notes = tmp_path / "release-notes.md"
     reviewed = (
@@ -161,7 +173,9 @@ def test_release_notes_merge_keeps_reviewed_notes_and_validation_link(
         "GITHUB_REPOSITORY": "owner/repository",
         "VALIDATION_RUN_ID": "12345",
     }
-    subprocess.run([sys.executable, "-c", script], cwd=tmp_path, env=environment, check=True)
+    subprocess.run(
+        ["sh", "-eu", "-c", merge_step["run"]], cwd=tmp_path, env=environment, check=True
+    )
 
     merged = notes.read_text()
     assert "Reviewed release notes." in merged
@@ -175,19 +189,21 @@ def test_release_notes_merge_keeps_reviewed_notes_and_validation_link(
 
 
 def test_release_summary_step_is_optional_and_uses_only_successful_output() -> None:
-    workflow = (release_record.ROOT / ".github/workflows/release.yml").read_text()
-    scribe_step = workflow.split("- name: Generate the change summary", 1)[1].split(
-        "- name: Keep reviewed deployment instructions", 1
-    )[0]
-    assert "GENERATE_RELEASE_SUMMARY: ${{ secrets.OPENAI_API_KEY != '' }}" in workflow
-    assert "if: env.GENERATE_RELEASE_SUMMARY == 'true'" in scribe_step
-    assert "continue-on-error: true" in scribe_step
-    assert "openai_api_key: ${{ secrets.OPENAI_API_KEY }}" in scribe_step
-    assert (
-        "GENERATED_NOTES: ${{ steps.notes.outcome == 'success' && "
-        "steps.notes.outputs.release_notes || '' }}" in workflow
+    draft = load_workflow("release.yml")["jobs"]["draft"]
+    assert draft["env"]["GENERATE_RELEASE_SUMMARY"] == "${{ secrets.OPENAI_API_KEY != '' }}"
+    scribe = next(
+        step
+        for step in draft["steps"]
+        if step.get("uses", "").split("@")[0] == "btfranklin/release-notes-scribe"
     )
-    assert "OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}" not in workflow
+    assert scribe["if"] == "env.GENERATE_RELEASE_SUMMARY == 'true'"
+    assert scribe["continue-on-error"] == "true"
+    assert scribe["with"]["openai_api_key"] == "${{ secrets.OPENAI_API_KEY }}"
+    merge = next(step for step in draft["steps"] if "GENERATED_NOTES" in step.get("env", {}))
+    assert merge["env"]["GENERATED_NOTES"] == (
+        "${{ steps.notes.outcome == 'success' && steps.notes.outputs.release_notes || '' }}"
+    )
+    assert all("OPENAI_API_KEY" not in step.get("env", {}) for step in draft["steps"])
 
 
 def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:

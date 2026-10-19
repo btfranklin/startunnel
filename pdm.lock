@@ -5,7 +5,7 @@
 groups = ["default", "dev", "live-agents"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.1"
-content_hash = "sha256:71a7df0959b8d4e25184ff89b07e9102c1bad3d5378383b600c509a637094960"
+content_hash = "sha256:c4c9b8f997b3ff7c218808d4c6dc114d8ba1bec2cff05ea295e54c5410f99f6f"
 
 [[metadata.targets]]
 requires_python = ">=3.14"

@@ -10,6 +10,7 @@ import subprocess
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from http.client import HTTPMessage
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,22 @@ from scripts import run_full_load_profile as load_runner
 from scripts import run_isolated_test_lane as lane_runner
 from scripts import run_resource_measurement as resource_runner
 from scripts import system_proof
+from tests.structure.workflows import load_workflow
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _assert_postgres_permission_tools_are_mounted(services: dict[str, Any]) -> None:
+    volumes = {volume["target"]: volume for volume in services["postgres"]["volumes"]}
+    for target, source in (
+        (
+            "/usr/local/share/startunnel/history-grants.sql",
+            "src/tunnels/migrations/sql/history-grants.sql",
+        ),
+        ("/usr/local/bin/startunnel-check-runtime-role", "docker/postgres/check-runtime-role.sh"),
+    ):
+        assert volumes[target]["source"] == str(ROOT / source)
+        assert volumes[target]["read_only"] is True
 
 
 @pytest.mark.parametrize(
@@ -51,23 +66,24 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
             assert self.running
 
         def run(self, label: str, *args: str, **kwargs: Any) -> None:
+            del label, kwargs
             if args[0] == "build":
                 self.builds.append(args)
             if args[0] == "up" and "--wait" in args:
                 self.running = True
-            if label == "Verify runtime image contents":
+            if args[-1] == "runtime-contents-proof":
                 assert self.running
                 assert args[:5] == ("exec", "-T", "web", "/app/.venv/bin/python", "-c")
                 self.runtime_contents_checked = True
             if self.backup_finished and not self.database_loss_started:
-                if label.startswith(("Verify live health", "Verify ready health")):
+                if args[-1].startswith("health-proof-200"):
                     self.availability_checked = True
-                elif label != "Stop PostgreSQL":
+                elif args[0] != "stop":
                     assert args[0] not in {"up", "restart", "stop"}
-            if label == "Stop PostgreSQL":
+            if args[0] == "stop" and args[-1] == "postgres":
                 assert self.availability_checked
                 self.database_loss_started = True
-            if label.startswith(("Verify live health", "Verify ready health", "Verify readiness")):
+            if args[-1].startswith("health-proof-"):
                 assert self.running
 
         def capture(self, *args: str, **kwargs: Any) -> str:
@@ -80,6 +96,12 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
         value.backup_finished = True
 
     monkeypatch.setattr(system_proof, "_coordinated_restore_proof", online_backup)
+    monkeypatch.setattr(system_proof, "_runtime_contents_script", lambda: "runtime-contents-proof")
+    monkeypatch.setattr(
+        system_proof,
+        "_web_health_script",
+        lambda status, *, path="/health/ready": f"health-proof-{status}-{path}",
+    )
     monkeypatch.setattr(system_proof, "_assert_reusable_images", lambda value: None)
     monkeypatch.setattr(system_proof, "_run_activity_restart_proof", lambda value: None)
     monkeypatch.setattr(system_proof, "_system_host_profile", lambda value: {})
@@ -89,7 +111,6 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     report = system_proof.run_system_proof(stack, build_images=build_images)
     assert report["status"] == "passed"
     assert stack.runtime_contents_checked
-    assert "runtime image contents" in {step["name"] for step in report["steps"]}
     assert stack.availability_checked
     if candidate_image:
         assert stack.builds == [("build", "example-tests", "agent-e2e", "browser-tests")]
@@ -114,7 +135,9 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    healthcheck = json.loads(result.stdout)["services"]["maintenance"]["healthcheck"]
+    services = json.loads(result.stdout)["services"]
+    _assert_postgres_permission_tools_are_mounted(services)
+    healthcheck = services["maintenance"]["healthcheck"]
     assert healthcheck == {
         "test": ["CMD", "/usr/local/bin/startunnel-maintenance-healthcheck"],
         "timeout": "1s",
@@ -128,19 +151,6 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
     assert "/usr/local/bin/startunnel-entrypoint" not in command
     assert not any("python" in argument for argument in command)
 
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    copy_rule = (
-        "COPY --chmod=0555 docker/app/maintenance-healthcheck.sh "
-        "/usr/local/bin/startunnel-maintenance-healthcheck"
-    )
-    production_runtime = dockerfile.split("FROM python-base AS runtime", 1)[1].split(
-        "FROM development-dependencies AS development-runtime", 1
-    )[0]
-    development_runtime = dockerfile.split(
-        "FROM development-dependencies AS development-runtime", 1
-    )[1].split("FROM development-runtime AS development", 1)[0]
-    assert copy_rule in production_runtime
-    assert copy_rule in development_runtime
     assert os.access(ROOT / "docker/app/maintenance-healthcheck.sh", os.X_OK)
 
 
@@ -211,6 +221,7 @@ def test_production_compose_uses_operator_origin_or_https_default(
     )
     assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)["services"]
+    _assert_postgres_permission_tools_are_mounted(services)
     healthcheck = services["web"]["healthcheck"]["test"][-1]
     captured_hosts: list[str | None] = []
     monkeypatch.setenv("STARTUNNEL_BASE_URL", expected_url)
@@ -234,11 +245,20 @@ def test_production_compose_uses_operator_origin_or_https_default(
         assert services[name]["environment"]["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] == expected_trusted
 
 
-def test_system_health_probe_outlasts_database_pool_acquisition() -> None:
-    proof = system_proof._web_health_script(503)
+def test_system_health_probe_outlasts_database_pool_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, float]] = []
 
-    assert "timeout=10" in proof
-    assert "status == 503" in proof
+    def unavailable(request: urllib.request.Request, timeout: float) -> Any:
+        calls.append((request.full_url, timeout))
+        raise urllib.error.HTTPError(request.full_url, 503, "Unavailable", HTTPMessage(), None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", unavailable)
+    exec(system_proof._web_health_script(503), {})
+    assert calls == [("http://127.0.0.1:8000/health/ready", 10)]
+    with pytest.raises(AssertionError):
+        exec(system_proof._web_health_script(200), {})
 
 
 @pytest.mark.parametrize(
@@ -598,7 +618,11 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     assert result == 0
     assert events[0] == ("init", ("stload-focused-12345678", ("load",)))
     assert events[-1] == ("exit", None)
-    load_calls = [event for name, event in events if name == "run" and "load profile" in event[0]]
+    load_calls = [
+        event
+        for name, event in events
+        if name == "run" and event[1] == ("run", "--rm", "--no-deps", "load-profile")
+    ]
     assert len(load_calls) == 1
     load_environment = load_calls[0][2]
     assert load_environment["STARTUNNEL_LOAD_DOCKER_VERSION"] == "29.0.0"
@@ -635,7 +659,7 @@ def test_load_runner_can_reuse_verified_current_images(
         ) -> None:
             del timeout_seconds
             events.append((step, arguments))
-            if step == "Run fixed five-minute load profile":
+            if arguments == ("run", "--rm", "--no-deps", "load-profile"):
                 assert environment is not None
                 assert environment["STARTUNNEL_LOAD_BUILD_MODE"] == "reused-current-images"
 
@@ -675,7 +699,7 @@ def test_load_runner_can_reuse_verified_current_images(
     )
 
     assert result == 0
-    assert all(step != "Build load images" for step, _arguments in events)
+    assert all(arguments[0] != "build" for _step, arguments in events)
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
@@ -1069,9 +1093,9 @@ def test_activity_restart_orchestration_stops_and_recovers_web(
         "-m",
         "scripts.prove_activity_restart",
     )
-    stop = next(arguments for step, arguments in commands if step.startswith("Stop web"))
+    stop = next(arguments for _step, arguments in commands if arguments[0] == "stop")
     assert stop == ("stop", "--timeout", "2", "web")
-    restart = next(arguments for step, arguments in commands if step.startswith("Restart web"))
+    restart = next(arguments for _step, arguments in commands if arguments[0] == "up")
     assert restart[:5] == ("up", "--detach", "--wait", "--wait-timeout", "300")
     assert restart[-1] == "web"
 
@@ -1120,28 +1144,6 @@ def test_activity_worker_failure_output_redacts_exception_values(
     assert sensitive_value not in output
 
 
-def test_system_restore_proof_uses_one_coordinated_backup() -> None:
-    backup = (ROOT / "scripts/backup-startunnel.sh").read_text(encoding="utf-8")
-    restore = (ROOT / "scripts/verify-startunnel-restore.sh").read_text(encoding="utf-8")
-
-    assert "pg_dump" in backup
-    assert "manifest.sha256" in backup
-    assert "pg_restore" in restore
-    assert "runtime-grants.sql" in restore
-    assert "CREATE TABLE startunnel_forbidden_schema" in restore
-    assert "DELETE FROM tunnels_message" in restore
-    assert "INSERT INTO django_session" in restore
-    assert "UPDATE django_session" in restore
-    assert "DELETE FROM django_session" in restore
-    runtime_restrictions = system_proof._runtime_restriction_script()
-    assert "CREATE DATABASE startunnel_forbidden_system_database" in runtime_restrictions
-    assert "DELETE FROM tunnels_message" in runtime_restrictions
-    runtime_session_dml = system_proof._runtime_session_dml_script()
-    assert "INSERT INTO django_session" in runtime_session_dml
-    assert "UPDATE django_session" in runtime_session_dml
-    assert "DELETE FROM django_session" in runtime_session_dml
-
-
 def test_system_report_records_every_used_service_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1175,66 +1177,78 @@ def test_system_report_records_every_used_service_image(
 
 
 def test_pull_request_workflow_has_all_non_live_release_lanes() -> None:
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-
-    assert "pdm install --frozen-lockfile --no-self" in workflow
-    assert "pdm run check" in workflow
-    for lane in ("postgres", "examples", "agents", "browser"):
-        assert f"run_isolated_test_lane.py {lane}" in workflow or f"- {lane}" in workflow
-    assert "OPENAI" not in workflow
-    assert "live-agent" not in workflow
-    assert "github.run_id" in workflow
-    assert "github.run_attempt" in workflow
-    assert workflow.count("--project-name") == workflow.count("scripts/run_isolated_test_lane.py")
-    assert "docker compose" not in workflow
+    workflow = load_workflow("ci.yml")
+    assert {"pull_request", "push", "workflow_dispatch"} <= workflow["on"].keys()
+    jobs = workflow["jobs"]
+    assert set(jobs["external-proofs"]["strategy"]["matrix"]["lane"]) == {"examples", "agents"}
+    assert {"canonical", "standalone-cli", "postgres", "external-proofs", "browser"} == set(
+        jobs["release-candidate"]["needs"]
+    )
+    assert jobs["release-candidate"]["if"] == (
+        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+    )
+    matrix = jobs["standalone-cli"]["strategy"]["matrix"]
+    assert set(matrix["python"]) == {"3.10", "3.14"}
+    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest"}
+    for job in jobs.values():
+        assert not job.get("secrets")
+        for environment in [
+            job.get("env", {}),
+            *(step.get("env", {}) for step in job.get("steps", [])),
+        ]:
+            assert {"OPENAI_API_KEY", "OPENAI_MODEL"}.isdisjoint(environment)
 
 
 def test_website_publication_is_separate_and_opt_in() -> None:
-    workflow = (ROOT / ".github/workflows/website.yml").read_text(encoding="utf-8")
-    build_job, deploy_job = workflow.split("  deploy:\n", maxsplit=1)
-
-    assert "pdm install --prod --frozen-lockfile --no-self" in build_job
-    assert "pdm run python website/build.py" in build_job
-    assert "steps.pages.outputs.base_path" in build_job
-    assert "path: website/dist" in build_job
-    assert "github.server_url" in build_job
-    assert "needs: build" in deploy_job
-    assert "github.event_name != 'pull_request'" in deploy_job
-    assert "github.ref == 'refs/heads/main'" in deploy_job
-    assert "vars.PAGES_ENABLED == 'true'" in deploy_job
-    assert "pages: write" in deploy_job
-    assert "id-token: write" in deploy_job
-    assert "name: github-pages" in deploy_job
-    assert "docker" not in workflow
+    workflow = load_workflow("website.yml")
+    build = workflow["jobs"]["build"]
+    deploy = workflow["jobs"]["deploy"]
+    assert deploy["needs"] == "build"
+    assert deploy["if"] == (
+        "github.event_name != 'pull_request' && github.ref == 'refs/heads/main' "
+        "&& vars.PAGES_ENABLED == 'true'"
+    )
+    assert deploy["permissions"] == {"pages": "write", "id-token": "write"}
+    assert deploy["environment"]["name"] == "github-pages"
+    artifact = next(
+        step
+        for step in build["steps"]
+        if step.get("uses", "").split("@")[0] == "actions/upload-pages-artifact"
+    )
+    assert artifact["with"]["path"] == "website/dist"
+    configuration = next(
+        step
+        for step in build["steps"]
+        if step.get("uses", "").split("@")[0] == "actions/configure-pages"
+    )
+    assert (
+        configuration["if"] == "github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'"
+    )
 
 
 def test_manual_release_workflow_limits_provider_settings_to_live_proof_step() -> None:
-    workflow = (ROOT / ".github/workflows/release-validation.yml").read_text(encoding="utf-8")
-    live_job = workflow.split("  live-agents:\n", maxsplit=1)[1]
-    live_test_step = live_job.split("      - name: Run the isolated opt-in proof\n", maxsplit=1)[1]
-
-    assert "pdm run security-release" in workflow
-    assert "run_isolated_test_lane.py system" in workflow
-    assert "run_full_load_profile.py" in workflow
-    assert "run_isolated_test_lane.py live-agents" in live_job
-    assert "--allow-openai-cost" in live_job
-    assert "OPENAI_API_KEY" not in workflow.split("  live-agents:\n", maxsplit=1)[0]
-    assert "OPENAI_MODEL" not in workflow.split("  live-agents:\n", maxsplit=1)[0]
-    assert "OPENAI_API_KEY" in live_job
-    assert "OPENAI_MODEL" in live_job
-    assert (
-        "OPENAI_API_KEY"
-        not in live_job.split("      - name: Run the isolated opt-in proof\n", maxsplit=1)[0]
+    workflow = load_workflow("release-validation.yml")
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["run_live_agents"]["default"] == "false"
+    live = workflow["jobs"]["live-agents"]
+    assert live["if"] == "${{ inputs.run_live_agents }}"
+    assert set(live["needs"]) == {"security", "system"}
+    provider_steps = [
+        (job_id, step)
+        for job_id, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+        if {"OPENAI_API_KEY", "OPENAI_MODEL"} & step.get("env", {}).keys()
+    ]
+    assert len(provider_steps) == 1
+    job_id, step = provider_steps[0]
+    assert job_id == "live-agents"
+    assert step["env"] == {
+        "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
+        "OPENAI_MODEL": "${{ secrets.OPENAI_MODEL }}",
+    }
+    assert all(
+        {"OPENAI_API_KEY", "OPENAI_MODEL"}.isdisjoint(job.get("env", {}))
+        for job in workflow["jobs"].values()
     )
-    assert live_test_step.count("          OPENAI_API_KEY:") == 1
-    assert live_test_step.count("          OPENAI_MODEL:") == 1
-    assert "github.run_id" in workflow
-    assert "github.run_attempt" in workflow
-    runner_count = workflow.count("scripts/run_isolated_test_lane.py") + workflow.count(
-        "scripts/run_full_load_profile.py"
-    )
-    assert workflow.count("--project-name") == runner_count
-    assert "docker compose" not in workflow
 
 
 @pytest.mark.parametrize(

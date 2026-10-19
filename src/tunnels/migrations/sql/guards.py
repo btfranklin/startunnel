@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 MESSAGE_GUARDS = r"""
@@ -364,30 +365,13 @@ FOR EACH ROW EXECUTE FUNCTION public.startunnel_check_tunnel_lifecycle();
 """
 
 
-REVOKE_HISTORY_DELETE = r"""
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'startunnel') THEN
-        REVOKE DELETE ON TABLE
-            public.tunnels_tunnel,
-            public.tunnels_tunneladdress,
-            public.tunnels_cycle,
-            public.tunnels_message,
-            public.tunnels_messagemention,
-            public.tunnels_tunnelevent,
-            public.tunnels_activitycheckpoint,
-            public.tunnels_auditevent
-        FROM startunnel;
-    END IF;
-END
-$$;
-"""
+REVOKE_HISTORY_DELETE = Path(__file__).with_name("history-grants.sql").read_text(encoding="utf-8")
 
 
 def revoke_runtime_history_delete(apps: Any, schema_editor: Any) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
-        schema_editor.execute(REVOKE_HISTORY_DELETE)
+        schema_editor.execute(REVOKE_HISTORY_DELETE, params=None)
 
 
 def install_guards(apps: Any, schema_editor: Any) -> None:

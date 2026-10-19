@@ -166,7 +166,7 @@ ARG APP_UID=10001
 ARG APP_GID=10001
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates curl nodejs npm tini \
+    && apt-get install --no-install-recommends --yes ca-certificates curl nodejs npm tini postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid "${APP_GID}" startunnel \
     && useradd --uid "${APP_UID}" --gid startunnel --create-home --home-dir /home/startunnel startunnel
