@@ -58,6 +58,7 @@ its identity, health, and audit event. See
 | `migrate` | One-shot schema migration and runtime grants |
 | `web` | Django ASGI application |
 | `maintenance` | Deadline listener and bounded cleanup worker |
+| `caddy` | Optional TLS proxy, enabled by the `edge` profile |
 
 PostgreSQL is the only service dependency. The maintenance service receives `DATABASE_ADMIN_URL` because the normal web role cannot delete retained message content.
 
@@ -96,7 +97,10 @@ Web startup requires PostgreSQL and completed migrations. It does not wait for
 maintenance health. Keep maintenance running for cycle deadlines and retention
 deletion. Expired content remains unreadable while maintenance is unavailable.
 
-Maintenance records the last reconciliation time, observed deletion lag, the last deletion error, reconciliation counts, due-work counts, and notification-wake counts in PostgreSQL. An idle worker wakes at most once per minute to refresh its local heartbeat and reconcile persisted deadlines. It does not scan every few seconds.
+Maintenance records reconciliation, deletion, error, and notification counts in
+PostgreSQL. With no notifications or due deadlines, it reconciles once per
+minute and refreshes its local heartbeat. Earlier deadlines and database
+notifications can wake it sooner.
 
 Database query timing applies to each Django connection in its process. It
 includes queries from synchronous views, asynchronous adapters, commands, and
@@ -106,6 +110,73 @@ the `X-Metrics-Token` header with the
 configured metrics token. Missing or incorrect tokens return HTTP 404. The
 endpoint does not combine query metrics from other containers. Query labels contain
 only the SQL operation type.
+
+## Idle runtime
+
+The default deployment uses one web worker. These activities continue with no
+clients and no due application work:
+
+| Component | Recurring work | Reason |
+|---|---|---|
+| Web server | Uvicorn checks its server state every 100 ms and updates Date headers each second | Standard server lifecycle |
+| Web and maintenance notification listeners | Block on PostgreSQL socket activity | Immediate delivery without periodic polling |
+| Maintenance | Reconciles persisted deadlines every 60 seconds | Recovery after missed notifications; heartbeat and expired-record cleanup |
+| Connection pools | Check for excess idle connections every 600 seconds | Release unused connections; pool workers otherwise block |
+| Docker health checks | Run every 60 seconds; every 2 seconds during startup | PostgreSQL readiness, web readiness, and maintenance heartbeat |
+| PostgreSQL | Native writer, checkpoint, and vacuum scheduling | Durable writes and database upkeep |
+| Optional Caddy | Certificate renewal checks every 10 minutes, OCSP checks each hour, and storage cleanup each day | Automatic TLS upkeep |
+
+The web readiness probe uses the runtime image's built-in `wget`. With one web
+upstream, Caddy returns request failures directly. Docker health checks report
+readiness.
+
+PostgreSQL defaults include 200 ms background-writer and WAL-writer delays, a
+60-second autovacuum interval per database, and a five-minute checkpoint
+timeout. Idle writers can sleep longer; these values do not mean that each
+timer performs a write. Keep the database's durability and cleanup defaults.
+See the PostgreSQL [resource](https://www.postgresql.org/docs/18/runtime-config-resource.html),
+[WAL](https://www.postgresql.org/docs/18/runtime-config-wal.html), and
+[vacuum](https://www.postgresql.org/docs/18/runtime-config-vacuum.html) settings.
+
+Uvicorn's timer remains part of the supported server. Extra web workers add
+server loops, pools, and a supervisor. Connection health checks run on checkout,
+not on a background timer. Metrics collection runs when a client requests it.
+Listener reconnect attempts use a 1–60 second backoff after a failure.
+Caddy retains its standard [certificate maintenance](https://github.com/caddyserver/certmagic/blob/v0.24.0/maintain.go)
+and [storage cleanup](https://github.com/caddyserver/caddy/blob/v2.10.2/modules/caddytls/tls.go).
+
+Use the [resource measurement lane](testing.md#performance-acceptance) to check
+CPU, memory, readiness, and deletion. CPU percentages refer to one core, not
+the whole host. Host operating-system work, the Docker daemon or virtual
+machine, external monitoring, backups, and certificate issuance are separate
+costs.
+
+### Reference measurement
+
+On 2026-10-18, a ten-minute idle test used production settings, one web worker,
+normal Docker health checks, and Caddy with a private TLS certificate. After a
+two-minute warmup, the containers used:
+
+| Service | CPU, as a percentage of one core |
+|---|---:|
+| Web | 0.328% |
+| PostgreSQL | 0.173% |
+| Maintenance | 0.069% |
+| Caddy | 0.024% |
+| **Total** | **0.594%** |
+
+Container memory ranged from 269 to 290 MiB, including database cache. Each
+scheduled health check ran ten times. Maintenance reconciled ten times, with
+no due work or notification wakes. The 1% idle CPU target remains unchanged.
+
+After traffic warmup, total container memory settled near 306 MiB. Caddy used
+about 25 MiB, with compression buffers among its largest heap allocations.
+Compression remains enabled to reduce response sizes.
+
+The test host was an Apple M3 Pro with 18 GiB RAM. Docker Desktop 29.5.3 used a
+Linux virtual machine with ten CPUs and 7.65 GiB available RAM. Repeat the
+measurement on the deployment host before using these values for capacity
+planning.
 
 ## Maintenance recovery
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import math
 import os
@@ -12,6 +13,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -26,53 +28,61 @@ if TYPE_CHECKING or __package__:
         LaneError,
         assert_local_docker,
         assert_project_unused,
+        assert_safe_target,
         generated_project_name,
         safe_environment,
         termination_signals,
         validate_project_name,
     )
+    from scripts.docker_stats import DockerStats
 else:
     from compose_isolation import (
         IsolationError,
         LaneError,
         assert_local_docker,
         assert_project_unused,
+        assert_safe_target,
         generated_project_name,
         safe_environment,
         termination_signals,
         validate_project_name,
     )
+    from docker_stats import DockerStats
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ("postgres", "valkey", "web", "maintenance")
-APP_SERVICES = ("web", "maintenance")
+REQUIRED_SERVICES = {"postgres", "web", "maintenance"}
 HEALTH_MARKERS = (
     "health/ready",
     "pg_isready",
     "startunnel-maintenance-healthcheck",
-    "startunnel-valkey-healthcheck",
 )
 
 
 @dataclass(frozen=True, slots=True)
 class Boundary:
     captured_at: str
-    cpu_usage_usec: dict[str, int]
+    cpu_usage_ns: dict[str, int]
+    cpu_captured_monotonic_seconds: dict[str, float]
     memory_bytes: dict[str, int]
     anonymous_rss_bytes: dict[str, int]
-    database_transactions: int
-    maintenance: dict[str, int] | None
 
 
-def aggregate_one_core_percent(
-    start: Mapping[str, int], end: Mapping[str, int], duration_seconds: float
-) -> float:
-    """Return aggregate cgroup CPU use as a percentage of one CPU core."""
+def cpu_percentages(start: Boundary, end: Boundary) -> dict[str, float]:
+    """Return each container's CPU rate over its own measured interval."""
 
-    if duration_seconds <= 0:
-        raise ValueError("The measurement duration must be positive.")
-    used = sum(max(0, end.get(name, 0) - value) for name, value in start.items())
-    return used / (duration_seconds * 1_000_000) * 100
+    if start.cpu_usage_ns.keys() != end.cpu_usage_ns.keys() or not start.cpu_usage_ns:
+        raise ValueError("The measured container set changed.")
+    percentages = {}
+    for service, initial in start.cpu_usage_ns.items():
+        duration = (
+            end.cpu_captured_monotonic_seconds[service]
+            - start.cpu_captured_monotonic_seconds[service]
+        )
+        usage = end.cpu_usage_ns[service] - initial
+        if duration <= 0 or usage < 0:
+            raise ValueError("The resource clock or CPU counter reset during measurement.")
+        percentages[service] = usage / (duration * 1_000_000_000) * 100
+    return percentages
 
 
 def memory_is_stable(samples: Sequence[int]) -> bool:
@@ -83,26 +93,6 @@ def memory_is_stable(samples: Sequence[int]) -> bool:
     allowance = max(5 * 1024 * 1024, int(samples[0] * 0.10))
     materially_rising = all(later > earlier + 1024 * 1024 for earlier, later in pairwise(samples))
     return not materially_rising and samples[-1] <= samples[0] + allowance
-
-
-def parse_cpu_stat(raw: str) -> int:
-    """Read usage_usec from a cgroup v2 cpu.stat value."""
-
-    for line in raw.splitlines():
-        name, _, value = line.partition(" ")
-        if name == "usage_usec" and value.isdigit():
-            return int(value)
-    raise ValueError("cpu.stat did not contain usage_usec.")
-
-
-def parse_memory_stat_anon(raw: str) -> int:
-    """Read anonymous resident memory from a cgroup v2 memory.stat value."""
-
-    for line in raw.splitlines():
-        name, _, value = line.partition(" ")
-        if name == "anon" and value.isdigit():
-            return int(value)
-    raise ValueError("memory.stat did not contain anon.")
 
 
 def count_health_probes(events: str) -> dict[str, int]:
@@ -148,16 +138,23 @@ class MeasurementStack:
         self.environment.update(
             {
                 "STARTUNNEL_APP_IMAGE": f"startunnel-resource-{label}:{project_name}",
-                "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "6",
+                "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "18",
                 "STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE": "4",
                 "STARTUNNEL_WEB_WORKERS": "1",
             }
         )
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
         self._env_file: Path | None = None
+        self.identifiers: dict[str, str] = {}
+        self.started: dict[str, tuple[str, int]] = {}
+        self.stats: DockerStats
 
     def __enter__(self) -> MeasurementStack:
-        assert_local_docker(self.environment)
+        assert_safe_target(self.environment, self.project_name)
+        endpoint = assert_local_docker(self.environment)
+        if not self.environment.get("DOCKER_CONTEXT"):
+            endpoint = self.environment.get("DOCKER_HOST") or endpoint
+        self.stats = DockerStats(endpoint)
         assert_project_unused(self.project_name, self.environment)
         self._temporary = tempfile.TemporaryDirectory(prefix="startunnel-resource-")
         self._env_file = Path(self._temporary.name) / "empty.env"
@@ -229,20 +226,27 @@ class MeasurementStack:
         return self.run(step, *arguments, timeout_seconds=timeout_seconds, capture=True)
 
     def container_ids(self) -> dict[str, str]:
-        identifiers: dict[str, str] = {}
-        configured = set(
-            self.capture("inspect configured services", "config", "--services").splitlines()
+        raw = self.capture(
+            "inspect running containers", "ps", "--status", "running", "--format", "{{json .}}"
         )
-        for service in SERVICES:
-            if service not in configured:
-                continue
-            value = self.capture(f"inspect {service} container", "ps", "--quiet", service)
-            if value:
-                identifiers[service] = value.splitlines()[0]
-        return identifiers
+        rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        counts = Counter(row["Service"] for row in rows)
+        return {
+            row["Service"]
+            if counts[row["Service"]] == 1
+            else row["Service"] + ":" + row["Name"]: row["ID"]
+            for row in rows
+        }
 
-    def container_file(self, service: str, path: str) -> str:
-        return self.capture(f"read {service} {path}", "exec", "-T", service, "cat", path)
+    def cache_containers(self) -> None:
+        self.identifiers = self.container_ids()
+        if not {name.split(":")[0] for name in self.identifiers} >= REQUIRED_SERVICES:
+            raise LaneError("runtime containers", "The reference backend is missing a service.")
+        for service, identifier in self.identifiers.items():
+            state = self.stats.get(f"/containers/{identifier}/json")
+            if not state["State"]["Running"]:
+                raise LaneError("runtime containers", f"The {service} container is not running.")
+            self.started[service] = (state["State"]["StartedAt"], state["RestartCount"])
 
     def sql(self, statement: str) -> str:
         return self.capture(
@@ -265,18 +269,27 @@ class MeasurementStack:
 
 def _boundary(stack: MeasurementStack) -> Boundary:
     cpu: dict[str, int] = {}
+    captured: dict[str, float] = {}
     memory: dict[str, int] = {}
     rss: dict[str, int] = {}
-    for service in stack.container_ids():
-        cpu[service] = parse_cpu_stat(stack.container_file(service, "/sys/fs/cgroup/cpu.stat"))
-        raw_memory = stack.container_file(service, "/sys/fs/cgroup/memory.current")
-        if not raw_memory.isdigit():
-            raise LaneError("cgroup memory", f"Invalid memory.current value for {service}.")
-        memory[service] = int(raw_memory)
-        rss[service] = parse_memory_stat_anon(
-            stack.container_file(service, "/sys/fs/cgroup/memory.stat")
-        )
-    transactions_raw = stack.sql(
+    for service, identifier in stack.identifiers.items():
+        before = time.monotonic()
+        stats = stack.stats.get(f"/containers/{identifier}/stats?stream=false&one-shot=true")
+        captured[service] = (before + time.monotonic()) / 2
+        cpu[service] = int(stats["cpu_stats"]["cpu_usage"]["total_usage"])
+        memory[service] = int(stats["memory_stats"]["usage"])
+        rss[service] = int(stats["memory_stats"]["stats"]["anon"])
+        state = stack.stats.get(f"/containers/{identifier}/json")
+        if (
+            not state["State"]["Running"]
+            or (state["State"]["StartedAt"], state["RestartCount"]) != stack.started[service]
+        ):
+            raise LaneError("runtime containers", f"The {service} container stopped or restarted.")
+    return Boundary(datetime.now(UTC).isoformat(), cpu, captured, memory, rss)
+
+
+def _activity_counters(stack: MeasurementStack) -> dict[str, Any]:
+    transactions = stack.sql(
         "SELECT xact_commit + xact_rollback FROM pg_stat_database "
         "WHERE datname = current_database();"
     )
@@ -294,14 +307,11 @@ def _boundary(stack: MeasurementStack) -> Boundary:
                 "due_work_count": due,
                 "notification_wake_count": wakes,
             }
-    return Boundary(
-        captured_at=datetime.now(UTC).isoformat(),
-        cpu_usage_usec=cpu,
-        memory_bytes=memory,
-        anonymous_rss_bytes=rss,
-        database_transactions=int(transactions_raw),
-        maintenance=maintenance,
-    )
+    return {
+        "captured_at": datetime.now(UTC).isoformat(),
+        "database_transactions": int(transactions),
+        "maintenance": maintenance,
+    }
 
 
 def _sleep_with_memory_samples(
@@ -313,55 +323,57 @@ def _sleep_with_memory_samples(
     while time.monotonic() < deadline:
         now = time.monotonic()
         if now >= next_sample:
-            values: dict[str, int] = {}
-            rss: dict[str, int] = {}
-            for service in stack.container_ids():
-                raw = stack.container_file(service, "/sys/fs/cgroup/memory.current")
-                values[service] = int(raw)
-                rss[service] = parse_memory_stat_anon(
-                    stack.container_file(service, "/sys/fs/cgroup/memory.stat")
-                )
+            boundary = _boundary(stack)
             samples.append(
                 {
-                    "captured_at": datetime.now(UTC).isoformat(),
-                    "cgroup_bytes": values,
-                    "anonymous_rss_bytes": rss,
+                    "captured_at": boundary.captured_at,
+                    "cgroup_bytes": boundary.memory_bytes,
+                    "anonymous_rss_bytes": boundary.anonymous_rss_bytes,
                 }
             )
-            next_sample = now + sample_seconds
-        time.sleep(min(10, max(0.1, deadline - time.monotonic())))
+            next_sample += sample_seconds
+        time.sleep(max(0, min(next_sample, deadline) - time.monotonic()))
     return samples
 
 
-def _docker_events(
-    stack: MeasurementStack, started_epoch: int, finished_epoch: int
-) -> dict[str, int]:
-    command = [
-        "docker",
-        "events",
-        "--since",
-        str(started_epoch),
-        "--until",
-        str(finished_epoch),
-        "--filter",
-        f"label=com.docker.compose.project={stack.project_name}",
-        "--format",
-        "{{json .}}",
-    ]
-    try:
-        result = subprocess.run(  # nosec B603
-            command,
+@contextmanager
+def _docker_events(stack: MeasurementStack) -> Iterator[list[str]]:
+    """Capture events live so the daemon's bounded history cannot truncate them."""
+
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+        process = subprocess.Popen(  # nosec B603
+            [
+                "docker",
+                "events",
+                "--since",
+                str(time.time()),
+                "--filter",
+                f"label=com.docker.compose.project={stack.project_name}",
+                "--format",
+                "{{json .}}",
+            ],
             env=stack.environment,
+            stdout=output,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise LaneError("Docker events", "Could not read Docker health events.") from error
-    if result.returncode:
-        raise LaneError("Docker events", "Docker did not return health events.")
-    return count_health_probes(result.stdout)
+        events: list[str] = []
+        try:
+            yield events
+            if process.poll() is not None:
+                raise LaneError("Docker events", "The live Docker event stream ended early.")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+            if process.stderr is not None:
+                process.stderr.close()
+            output.seek(0)
+            events.extend(output.read().splitlines())
 
 
 def _delta(start: dict[str, int] | None, end: dict[str, int] | None) -> dict[str, int] | None:
@@ -478,20 +490,29 @@ def _measure_stack(
             timeout_seconds=600,
         )
         ready_seconds = time.monotonic() - startup_started
+        stack.cache_containers()
         print(f"[{label}: warm up for {warmup_seconds} seconds]", flush=True)
         _sleep_with_memory_samples(stack, warmup_seconds, sample_seconds)
-        idle_event_start = int(time.time())
-        idle_start = _boundary(stack)
-        idle_started = time.monotonic()
-        idle_samples = _sleep_with_memory_samples(stack, idle_seconds, sample_seconds)
-        idle_duration = time.monotonic() - idle_started
-        idle_end = _boundary(stack)
-        idle_event_end = int(time.time())
-        health_probes = _docker_events(stack, idle_event_start, idle_event_end)
+        activity_start = _activity_counters(stack)
+        with _docker_events(stack) as events:
+            idle_start = _boundary(stack)
+            idle_started = time.monotonic()
+            idle_samples = _sleep_with_memory_samples(stack, idle_seconds, sample_seconds)
+            idle_duration = time.monotonic() - idle_started
+            idle_end = _boundary(stack)
+        health_probes = count_health_probes("\n".join(events))
+        if stack.container_ids() != stack.identifiers:
+            raise LaneError("runtime containers", "The measured container set changed.")
+        activity_end = _activity_counters(stack)
 
         cycle_results: list[dict[str, Any]] = []
         stabilized_totals: list[int] = []
-        peak_memory = sum(idle_end.memory_bytes.values())
+        stabilized_services: dict[str, list[int]] = {service: [] for service in stack.identifiers}
+        peak_memory = max(
+            sum(idle_start.memory_bytes.values()),
+            sum(idle_end.memory_bytes.values()),
+            *(sum(sample["cgroup_bytes"].values()) for sample in idle_samples),
+        )
         for cycle in range(1, cycles + 1):
             before = _boundary(stack)
             _run_load(stack, load_operations)
@@ -503,6 +524,8 @@ def _measure_stack(
             peak_memory = max(peak_memory, *(sum(values.values()) for values in all_memory))
             stabilized_total = sum(settled.memory_bytes.values())
             stabilized_totals.append(stabilized_total)
+            for service, value in settled.memory_bytes.items():
+                stabilized_services[service].append(value)
             cycle_results.append(
                 {
                     "cycle": cycle,
@@ -516,9 +539,8 @@ def _measure_stack(
         deletion: dict[str, Any] | None = None
         if label == "candidate":
             deletion = _prove_deletion(stack, deletion_timeout_seconds)
-        cpu_percent = aggregate_one_core_percent(
-            idle_start.cpu_usage_usec, idle_end.cpu_usage_usec, idle_duration
-        )
+        percentages = cpu_percentages(idle_start, idle_end)
+        cpu_percent = sum(percentages.values())
         return {
             "source": str(root),
             "project_name": project_name,
@@ -530,18 +552,28 @@ def _measure_stack(
                 "start": asdict(idle_start),
                 "end": asdict(idle_end),
                 "cpu_percent_of_one_core": round(cpu_percent, 4),
+                "cpu_percent_by_service": {
+                    name: round(value, 4) for name, value in percentages.items()
+                },
                 "database_transaction_delta": (
-                    idle_end.database_transactions - idle_start.database_transactions
+                    activity_end["database_transactions"] - activity_start["database_transactions"]
                 ),
-                "maintenance_delta": _delta(idle_start.maintenance, idle_end.maintenance),
+                "maintenance_delta": _delta(
+                    activity_start["maintenance"], activity_end["maintenance"]
+                ),
                 "health_probe_executions": health_probes,
+                "health_probe_scope": "Live observer interval includes boundary collection.",
                 "memory_samples": idle_samples,
+                "activity_counter_start": activity_start,
+                "activity_counter_end": activity_end,
+                "database_counter_scope": "Includes observation queries outside the CPU interval.",
             },
             "cycles": cycle_results,
             "memory": {
                 "stabilized_totals_bytes": stabilized_totals,
-                "peak_total_bytes": peak_memory,
-                "stable": memory_is_stable(stabilized_totals),
+                "sampled_peak_total_bytes": peak_memory,
+                "stable": all(memory_is_stable(values) for values in stabilized_services.values()),
+                "stabilized_service_bytes": stabilized_services,
                 "criterion": "final <= first + max(5 MiB, 10%) and no material rise in every cycle",
             },
             "deletion": deletion,
@@ -615,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _positive(arguments)
         environment = safe_environment()
+        assert_safe_target(environment, "sttest-resource-preflight")
         assert_local_docker(environment)
         docker_version = subprocess.run(  # nosec B603
             ["docker", "version", "--format", "{{.Server.Version}}"],
@@ -672,10 +705,12 @@ def main(argv: list[str] | None = None) -> int:
                 "candidate_ref": "working-tree",
                 "candidate_commit": candidate_commit,
                 "compose_file": "compose.yaml",
+                "scope": "All running containers in the isolated reference Compose project.",
+                "web_database_pool_max_size": 18,
                 "command": "python scripts/run_resource_measurement.py " + " ".join(raw_arguments),
                 "production_process_mode": "Uvicorn with one worker and no reloader",
                 "external_clients": False,
-                "cgroup_cpu_reads": "measurement boundaries only",
+                "cgroup_cpu_reads": "External Engine counters with per-service monotonic intervals",
                 "memory_sample_seconds": arguments.sample_seconds,
                 **common,
             },
@@ -707,6 +742,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Resource measurement passed. Safe report: {report_path}")
     except (
         ValueError,
+        KeyError,
+        OSError,
+        http.client.HTTPException,
         subprocess.SubprocessError,
         InterruptedError,
         IsolationError,

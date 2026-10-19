@@ -219,27 +219,39 @@ The lane measures the current working tree. For a comparison, run
 `pdm run python scripts/run_resource_measurement.py --baseline-ref REF`.
 This option also checks out and measures the selected baseline in a temporary
 detached worktree. Each stack uses one Uvicorn worker and no development
-reloader. The lane removes its stacks and volumes. It uses only internal
-clients. The report is in `artifacts/resource-measurement-*.json`.
+reloader, with the default connection pool limits. The reference stack contains
+PostgreSQL, web, and maintenance. It does not include the optional Caddy edge.
+The lane removes its stacks and volumes. It uses only internal clients. The
+report is in `artifacts/resource-measurement-*.json`.
+The lane needs a local Unix socket or local TCP Docker endpoint.
 
 1. Warm the stack for two minutes.
 2. Measure idle CPU and recorded activity counters for ten minutes.
-3. Record cgroup CPU at the measurement boundaries, low-frequency memory,
-   health-probe executions, database transactions, and available maintenance
-   counters.
+3. Read CPU and memory counters through the local Docker Engine API. Record
+   each service's CPU rate over its own measured interval. Capture health-probe
+   events live. Read database and maintenance counters outside the CPU interval.
 4. Run three idle-load-idle cycles and confirm that memory returns to a stable band.
 
 Acceptance targets:
 
 - candidate total idle CPU is below 1 percent of one core on the documented
   reference machine;
-- no service wakes more than once per minute when no deadline is near;
+- routine maintenance reconciliation and Docker health probes run at most once
+  per minute when no deadline is near;
 - no container grows memory monotonically across the three cycles;
 - Compose reaches ready state within two minutes on the reference machine.
 
 Record the machine, Docker version, commit, duration, sample interval, and exact commands with each result.
-The lane does not infer physical host wakeups, energy use, or watts from CPU or
-probe counts.
+The CPU interval includes normal health checks. It contains no measurement
+commands inside containers. A restart, counter reset, or change to the container
+set fails the measurement. Memory must settle for each service; a stable total
+cannot hide growth in one service.
+
+The [runtime inventory](operations.md#idle-runtime) lists dependency timers that
+continue at idle. These timers are outside the once-per-minute application
+work limit. Measure an operator's proxy and monitoring separately when those
+services are outside the reference stack. The lane does not infer physical host
+wakeups, energy use, or watts from CPU or probe counts.
 
 ## Candidate image evidence
 

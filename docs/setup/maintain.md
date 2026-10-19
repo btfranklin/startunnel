@@ -47,12 +47,14 @@ This causes a short interruption. Do not use `down --volumes` or a Docker volume
 prune for a restart. They can remove durable data. Container restart policies
 start services after a server reboot; verify their health after every reboot.
 
-To apply Caddy configuration changes or renewed certificate files without a
-service interruption, run:
+For an in-place Caddy configuration edit, reload without stopping the service:
 
 ```shell
 docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --force
 ```
+
+A checkout or editor can replace the mounted file. After a release checkout,
+re-create Caddy as shown in the upgrade steps below.
 
 The admin API uses container loopback. The supplied Compose file does not publish
 its port, 2019. Keep that port private.
@@ -139,6 +141,13 @@ application no longer stores a per-message content digest.
    replaces the image setting and starts the stack. It retains earlier
    snapshots. Database volumes and secret files remain in place. A pending
    database migration can change stored data, including the one-time reset.
+
+   If you use the included Caddy service, re-create it so its bind mount reads
+   the new configuration. This causes a short TLS interruption:
+
+   ```shell
+   docker compose up -d --no-deps --force-recreate caddy
+   ```
 
    There is no automatic rollback. After an interrupted attempt, check the
    printed snapshot, configuration, migrations, and service state. Retry from

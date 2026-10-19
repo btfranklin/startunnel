@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import selectors
 import signal
+import socket
 import threading
 from collections.abc import Mapping
 from contextlib import suppress
@@ -45,6 +47,17 @@ def _connection_kwargs() -> dict[str, object]:
     }
 
 
+def _wait_for_notification(
+    listener: psycopg.Connection[tuple[object, ...]], stop_socket: socket.socket, timeout: float
+) -> bool:
+    if list(listener.notifies(timeout=0)):
+        return True
+    with selectors.DefaultSelector() as selector:
+        selector.register(listener, selectors.EVENT_READ)
+        selector.register(stop_socket, selectors.EVENT_READ)
+        return bool(selector.select(timeout)) and bool(list(listener.notifies(timeout=0)))
+
+
 class Command(BaseCommand):
     help = "Run deadline-based StarTunnel maintenance."
 
@@ -53,22 +66,34 @@ class Command(BaseCommand):
 
     def handle(self, *args: object, **options: object) -> None:
         del args
-        stop = threading.Event()
-        once = bool(options["once"])
-
-        def request_stop(signum: int, frame: object) -> None:
-            del signum, frame
-            stop.set()
-
-        signal.signal(signal.SIGTERM, request_stop)
-        signal.signal(signal.SIGINT, request_stop)
-        if once:
+        if options["once"]:
             self._reconcile(once=True)
             return
-        if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
-            self._sqlite_loop(stop)
-            return
+        stop = threading.Event()
+        stop_reader, stop_writer = socket.socketpair()
+        with stop_reader, stop_writer:
+            stop_writer.setblocking(False)
 
+            def request_stop(signum: int, frame: object) -> None:
+                del signum, frame
+                stop.set()
+                with suppress(BlockingIOError):
+                    stop_writer.send(b"0")
+
+            handlers = [
+                (signum, signal.signal(signum, request_stop))
+                for signum in (signal.SIGTERM, signal.SIGINT)
+            ]
+            try:
+                if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
+                    self._sqlite_loop(stop)
+                else:
+                    self._run_postgres(stop, stop_reader)
+            finally:
+                for signum, handler in handlers:
+                    signal.signal(signum, handler)
+
+    def _run_postgres(self, stop: threading.Event, stop_reader: socket.socket) -> None:
         self.retry_delay = 1.0
         while not stop.is_set():
             try:
@@ -83,7 +108,7 @@ class Command(BaseCommand):
                     if not acquired or not acquired[0]:
                         stop.wait(RECONCILIATION_SECONDS)
                         continue
-                    self._postgres_loop(listener, stop)
+                    self._postgres_loop(listener, stop, stop_reader)
             except (psycopg.Error, DatabaseError) as error:
                 logger.exception("Maintenance database operation failed.")
                 close_old_connections()
@@ -97,6 +122,7 @@ class Command(BaseCommand):
         self,
         listener: psycopg.Connection[tuple[object, ...]],
         stop: threading.Event,
+        stop_reader: socket.socket,
     ) -> None:
         while not stop.is_set():
             counts = self._drain_due_work(stop)
@@ -108,8 +134,7 @@ class Command(BaseCommand):
                 timeout = min((deadline - now).total_seconds(), RECONCILIATION_SECONDS)
             elif deadline is not None:
                 timeout = 0
-            notifications = list(listener.notifies(timeout=max(timeout, 0), stop_after=1))
-            if notifications:
+            if _wait_for_notification(listener, stop_reader, max(timeout, 0)):
                 record_notification_wake()
 
     def _sqlite_loop(self, stop: threading.Event) -> None:

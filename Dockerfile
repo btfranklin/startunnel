@@ -151,7 +151,7 @@ USER startunnel:startunnel
 EXPOSE 8000
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/startunnel-entrypoint"]
-CMD ["/app/.venv/bin/uvicorn", "startunnel.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--no-proxy-headers", "--no-access-log", "--timeout-graceful-shutdown", "30"]
+CMD ["/app/.venv/bin/uvicorn", "startunnel.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-proxy-headers", "--no-access-log", "--timeout-graceful-shutdown", "30"]
 
 FROM runtime AS test-runtime
 
@@ -187,7 +187,7 @@ COPY . .
 RUN chown -R startunnel:startunnel /app /home/startunnel
 
 USER startunnel:startunnel
-CMD ["/app/.venv/bin/uvicorn", "startunnel.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--no-proxy-headers", "--no-access-log", "--timeout-graceful-shutdown", "30"]
+CMD ["/app/.venv/bin/uvicorn", "startunnel.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-proxy-headers", "--no-access-log", "--timeout-graceful-shutdown", "30"]
 
 FROM development-runtime AS browser-tests
 

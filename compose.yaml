@@ -143,10 +143,13 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test:
-        - CMD
-        - /app/.venv/bin/python
-        - -c
-        - from urllib.parse import urlparse; import os, urllib.request; base_url = os.environ.get('STARTUNNEL_BASE_URL', ''); host = urlparse(base_url).netloc or os.environ['STARTUNNEL_ALLOWED_HOSTS'].split(',')[0].strip(); request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3).read()
+        - CMD-SHELL
+        - >-
+          origin="$${STARTUNNEL_BASE_URL#*://}";
+          exec wget -q -O /dev/null -T 3
+          --header="Host: $${origin%%/*}"
+          --header="X-Forwarded-Proto: https"
+          http://127.0.0.1:8000/health/ready
       interval: 60s
       start_interval: 2s
       timeout: 5s

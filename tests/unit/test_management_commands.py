@@ -143,6 +143,12 @@ def test_sqlite_maintenance_loop_waits_until_deadline(
 def test_postgres_loop_drains_due_work_and_records_notification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "core.management.commands.maintenance_loop._wait_for_notification",
+        lambda listener, stop_socket, timeout: bool(
+            listener.notifies(timeout=timeout, stop_after=1)
+        ),
+    )
     reconciliations = iter(
         [
             {"cycles_closed": 1, "cycle_delete_failures": 0},
@@ -175,13 +181,20 @@ def test_postgres_loop_drains_due_work_and_records_notification(
         "core.management.commands.maintenance_loop.record_notification_wake",
         lambda: wakes.append(True),
     )
-    command._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
+    command._postgres_loop(Listener(), stop, None)  # type: ignore[arg-type]
     assert wakes == [True]
 
 
 def test_postgres_loop_does_not_busy_loop_after_delete_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "core.management.commands.maintenance_loop._wait_for_notification",
+        lambda listener, stop_socket, timeout: bool(
+            listener.notifies(timeout=timeout, stop_after=1)
+        ),
+    )
+
     class Stop:
         stopped = False
 
@@ -212,12 +225,18 @@ def test_postgres_loop_does_not_busy_loop_after_delete_failure(
     monkeypatch.setattr(
         "core.management.commands.maintenance_loop.next_deadline", deadline_after_failure
     )
-    command._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
+    command._postgres_loop(Listener(), stop, None)  # type: ignore[arg-type]
 
 
 def test_maintenance_recovers_from_orm_errors_with_backoff(
     settings: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    monkeypatch.setattr(
+        "core.management.commands.maintenance_loop._wait_for_notification",
+        lambda listener, stop_socket, timeout: bool(
+            listener.notifies(timeout=timeout, stop_after=1)
+        ),
+    )
     from core.logging import SafeJsonFormatter
 
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")

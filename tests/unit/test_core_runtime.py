@@ -128,7 +128,8 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
         async def execute(self, sql: str) -> None:
             assert sql in {"LISTEN startunnel_activity", f"LISTEN {BOARD_CHANNEL}"}
 
-        async def notifies(self) -> Any:
+        async def notifies(self, *, timeout: float) -> Any:
+            assert timeout == 0
             yield Notification("startunnel_activity", "invalid")
             yield Notification("startunnel_activity", str(tunnel_id))
             yield Notification(BOARD_CHANNEL, "1")
@@ -177,7 +178,8 @@ async def test_listener_reconnects_after_database_error(
         async def execute(self, query: str) -> None:
             subscriptions.append(query)
 
-        async def notifies(self) -> Any:
+        async def notifies(self, *, timeout: float) -> Any:
+            assert timeout == 0
             assert listener._ready.is_set()
             assert board_waiter.is_set()
             assert activity_waiter.is_set()

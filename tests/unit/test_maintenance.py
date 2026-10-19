@@ -208,8 +208,14 @@ def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
             return []
 
     stop = Stop()
+    monkeypatch.setattr(
+        "core.management.commands.maintenance_loop._wait_for_notification",
+        lambda listener, stop_socket, timeout: bool(
+            listener.notifies(timeout=timeout, stop_after=1)
+        ),
+    )
     with time_machine.travel(now, tick=False):
-        MaintenanceCommand()._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
+        MaintenanceCommand()._postgres_loop(Listener(), stop, None)  # type: ignore[arg-type]
     assert len(attempts) == 4
     assert Cycle.objects.get(pk=created.cycle.pk).state == Cycle.State.CLOSED
 

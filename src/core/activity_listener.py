@@ -27,6 +27,16 @@ def _connection_kwargs() -> dict[str, object]:
     }
 
 
+async def _wait_readable(fileno: int) -> None:
+    loop = asyncio.get_running_loop()
+    ready = asyncio.Event()
+    loop.add_reader(fileno, ready.set)
+    try:
+        await ready.wait()
+    finally:
+        loop.remove_reader(fileno)
+
+
 class ActivityListener:
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
@@ -106,19 +116,23 @@ class ActivityListener:
                     self._ready.set()
                     self._wake_all()
                     backoff = 1.0
-                    async for notification in connection.notifies():
-                        if notification.channel == BOARD_CHANNEL:
-                            for waiter in self._board_waiters:
+                    while not self._stopping:
+                        # Drain buffered notifications before waiting on the socket.
+                        async for notification in connection.notifies(timeout=0):
+                            if notification.channel == BOARD_CHANNEL:
+                                for waiter in self._board_waiters:
+                                    waiter.set()
+                                continue
+                            if notification.channel != ACTIVITY_CHANNEL:
+                                continue
+                            try:
+                                tunnel_id = UUID(notification.payload)
+                            except ValueError:
+                                continue
+                            for waiter in self._waiters.get(tunnel_id, set()):
                                 waiter.set()
-                            continue
-                        if notification.channel != ACTIVITY_CHANNEL:
-                            continue
-                        try:
-                            tunnel_id = UUID(notification.payload)
-                        except ValueError:
-                            continue
-                        for waiter in self._waiters.get(tunnel_id, set()):
-                            waiter.set()
+                        if not self._stopping:
+                            await _wait_readable(connection.fileno())
             except asyncio.CancelledError:
                 raise
             except psycopg.Error:

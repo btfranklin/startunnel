@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from examples.python.startunnel_client import StarTunnelError
 from scripts import compose_isolation as isolation
 from scripts import prove_activity_restart as activity_worker
@@ -154,6 +155,69 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
     assert os.access(ROOT / "docker/app/maintenance-healthcheck.sh", os.X_OK)
 
 
+def _run_web_healthcheck(
+    command: str, directory: Path, *, base_url: str, exit_code: int
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    executable = directory / "wget"
+    executable.write_text(
+        """#!/bin/sh
+printf '%s\\n' "$@" > "$WGET_ARGUMENTS"
+exit "$WGET_EXIT_CODE"
+"""
+    )
+    executable.chmod(0o755)
+    output = directory / "wget-arguments"
+    environment = os.environ | {
+        "PATH": str(directory) + os.pathsep + os.defpath,
+        "STARTUNNEL_BASE_URL": base_url,
+        "WGET_ARGUMENTS": str(output),
+        "WGET_EXIT_CODE": str(exit_code),
+    }
+    result = subprocess.run(
+        ["/bin/sh", "-c", command.replace("$$", "$")],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, output.read_text().splitlines()
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected_host"),
+    [
+        ("http://startunnel.internal", "startunnel.internal"),
+        ("https://startunnel.example", "startunnel.example"),
+        ("http://startunnel.internal:8000", "startunnel.internal:8000"),
+        ("https://startunnel.example:8443/", "startunnel.example:8443"),
+        ("http://[::1]:8000/", "[::1]:8000"),
+    ],
+)
+@pytest.mark.parametrize("exit_code", [0, 8])
+def test_web_healthcheck_uses_the_origin_and_preserves_failure(
+    executable_dir: Path, base_url: str, expected_host: str, exit_code: int
+) -> None:
+    services = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
+    kind, command = services["web"]["healthcheck"]["test"]
+    assert kind == "CMD-SHELL"
+
+    result, arguments = _run_web_healthcheck(
+        command, executable_dir, base_url=base_url, exit_code=exit_code
+    )
+
+    assert result.returncode == exit_code, result.stderr
+    assert arguments == [
+        "-q",
+        "-O",
+        "/dev/null",
+        "-T",
+        "3",
+        "--header=Host: " + expected_host,
+        "--header=X-Forwarded-Proto: https",
+        "http://127.0.0.1:8000/health/ready",
+    ]
+
+
 @pytest.mark.skipif(shutil.which("docker") is None, reason="Compose CLI is required.")
 @pytest.mark.parametrize(
     (
@@ -177,7 +241,7 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
     ],
 )
 def test_production_compose_uses_operator_origin_or_https_default(
-    monkeypatch: pytest.MonkeyPatch,
+    executable_dir: Path,
     base_url: str | None,
     allowed_hosts: str | None,
     trusted_origins: str | None,
@@ -223,22 +287,12 @@ def test_production_compose_uses_operator_origin_or_https_default(
     services = json.loads(result.stdout)["services"]
     _assert_postgres_permission_tools_are_mounted(services)
     healthcheck = services["web"]["healthcheck"]["test"][-1]
-    captured_hosts: list[str | None] = []
-    monkeypatch.setenv("STARTUNNEL_BASE_URL", expected_url)
-    monkeypatch.setenv("STARTUNNEL_ALLOWED_HOSTS", expected_hosts)
-
-    def fake_urlopen(request: urllib.request.Request, timeout: float) -> Any:
-        captured_hosts.append(request.get_header("Host"))
-        return type("Response", (), {"read": lambda self: None})()
-
-    monkeypatch.setattr(
-        urllib.request,
-        "urlopen",
-        fake_urlopen,
+    probe, arguments = _run_web_healthcheck(
+        healthcheck, executable_dir, base_url=expected_url, exit_code=0
     )
-    exec(healthcheck, {})
+    assert probe.returncode == 0, probe.stderr
     expected_host = "startunnel.internal:8000" if base_url else "startunnel.example.test"
-    assert captured_hosts == [expected_host]
+    assert "--header=Host: " + expected_host in arguments
     for name in ("migrate", "web", "maintenance"):
         assert services[name]["environment"]["STARTUNNEL_BASE_URL"] == expected_url
         assert services[name]["environment"]["STARTUNNEL_ALLOWED_HOSTS"] == expected_hosts
@@ -275,16 +329,6 @@ def test_generated_project_names_are_disposable(lane: str, prefix: str) -> None:
     assert project_name.startswith(prefix)
     assert isolation.validate_project_name(project_name) == project_name
     assert "startunnel" not in project_name
-
-
-def test_resource_cpu_percent_aggregates_all_containers() -> None:
-    result = resource_runner.aggregate_one_core_percent(
-        {"web": 1_000_000, "postgres": 2_000_000},
-        {"web": 1_600_000, "postgres": 2_400_000},
-        10,
-    )
-
-    assert result == 10.0
 
 
 @pytest.mark.parametrize(
@@ -325,8 +369,6 @@ def test_resource_parsers_count_only_health_check_execs() -> None:
         )
     )
 
-    assert resource_runner.parse_cpu_stat("usage_usec 123\nuser_usec 100\n") == 123
-    assert resource_runner.parse_memory_stat_anon("anon 456\nfile 100\n") == 456
     assert resource_runner.count_health_probes(events) == {"postgres": 1, "maintenance": 1}
 
 

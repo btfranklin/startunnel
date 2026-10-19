@@ -53,6 +53,7 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | [prove_admin_upgrade.py](prove_admin_upgrade.py) | Verify forward migrations on restored historical databases |
 | [prove_activity_restart.py](prove_activity_restart.py) | Verify reader recovery across a web restart |
 | [run_resource_measurement.py](run_resource_measurement.py) | Measure idle CPU, memory, and recurring work |
+| [docker_stats.py](docker_stats.py) | Read Docker counters without running commands inside containers |
 | [run_full_load_profile.py](run_full_load_profile.py) | Run the fixed load profile and record safe evidence |
 
 ## Release preparation
