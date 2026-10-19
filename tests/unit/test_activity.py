@@ -102,7 +102,7 @@ def test_activity_workers_keep_cursor_progress_and_query_bounds(
     _reply(created, creator, "activity-worker-second")
     _reply(created, creator, "activity-worker-third")
 
-    with django_assert_num_queries(3):
+    with django_assert_num_queries(2):
         immediate = _read_activity_once_for_async(
             credential=creator,
             address=created.address,

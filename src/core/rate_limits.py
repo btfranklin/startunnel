@@ -106,8 +106,6 @@ def _consume(
             consume_once()
         except IntegrityError:
             consume_once()
-    except RateLimited:
-        raise
     except DatabaseError as error:
         raise DependencyUnavailable() from error
 

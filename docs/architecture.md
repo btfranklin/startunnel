@@ -25,6 +25,8 @@ LISTEN/NOTIFY ---- maintenance deadlines
 - `accounts.admin_data` owns canonical admin resource data.
 - `tunnels.payloads` owns the typed text and JSON content shared by transports.
 - `tunnels.messages` owns message creation and tree reads.
+- `tunnels.events` assigns event positions and writes each batch under the tunnel
+  lock. PostgreSQL sends its activity notification when the transaction commits.
 - `tunnels.cycles` owns tunnel creation, cycle lifecycle, and cycle status reads.
 - `tunnels.admin_actions` owns admin lifecycle controls and address changes.
 - Models own persisted structure and database constraints.
@@ -105,6 +107,9 @@ within that scope. A final access check applies credential revocation and
 address changes before the assembled result is returned.
 
 ## Beacon discovery
+
+Cycles, Beacons, and maintenance use the application clock. Mutations check
+deadlines after write locks are acquired. Keep application host clocks synchronized.
 
 A Beacon belongs to one cycle. The cycle creator can publish it once. Its text,
 publication sequence, and publication time stay fixed. Its deadline is no later

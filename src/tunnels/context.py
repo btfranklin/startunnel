@@ -9,10 +9,11 @@ from typing import Any, Literal
 from uuid import UUID
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.errors import ContextBudgetTooSmall, CycleUnavailable, InvalidRequest
 from core.limits import DEFAULT_LIMITS, MAX_CONTEXT_REFERENCES
 
-from .access import limits_for, resolve_tunnel, select_cycle
+from .access import resolve_tunnel, select_cycle
 from .message_data import message_payload
 from .messages import load_branch
 from .models import ActivityCheckpoint, Message, Tunnel, TunnelEvent
@@ -74,7 +75,7 @@ def get_context(
 ) -> ContextView:
     """Select one required branch and optional messages within exact wire budgets."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if max_items < 1 or max_items > limits.maximum_context_items:
         raise InvalidRequest(f"max_items must be from 1 through {limits.maximum_context_items}.")
     if max_bytes < 1 or max_bytes > limits.maximum_context_bytes:

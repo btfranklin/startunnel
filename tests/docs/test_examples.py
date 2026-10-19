@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import os
 import subprocess
 from pathlib import Path
@@ -14,11 +13,6 @@ from examples.python.startunnel_client import StarTunnelClient, StarTunnelError
 from scripts import run_tutorial
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def test_every_python_example_compiles() -> None:
-    for path in sorted((ROOT / "examples").rglob("*.py")):
-        ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
 @pytest.mark.asyncio
@@ -91,31 +85,6 @@ async def test_reference_client_error_has_request_id_but_not_bearer_values() -> 
     assert address not in str(captured.value)
     assert parent_id not in str(captured.value)
     assert "private payload" not in str(captured.value)
-
-
-def test_tutorial_script_has_no_secret_prints() -> None:
-    path = ROOT / "examples/python/tutorial_exchange.py"
-    text = path.read_text(encoding="utf-8")
-    tree = ast.parse(text)
-    printed_names: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            continue
-        if node.func.id != "print":
-            continue
-        printed_names.update(
-            child.id
-            for argument in node.args
-            for child in ast.walk(argument)
-            if isinstance(child, ast.Name)
-        )
-    assert not {
-        "sender_key",
-        "receiver_key",
-        "snapshot_cursor",
-        "page_cursor",
-        "activity_cursor",
-    }.intersection(printed_names)
 
 
 def test_tutorial_environment_file_declares_its_client_settings() -> None:

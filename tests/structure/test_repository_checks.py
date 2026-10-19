@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,19 +56,44 @@ def test_pages_have_no_heading_or_section_eyebrows() -> None:
 @pytest.mark.parametrize("path", ["Dockerfile", "compose.yaml", "compose.dev.yaml"])
 def test_every_uvicorn_command_disables_implicit_proxy_trust(path: str) -> None:
     content = (ROOT / path).read_text(encoding="utf-8")
-    commands = content.split("uvicorn")[1:]
-    assert commands, f"{path} must contain a Uvicorn command."
+    if path == "Dockerfile":
+        commands = [
+            json.loads(line.removeprefix("CMD "))
+            for line in content.splitlines()
+            if line.startswith("CMD ")
+        ]
+    else:
+        config = yaml.safe_load(content)
+        commands = [
+            service["command"]
+            for service in config["services"].values()
+            if "uvicorn" in str(service.get("command", []))
+        ]
+    assert commands
     assert all("--no-proxy-headers" in command for command in commands)
 
 
 def test_web_worker_and_database_pool_defaults_preserve_headroom() -> None:
-    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
-    environment = (ROOT / ".env.example").read_text(encoding="utf-8")
+    services = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
+    example = dict(
+        line.split("=", 1)
+        for line in (ROOT / ".env.example").read_text().splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
 
-    assert "${STARTUNNEL_WEB_WORKERS:-1}" in compose
-    assert "${STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE:-18}" in compose
-    assert "${STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE:-4}" in compose
-    assert "STARTUNNEL_WEB_WORKERS=1" in environment
-    assert "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE=18" in environment
-    assert "STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE=4" in environment
-    assert 1 * 18 + 4 <= 90
+    def default(value: str) -> int:
+        match = re.fullmatch(r"\$\{([A-Z_]+):-([0-9]+)\}", value)
+        assert match is not None
+        name, amount = match.groups()
+        assert int(example[name]) == int(amount)
+        return int(amount)
+
+    web = services["web"]
+    command = web["command"]
+    workers = default(command[command.index("--workers") + 1])
+    web_pool = default(web["environment"]["STARTUNNEL_DATABASE_POOL_MAX_SIZE"])
+    maintenance_pool = default(
+        services["maintenance"]["environment"]["STARTUNNEL_DATABASE_POOL_MAX_SIZE"]
+    )
+    # PostgreSQL defaults to 100 connections. Keep ten for tools and recovery.
+    assert workers * web_pool + maintenance_pool <= 90

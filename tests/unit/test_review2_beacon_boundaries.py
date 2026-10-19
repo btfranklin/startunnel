@@ -25,7 +25,7 @@ def test_publication_that_reaches_cycle_expiry_rolls_back(
         idempotency_key="deadline-publication-create",
         root_content={"type": "text", "text": "Review"},
     )
-    monkeypatch.setattr(beacons, "_database_now", lambda: created.cycle.expires_at)
+    monkeypatch.setattr(timezone, "now", lambda: created.cycle.expires_at)
     with pytest.raises(CycleClosed):
         beacons.publish_beacon(
             credential=creator,

@@ -11,6 +11,7 @@ from django.db import connection, transaction
 from django.db.models import Count, Exists, OuterRef, Sum
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.audit import record_event
 from core.errors import (
     CycleUnavailable,
@@ -27,11 +28,11 @@ from core.metrics import MESSAGES_SENT
 from .access import (
     active_cycle,
     cycle_is_readable,
-    limits_for,
     resolve_tunnel,
     select_cycle,
 )
 from .codec import canonical_address
+from .events import append_events
 from .models import (
     Cycle,
     Message,
@@ -192,7 +193,7 @@ def post_reply(
     correlation_id: str | None = None,
     session: str | None = None,
 ) -> PostedReply:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     payload = validate_content(content, maximum_bytes=limits.bytes_per_message)
     correlation = _normalize_correlation_id(correlation_id)
     session = _validate_session(session)
@@ -250,7 +251,6 @@ def post_reply(
         maximum=limits.mentions_per_message,
     )
     sequence = cycle.next_sequence
-    event_position = tunnel.next_event_position
     message = _create_message(
         tunnel=tunnel,
         cycle=cycle,
@@ -266,14 +266,11 @@ def post_reply(
     cycle.message_count += 1
     cycle.content_bytes += message.byte_count
     cycle.save(update_fields=["next_sequence", "message_count", "content_bytes"])
-    tunnel.next_event_position = event_position + 1
-    tunnel.save(update_fields=["next_event_position"])
-    TunnelEvent.objects.create(
+    event_position = append_events(
         tunnel=tunnel,
-        cycle=cycle,
-        message=message,
-        position=event_position,
-        event_type=TunnelEvent.Type.MESSAGE_POSTED,
+        events=[
+            TunnelEvent(cycle=cycle, message=message, event_type=TunnelEvent.Type.MESSAGE_POSTED)
+        ],
     )
     from .beacons import note_beacon_response
 
@@ -309,7 +306,7 @@ def read_tree(
     after_sequence: int = 0,
     snapshot_sequence: int | None = None,
 ) -> TreePage:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     if after_sequence < 0:
@@ -430,7 +427,7 @@ def list_replies(
         message_id=message_id,
         cycle_id=cycle_id,
     )
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     if after_sequence < 0:
@@ -597,7 +594,7 @@ def get_subtree(
 ) -> SubtreePage:
     """Return one stable preorder page rooted at a selected message."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if max_depth < 0 or max_depth > limits.maximum_tree_depth:
         raise InvalidRequest(f"max_depth must be from 0 through {limits.maximum_tree_depth}.")
     if limit < 1 or limit > limits.maximum_list_page:
@@ -702,7 +699,7 @@ def list_leaves(
 ) -> LeafPage:
     """Return a stable sequence-ordered page of messages with no snapshot child."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     if after_sequence < 0:

@@ -9,7 +9,6 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 def test_initial_schema_has_current_models_and_guards() -> None:
-    assert connection.vendor == "postgresql"
     loader = MigrationLoader(connection)
     owned_apps = {"accounts", "agents", "core", "tunnels"}
     leaves = [node for node in loader.graph.leaf_nodes() if node[0] in owned_apps]

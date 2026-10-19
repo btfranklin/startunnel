@@ -7,14 +7,13 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import connection, transaction
 from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
-from django.db.models.functions import Now
 from django.utils import timezone
 
 from accounts.models import User
@@ -42,10 +41,11 @@ from core.limits import (
 )
 from core.logging import current_request_id
 from core.models import AgentReceipt
-from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
+from core.notifications import BOARD_CHANNEL, notify, notify_maintenance
 
 from .access import credential_is_active, cycle_is_readable, resolve_tunnel
 from .codec import canonical_address
+from .events import append_events
 from .models import Beacon, BoardState, Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
 DEFAULT_BEACON_SECONDS = 3_600
@@ -97,6 +97,7 @@ def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
 
     if message.parent_id is None:
         return
+    now = timezone.now()
     earlier_responses = Message.objects.filter(
         cycle_id=OuterRef("cycle_id"),
         sender_id=message.sender_id,
@@ -109,8 +110,8 @@ def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
             cycle=cycle,
             publication_sequence__lt=message.sequence,
             ended_at__isnull=True,
-            expires_at__gt=Now(),
-            cycle__expires_at__gt=Now(),
+            expires_at__gt=now,
+            cycle__expires_at__gt=now,
             cycle__tunnel__state=Tunnel.State.ACTIVE,
         )
         .exclude(publisher_id=message.sender_id)
@@ -165,6 +166,7 @@ def _cursor_expiry(cursor: dict[str, Any]) -> datetime | None:
 
 
 def _next_visible_expiry(*, snapshot_position: int) -> datetime | None:
+    now = timezone.now()
     current_address = TunnelAddress.objects.filter(
         tunnel_id=OuterRef("cycle__tunnel_id"), state=TunnelAddress.State.CURRENT
     ).values("address")[:1]
@@ -172,9 +174,9 @@ def _next_visible_expiry(*, snapshot_position: int) -> datetime | None:
         Beacon.objects.filter(
             board_position__lte=snapshot_position,
             ended_at__isnull=True,
-            expires_at__gt=Now(),
+            expires_at__gt=now,
             cycle__state=Cycle.State.ACTIVE,
-            cycle__expires_at__gt=Now(),
+            cycle__expires_at__gt=now,
             cycle__tunnel__state=Tunnel.State.ACTIVE,
         )
         .annotate(current_address=Subquery(current_address))
@@ -199,14 +201,6 @@ def _validate_beacon_text(text: str) -> None:
         raise InvalidRequest("Beacon text must contain valid Unicode.") from error
 
 
-def _database_now() -> datetime:
-    if connection.vendor == "postgresql":
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT clock_timestamp()")
-            return cast(datetime, cursor.fetchone()[0])
-    return timezone.now()
-
-
 def _locked_tunnel_and_cycle(*, credential: AgentCredential, address: str) -> tuple[Tunnel, Cycle]:
     tunnel = resolve_tunnel(credential=credential, address=address, for_update=True)
     cycle = Cycle.objects.select_for_update().filter(tunnel=tunnel).order_by("-number").first()
@@ -227,23 +221,22 @@ def _end_locked(
     if beacon.ended_at is not None:
         return
     _advance_board_position()
-    now = _database_now()
+    now = timezone.now()
     if beacon.expires_at <= now:
         reason = Beacon.EndReason.EXPIRED
     beacon.ended_at = beacon.expires_at if reason == Beacon.EndReason.EXPIRED else now
     beacon.end_reason = reason
     beacon.save(update_fields=["ended_at", "end_reason"])
-    event_position = tunnel.next_event_position
-    tunnel.next_event_position = event_position + 1
-    tunnel.save(update_fields=["next_event_position"])
-    TunnelEvent.objects.create(
+    append_events(
         tunnel=tunnel,
-        cycle=cycle,
-        position=event_position,
-        event_type=TunnelEvent.Type.BEACON_ENDED,
-        metadata={"beacon_id": str(beacon.id), "reason": reason},
+        events=[
+            TunnelEvent(
+                cycle=cycle,
+                event_type=TunnelEvent.Type.BEACON_ENDED,
+                metadata={"beacon_id": str(beacon.id), "reason": reason},
+            )
+        ],
     )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
     record_event(
         actor_credential=actor_credential,
         actor_user=actor_user,
@@ -312,7 +305,7 @@ def publish_beacon(
     if beacon is not None:
         raise LifecycleConflict("This cycle already has a Beacon.")
     position = _advance_board_position()
-    now = _database_now()
+    now = timezone.now()
     if cycle.expires_at <= now:
         raise CycleClosed()
     expires_at = min(now + timedelta(seconds=lifetime), cycle.expires_at)
@@ -325,17 +318,16 @@ def publish_beacon(
         published_at=now,
         expires_at=expires_at,
     )
-    event_position = tunnel.next_event_position
-    tunnel.next_event_position = event_position + 1
-    tunnel.save(update_fields=["next_event_position"])
-    TunnelEvent.objects.create(
+    append_events(
         tunnel=tunnel,
-        cycle=cycle,
-        position=event_position,
-        event_type=TunnelEvent.Type.BEACON_LIT,
-        metadata={"beacon_id": str(beacon.id)},
+        events=[
+            TunnelEvent(
+                cycle=cycle,
+                event_type=TunnelEvent.Type.BEACON_LIT,
+                metadata={"beacon_id": str(beacon.id)},
+            )
+        ],
     )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
     transaction.on_commit(notify_maintenance)
     record_event(
         actor_credential=credential,
@@ -374,7 +366,7 @@ def withdraw_beacon(
     beacon = Beacon.objects.select_for_update().filter(pk=beacon_id, cycle=cycle).first()
     if beacon is None or beacon.publisher_id != credential.id or cycle.creator_id != credential.id:
         raise TunnelUnavailable()
-    now = _database_now()
+    now = timezone.now()
     if (
         cycle.state != Cycle.State.ACTIVE
         or tunnel.state != Tunnel.State.ACTIVE
@@ -461,6 +453,7 @@ def read_board(
             or before_position > snapshot_position
         ):
             raise InvalidCursor()
+    now = timezone.now()
     rows = list(
         beacon_queryset()
         .annotate(current_address=Subquery(address_subquery))
@@ -468,9 +461,9 @@ def read_board(
             board_position__lte=snapshot_position,
             board_position__lt=before_position,
             ended_at__isnull=True,
-            expires_at__gt=Now(),
+            expires_at__gt=now,
             cycle__state=Cycle.State.ACTIVE,
-            cycle__expires_at__gt=Now(),
+            cycle__expires_at__gt=now,
             cycle__tunnel__state=Tunnel.State.ACTIVE,
             current_address__isnull=False,
         )
@@ -520,7 +513,7 @@ def _read_board_wait_state_for_async(
         )
         if after_position > current_position:
             raise InvalidCursor()
-        now = _database_now()
+        now = timezone.now()
         refresh_required = after_position < current_position or (
             next_expiry is not None and next_expiry <= now
         )

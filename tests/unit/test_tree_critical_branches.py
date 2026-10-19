@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 from uuid import uuid4
@@ -9,6 +10,7 @@ from uuid import uuid4
 import pytest
 from django.utils import timezone
 
+from agents.models import AgentCredential
 from core.errors import (
     CycleUnavailable,
     InvalidCredential,
@@ -24,9 +26,13 @@ from tunnels.admin_actions import (
     rollover_cycle_as_admin,
     start_cycle_as_admin,
 )
+from tunnels.context import get_context
 from tunnels.cycles import _close_locked_cycle, close_cycle, create_tunnel
+from tunnels.entry import enter_tunnel
 from tunnels.messages import get_message, list_replies, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel
+from tunnels.participants import list_participants
+from tunnels.search import search_messages
 
 pytestmark = pytest.mark.django_db
 
@@ -59,8 +65,8 @@ def test_create_rejects_long_correlation_and_instance_quota(
             root_correlation_id="x" * 129,
         )
     monkeypatch.setattr(
-        "tunnels.cycles.limits_for",
-        lambda value: replace(Limits(), non_retired_tunnels=0),
+        "tunnels.cycles.instance_limits.effective_limits",
+        lambda: replace(Limits(), non_retired_tunnels=0),
     )
     with pytest.raises(QuotaExceeded):
         _create(credential, "critical-quota")
@@ -197,8 +203,8 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             correlation_id="x" * 129,
         )
     monkeypatch.setattr(
-        "tunnels.messages.limits_for",
-        lambda value: replace(Limits(), maximum_tree_depth=0),
+        "tunnels.messages.instance_limits.effective_limits",
+        lambda: replace(Limits(), maximum_tree_depth=0),
     )
     with pytest.raises(QuotaExceeded, match="depth"):
         post_reply(
@@ -209,8 +215,8 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             content={"type": "text", "text": "Reply."},
         )
     monkeypatch.setattr(
-        "tunnels.messages.limits_for",
-        lambda value: replace(Limits(), messages_per_cycle=1),
+        "tunnels.messages.instance_limits.effective_limits",
+        lambda: replace(Limits(), messages_per_cycle=1),
     )
     with pytest.raises(QuotaExceeded, match="message limit"):
         post_reply(
@@ -221,8 +227,8 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
             content={"type": "text", "text": "Reply."},
         )
     monkeypatch.setattr(
-        "tunnels.messages.limits_for",
-        lambda value: replace(Limits(), content_bytes_per_cycle=1),
+        "tunnels.messages.instance_limits.effective_limits",
+        lambda: replace(Limits(), content_bytes_per_cycle=1),
     )
     with pytest.raises(QuotaExceeded, match="content-byte"):
         post_reply(
@@ -345,3 +351,23 @@ def test_inactive_operator_cannot_control_or_find_tunnel(
             expected_address_generation=1,
             root_content={"type": "text", "text": "No access."},
         )
+
+
+@pytest.mark.parametrize("operation", ["tree", "entry", "context", "participants", "search"])
+def test_domain_reads_reject_a_revoked_credential_from_a_stale_object(
+    credential_factory: Any, operation: str
+) -> None:
+    credential, _ = credential_factory()
+    created = _create(credential, "critical-stale-reader")
+    AgentCredential.objects.filter(pk=credential.pk).update(revoked_at=timezone.now())
+    assert credential.revoked_at is None
+    operations: dict[str, tuple[Callable[..., Any], dict[str, Any]]] = {
+        "tree": (read_tree, {}),
+        "entry": (enter_tunnel, {}),
+        "context": (get_context, {"focus_message_id": created.root.id}),
+        "participants": (list_participants, {}),
+        "search": (search_messages, {"query": "root"}),
+    }
+    read, arguments = operations[operation]
+    with pytest.raises(InvalidCredential):
+        read(credential=credential, address=created.address, **arguments)

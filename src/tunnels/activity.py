@@ -11,7 +11,7 @@ from uuid import UUID
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import connection, transaction
-from django.db.models import Exists, OuterRef, Prefetch, QuerySet, prefetch_related_objects
+from django.db.models import Exists, OuterRef, QuerySet, prefetch_related_objects
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
@@ -24,7 +24,6 @@ from .access import (
     active_credential_query,
     address_query,
     cycle_is_readable,
-    limits_for,
     resolve_tunnel,
 )
 from .codec import canonical_address
@@ -68,13 +67,7 @@ def _activity_rows(query: QuerySet[TunnelEvent], *, limit: int) -> list[TunnelEv
             event.cycle = None
     messages = [event.message for event in rows if event.message is not None]
     if messages and any(getattr(event, "message_has_mentions", False) for event in rows):
-        prefetch_related_objects(
-            messages,
-            Prefetch(
-                "mentions",
-                queryset=MessageMention.objects.select_related("credential"),
-            ),
-        )
+        prefetch_related_objects(messages, "mentions")
     else:
         for message in messages:
             message._prefetched_objects_cache = {"mentions": []}  # type: ignore[attr-defined]
@@ -125,7 +118,7 @@ def _resolve_activity_start(
     limit: int,
     event_types: tuple[str, ...] | None,
 ) -> _ActivityStart:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if after_position is not None and after_position < 0:
         raise InvalidRequest("The activity position cannot be negative.")
     if limit < 1 or limit > limits.maximum_list_page:
@@ -181,9 +174,9 @@ def _activity_query(
     after_position: int,
     event_types: tuple[str, ...] | None,
 ) -> QuerySet[TunnelEvent]:
-    query = TunnelEvent.objects.select_related(
-        "cycle", "message", "message__cycle", "message__sender"
-    ).filter(tunnel=tunnel, position__gt=after_position)
+    query = TunnelEvent.objects.select_related("cycle", "message", "message__cycle").filter(
+        tunnel=tunnel, position__gt=after_position
+    )
     if event_types is not None:
         query = query.filter(event_type__in=event_types)
     return query

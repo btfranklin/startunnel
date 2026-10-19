@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from scripts.start_production import (
     PRODUCTION_SECRET_NAMES,
     compose_command,
@@ -148,15 +148,13 @@ def test_production_secret_preflight_preserves_operator_text_formats(tmp_path: P
 
 
 def test_production_secret_preflight_inventory_matches_compose() -> None:
-    compose_source = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
-    compose_secret_names = set(
-        re.findall(
-            r"file: \$\{STARTUNNEL_SECRETS_DIR:-\./secrets\}/([a-z0-9_]+)",
-            compose_source,
-        )
-    )
-
-    assert set(PRODUCTION_SECRET_NAMES) == compose_secret_names
+    compose = yaml.load((ROOT / "compose.prod.yaml").read_text(), Loader=yaml.BaseLoader)
+    secret_files = {Path(item["file"]).name for item in compose["secrets"].values()}
+    referenced = {
+        name for service in compose["services"].values() for name in service.get("secrets", [])
+    }
+    assert set(PRODUCTION_SECRET_NAMES) == secret_files
+    assert referenced == set(compose["secrets"])
 
 
 @pytest.mark.parametrize("unsafe_kind", ["empty", "directory"])

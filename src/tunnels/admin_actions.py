@@ -28,6 +28,7 @@ from .cycles import (
     _prepare_cycle_root,
     _start_cycle_locked,
 )
+from .events import append_events
 from .messages import _validate_session
 from .models import (
     Beacon,
@@ -187,14 +188,13 @@ def _rotate_locked_address(
     current.save(update_fields=["state", "retired_at", "retirement_reason"])
     generation = current.generation + 1
     _allocate_random_address(tunnel=tunnel, generation=generation)
-    event_position = tunnel.next_event_position
-    tunnel.next_event_position = event_position + 1
-    tunnel.save(update_fields=["next_event_position"])
-    TunnelEvent.objects.create(
+    append_events(
         tunnel=tunnel,
-        position=event_position,
-        event_type=TunnelEvent.Type.ADDRESS_ROTATED,
-        metadata={"generation": generation},
+        events=[
+            TunnelEvent(
+                event_type=TunnelEvent.Type.ADDRESS_ROTATED, metadata={"generation": generation}
+            )
+        ],
     )
     if cycle is not None:
         from .beacons import end_beacon_for_cycle_locked
@@ -253,16 +253,14 @@ def _retire_locked_tunnel(
         retired_at=now,
         retirement_reason=reason,
     )
-    event_position = tunnel.next_event_position
     tunnel.state = Tunnel.State.RETIRED
     tunnel.retired_at = now
-    tunnel.next_event_position = event_position + 1
-    tunnel.save(update_fields=["state", "retired_at", "next_event_position"])
-    TunnelEvent.objects.create(
+    append_events(
         tunnel=tunnel,
-        position=event_position,
-        event_type=TunnelEvent.Type.TUNNEL_RETIRED,
-        metadata={"reason": reason},
+        events=[
+            TunnelEvent(event_type=TunnelEvent.Type.TUNNEL_RETIRED, metadata={"reason": reason})
+        ],
+        update_fields=("state", "retired_at"),
     )
     record_event(
         actor_user=actor_user,

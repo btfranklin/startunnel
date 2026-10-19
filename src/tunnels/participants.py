@@ -13,10 +13,11 @@ from uuid import UUID
 from django.db.models import Count, Max, Min, OuterRef, Subquery
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.errors import InvalidRequest
 from core.limits import DEFAULT_LIMITS
 
-from .access import limits_for, resolve_tunnel, select_cycle
+from .access import resolve_tunnel, select_cycle
 from .models import ActivityCheckpoint, Cycle, Message, MessageMention, Tunnel
 
 
@@ -55,7 +56,7 @@ def list_participants(
 ) -> ParticipantPage:
     """List recorded cycle participants in stable first-occurrence order."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     if (after_first_sequence is None) != (after_credential_id is None):

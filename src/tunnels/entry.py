@@ -11,10 +11,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.cursors import encode_cursor
 from core.errors import EntryBudgetTooSmall, InvalidCredential, InvalidRequest
 
-from .access import credential_is_active, limits_for, resolve_tunnel
+from .access import credential_is_active, resolve_tunnel
 from .message_data import cycle_payload, message_payload
 from .models import Cycle, Message, Tunnel
 
@@ -123,7 +124,7 @@ def enter_tunnel(
 ) -> TunnelEntry:
     """Read a count- and byte-bounded snapshot while tunnel writes wait on its row lock."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     if max_bytes < 1 or max_bytes > limits.maximum_context_bytes:
@@ -146,7 +147,9 @@ def enter_tunnel(
             )
             .first()
         )
-        if cycle is not None:
+        if cycle is None:
+            tunnel.state = Tunnel.State.DORMANT
+        else:
             snapshot_sequence = max(cycle.next_sequence - 1, 0)
             root = (
                 Message.objects.select_related("cycle")

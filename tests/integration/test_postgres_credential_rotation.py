@@ -66,11 +66,11 @@ def _update_payload(
 def test_real_postgres_rejects_old_credentials_and_accepts_rollback() -> None:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
-        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL credential tests.")
+        pytest.fail("Set TEST_DATABASE_URL to run PostgreSQL credential tests.")
     parsed_connection = conninfo_to_dict(database_url)
     host = parsed_connection.get("host")
     if not isinstance(host, str) or not host or host.startswith("/"):
-        pytest.skip("TEST_DATABASE_URL must use TCP so password authentication is tested.")
+        pytest.fail("TEST_DATABASE_URL must use TCP so password authentication is tested.")
     connection = {
         "host": host,
         "port": str(parsed_connection.get("port") or "5432"),

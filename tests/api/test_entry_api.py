@@ -264,3 +264,22 @@ def test_entry_history_and_activity_cursors_work_after_one_hour(
             key=key,
         )
         assert checkpoint.status_code == 200
+
+
+def test_expired_entry_and_status_agree_before_maintenance(
+    client: Client, credential_factory: Any
+) -> None:
+    creator, key = credential_factory()
+    created = _create(creator, "entry-status-expiry-create")
+    event_count = created.tunnel.events.count()
+    with time_machine.travel(created.cycle.expires_at, tick=False):
+        entry = _post(client, "/api/v1/enter", {"address": created.address}, key=key)
+        status = _post(client, "/api/v1/tunnel/status", {"address": created.address}, key=key)
+    assert entry.status_code == status.status_code == 200
+    assert entry.json()["status"] == status.json()["state"] == "dormant"
+    assert entry.json()["cycle"] is None
+    assert status.json()["current_cycle"] is None
+    created.tunnel.refresh_from_db()
+    created.cycle.refresh_from_db()
+    assert created.tunnel.state == created.cycle.state == "active"
+    assert created.tunnel.events.count() == event_count

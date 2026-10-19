@@ -58,8 +58,8 @@ def main() -> int:
         _safe_run([sys.executable, str(ROOT / "examples/python" / filename)])
         print(f"{filename} passed.")
 
-    _safe_run(["/bin/sh", str(ROOT / "examples/curl/tunnel_exchange.sh")])
-    print("tunnel_exchange.sh passed.")
+    _safe_run([sys.executable, str(ROOT / "cli/star_tunnel.py"), "tutorial"])
+    print("CLI tutorial passed.")
     print("Every non-OpenAI example passed against the public API.")
     return 0
 

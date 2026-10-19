@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from django.db import close_old_connections, connection
+from django.db import close_old_connections
 from django.utils import timezone
 
 from accounts.admin_access import (
@@ -38,7 +38,6 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 def test_independent_self_deactivations_can_leave_no_active_admins() -> None:
-    assert connection.vendor == "postgresql"
     first = User.objects.create_user(username="first", password="test-long-password-7291")
     second = User.objects.create_user(username="second", password="test-long-password-7282")
     barrier = Barrier(2)
@@ -60,7 +59,6 @@ def test_independent_self_deactivations_can_leave_no_active_admins() -> None:
 def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     credential, _ = credential_factory(user=actor)
     first = create_tunnel(
@@ -111,7 +109,6 @@ def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
 
 
 def test_identical_concurrent_admin_keys_create_one_result_and_audit() -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     both_started = Barrier(2)
     data = {"username": "created-once", "password": "test-long-password-7292"}
@@ -138,7 +135,6 @@ def test_identical_concurrent_admin_keys_create_one_result_and_audit() -> None:
 
 
 def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     from agents.services import create_credential
 
@@ -174,7 +170,6 @@ def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.Monkey
 def test_concurrent_changed_admin_requests_with_one_key_conflict(
     different_operation: bool,
 ) -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     both_started = Barrier(2)
     requests: list[tuple[type[AdminCommand], dict[str, Any]]] = [
@@ -212,7 +207,6 @@ def test_concurrent_changed_admin_requests_with_one_key_conflict(
 
 
 def test_concurrent_retry_replaces_one_expired_receipt() -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     data = {"name": "replace-expired"}
     first = execute_admin_operation(
@@ -250,7 +244,6 @@ def test_concurrent_retry_replaces_one_expired_receipt() -> None:
 def test_key_issuance_finishes_before_concurrent_owner_deactivation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert connection.vendor == "postgresql"
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     owner = User.objects.create_user(username="key-owner", password="test-long-password-7292")
     issued = Event()

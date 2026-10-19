@@ -58,7 +58,6 @@ def recovery_for(error: StarTunnelError) -> str:
 
 
 async def run() -> None:
-    # region environment
     load_env_file(".env.tutorial")
     settings = require_environment(
         "STARTUNNEL_BASE_URL",
@@ -72,7 +71,6 @@ async def run() -> None:
     receiver = StarTunnelClient(
         settings["STARTUNNEL_BASE_URL"], settings["STARTUNNEL_RECEIVER_KEY"]
     )
-    # endregion environment
 
     address: str | None = None
     cycle_id: str | None = None
@@ -84,7 +82,6 @@ async def run() -> None:
         await receiver.me()
         stage(2, "Checked Tutorial receiver")
 
-        # region create-tunnel
         created = await sender.create_tunnel(
             label="First tutorial board",
             cycle_label="Initial review",
@@ -109,11 +106,9 @@ async def run() -> None:
         )
         cycle_id = require_string(cycle.get("id"), "the cycle ID")
         root_id = require_string(root.get("id"), "the root message ID")
-        # endregion create-tunnel
         stage(3, "Created a stable tunnel and root")
         print(f"    Address: {display_address}")
 
-        # region read-tree
         tree = await receiver.read_tree(address=address, cycle_id=cycle_id)
         nodes = require_list(tree.get("nodes"), "the tree nodes")
         if (
@@ -128,10 +123,8 @@ async def run() -> None:
             require_object(nodes[0], "the root node").get("content"), "the root content"
         )
         print(f"    Root: {json.dumps(root_content, ensure_ascii=False, sort_keys=True)}")
-        # endregion read-tree
         stage(4, "Receiver read the complete tree")
 
-        # region post-reply
         posted = await receiver.post_reply(
             address=address,
             parent_id=root_id,
@@ -146,7 +139,6 @@ async def run() -> None:
         reply_id = require_string(posted_message.get("id"), "the reply ID")
         if posted_message.get("parent_id") != root_id:
             raise ValueError("The reply does not point to the root message.")
-        # endregion post-reply
         stage(5, "Receiver posted a required-parent reply")
 
         exact = await sender.read_message(address=address, cycle_id=cycle_id, message_id=reply_id)
@@ -178,7 +170,6 @@ async def run() -> None:
             raise ValueError("The root did not have the expected direct reply.")
         stage(8, "Sender listed the root's direct replies")
 
-        # region close-cycle
         await sender.close_cycle(
             address=address,
             expected_cycle_id=cycle_id,
@@ -188,7 +179,6 @@ async def run() -> None:
         retained = await receiver.read_tree(address=address, cycle_id=cycle_id)
         if len(require_list(retained.get("nodes"), "the retained tree")) != 2:
             raise ValueError("The closed cycle did not keep its immutable tree.")
-        # endregion close-cycle
         stage(9, "Closed the cycle; the address still reads it")
         print("\nYour first StarTunnel exchange is complete.")
     finally:

@@ -140,7 +140,9 @@ returns `413 entry_budget_too_small`.
 
 If there is no active cycle, the response includes the current tunnel status
 and activity cursor. It sets `cycle` and `root` to `null` and returns no past
-cycle content.
+cycle content. If the current cycle has expired, entry and tunnel status report
+`dormant` before maintenance records the closure. These reads do not change the
+stored lifecycle state.
 
 ## Beacon discovery
 

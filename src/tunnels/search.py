@@ -15,10 +15,11 @@ from django.db.models.expressions import RawSQL
 from django.db.models.functions import Cast, Coalesce
 
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
 from core.limits import MAX_CORRELATION_ID_CHARACTERS
 
-from .access import limits_for, resolve_tunnel, select_cycle
+from .access import resolve_tunnel, select_cycle
 from .models import Cycle, Message, Tunnel
 from .payloads import validate_storable_text
 
@@ -180,7 +181,7 @@ def search_messages(
 ) -> SearchPage:
     """Search one authorized cycle with fixed snapshot and resource bounds."""
 
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_search_results:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_search_results}.")
     missing_cursor_values = (after_rank is None, after_sequence is None, after_message_id is None)
@@ -209,10 +210,9 @@ def search_messages(
         )
     ):
         raise InvalidRequest("Provide query text or at least one metadata filter.")
+    tunnel = resolve_tunnel(credential=credential, address=address)
     if connection.vendor != "postgresql":
         raise DependencyUnavailable("PostgreSQL search is not available.")
-
-    tunnel = resolve_tunnel(credential=credential, address=address)
     cycle = select_cycle(tunnel=tunnel, cycle_id=cycle_id)
     current_sequence = max(cycle.next_sequence - 1, 0)
     high_water = current_sequence if snapshot_sequence is None else snapshot_sequence

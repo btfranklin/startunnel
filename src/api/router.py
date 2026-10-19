@@ -518,22 +518,28 @@ def _page_cursor_values(
     )
 
 
-def _tree_response(page: TreePage) -> TreeResponse:
-    snapshot_cursor = cursors.encode_cursor(
-        "tree-snapshot",
-        tunnel_id=str(page.tunnel.id),
-        cycle_id=str(page.cycle.id),
-        snapshot_sequence=page.snapshot_sequence,
+def _page_cursors(
+    kind: str,
+    page: TreePage | ReplyPage | SubtreePage | LeafPage,
+    **extra: str | int,
+) -> tuple[str, str | None]:
+    values = {
+        "tunnel_id": str(page.tunnel.id),
+        "cycle_id": str(page.cycle.id),
+        "snapshot_sequence": page.snapshot_sequence,
+        **extra,
+    }
+    snapshot = cursors.encode_cursor(f"{kind}-snapshot", **values)
+    continuation = (
+        cursors.encode_cursor(f"{kind}-page", **values, after_sequence=page.next_after_sequence)
+        if page.next_after_sequence is not None
+        else None
     )
-    next_page_cursor = None
-    if page.next_after_sequence is not None:
-        next_page_cursor = cursors.encode_cursor(
-            "tree-page",
-            tunnel_id=str(page.tunnel.id),
-            cycle_id=str(page.cycle.id),
-            snapshot_sequence=page.snapshot_sequence,
-            after_sequence=page.next_after_sequence,
-        )
+    return snapshot, continuation
+
+
+def _tree_response(page: TreePage) -> TreeResponse:
+    snapshot_cursor, next_page_cursor = _page_cursors("tree", page)
     if page.cycle.root_message_id is None:
         raise InvalidRequest("The cycle root is not available.")
     return TreeResponse(
@@ -625,23 +631,13 @@ def read_tunnel_branch(request: HttpRequest, payload: BranchRequest) -> BranchRe
 
 
 def _reply_page_response(page: ReplyPage) -> RepliesResponse:
-    cursor_values = {
-        "tunnel_id": str(page.tunnel.id),
-        "cycle_id": str(page.cycle.id),
-        "parent_id": str(page.parent.id),
-        "snapshot_sequence": page.snapshot_sequence,
-    }
-    next_page_cursor = None
-    if page.next_after_sequence is not None:
-        next_page_cursor = cursors.encode_cursor(
-            "replies-page",
-            **cursor_values,
-            after_sequence=page.next_after_sequence,
-        )
+    snapshot_cursor, next_page_cursor = _page_cursors(
+        "replies", page, parent_id=str(page.parent.id)
+    )
     return RepliesResponse(
         parent_id=page.parent.id,
         messages=[MessageResponse.model_validate(message_payload(item)) for item in page.messages],
-        snapshot_cursor=cursors.encode_cursor("replies-snapshot", **cursor_values),
+        snapshot_cursor=snapshot_cursor,
         next_page_cursor=next_page_cursor,
         complete=page.complete,
     )
@@ -673,25 +669,9 @@ def read_tunnel_replies(request: HttpRequest, payload: RepliesRequest) -> Replie
 
 
 def _subtree_response(page: SubtreePage, *, max_depth: int) -> SubtreeResponse:
-    snapshot_cursor = cursors.encode_cursor(
-        "subtree-snapshot",
-        tunnel_id=str(page.tunnel.id),
-        cycle_id=str(page.cycle.id),
-        message_id=str(page.root.id),
-        max_depth=max_depth,
-        snapshot_sequence=page.snapshot_sequence,
+    snapshot_cursor, next_page_cursor = _page_cursors(
+        "subtree", page, message_id=str(page.root.id), max_depth=max_depth
     )
-    next_page_cursor = None
-    if page.next_after_sequence is not None:
-        next_page_cursor = cursors.encode_cursor(
-            "subtree-page",
-            tunnel_id=str(page.tunnel.id),
-            cycle_id=str(page.cycle.id),
-            message_id=str(page.root.id),
-            max_depth=max_depth,
-            snapshot_sequence=page.snapshot_sequence,
-            after_sequence=page.next_after_sequence,
-        )
     return SubtreeResponse(
         cycle_id=page.cycle.id,
         root_id=page.root.id,
@@ -731,21 +711,7 @@ def read_tunnel_subtree(request: HttpRequest, payload: SubtreeRequest) -> Subtre
 
 
 def _leaves_response(page: LeafPage) -> LeavesResponse:
-    snapshot_cursor = cursors.encode_cursor(
-        "leaves-snapshot",
-        tunnel_id=str(page.tunnel.id),
-        cycle_id=str(page.cycle.id),
-        snapshot_sequence=page.snapshot_sequence,
-    )
-    next_page_cursor = None
-    if page.next_after_sequence is not None:
-        next_page_cursor = cursors.encode_cursor(
-            "leaves-page",
-            tunnel_id=str(page.tunnel.id),
-            cycle_id=str(page.cycle.id),
-            snapshot_sequence=page.snapshot_sequence,
-            after_sequence=page.next_after_sequence,
-        )
+    snapshot_cursor, next_page_cursor = _page_cursors("leaves", page)
     return LeavesResponse(
         cycle_id=page.cycle.id,
         leaves=[

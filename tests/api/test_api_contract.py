@@ -8,10 +8,13 @@ from datetime import timedelta
 from typing import Any, cast
 
 import pytest
-from django.db import IntegrityError, OperationalError
+from django.db import IntegrityError, OperationalError, connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from agents.models import AgentCredential
+from agents.services import authenticate_key
 from tunnels.codec import encode_token
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress
 
@@ -814,3 +817,43 @@ def test_expired_cycle_rejects_reply_without_mutation(
     )
     _assert_safe_error(response, status=409, code="cycle_closed")
     assert Message.objects.filter(cycle_id=created["cycle"]["id"]).count() == 1
+
+
+@pytest.mark.parametrize(("path", "expected_checks"), [("tree", 2), ("enter", 3)])
+def test_address_reads_check_credentials_without_a_separate_limits_query(
+    client: Client, credential_factory: Any, path: str, expected_checks: int
+) -> None:
+    _, key = credential_factory()
+    created = _create_global(client, key, f"api-credential-query-{path}")
+    with CaptureQueriesContext(connection) as queries:
+        response = _post(
+            client,
+            f"/api/v1/{path}",
+            {"address": created["tunnel"]["address"]},
+            key=key,
+        )
+    assert response.status_code == 200, response.content
+    credential_table = connection.ops.quote_name(AgentCredential._meta.db_table)
+    credential_reads = [
+        query
+        for query in queries
+        if query["sql"].lstrip().startswith("SELECT") and f"FROM {credential_table}" in query["sql"]
+    ]
+    assert len(credential_reads) == expected_checks
+
+
+def test_address_read_rechecks_a_key_revoked_after_authentication(
+    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, key = credential_factory()
+    created = _create_global(client, key, "api-revoke-after-auth-create")
+
+    def authenticate_then_revoke(token: str) -> AgentCredential:
+        credential = authenticate_key(token)
+        AgentCredential.objects.filter(pk=credential.pk).update(revoked_at=timezone.now())
+        return credential
+
+    monkeypatch.setattr("api.auth.authenticate_key", authenticate_then_revoke)
+    response = _post(client, "/api/v1/tree", {"address": created["tunnel"]["address"]}, key=key)
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_credential"

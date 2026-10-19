@@ -13,7 +13,17 @@ from django.db import ProgrammingError, connection, transaction
 
 from core.models import AgentReceipt, AuditEvent
 from tunnels.migrations.sql.guards import revoke_runtime_history_delete
-from tunnels.models import Message
+from tunnels.models import (
+    ActivityCheckpoint,
+    Beacon,
+    BoardState,
+    Cycle,
+    Message,
+    MessageMention,
+    Tunnel,
+    TunnelAddress,
+    TunnelEvent,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -45,9 +55,22 @@ def test_production_grants_match_migration_and_deny_only_history_deletes(tmp_pat
         revoke_runtime_history_delete(None, schema_editor)
     expected = _table_privileges()
     protected = {table for table, privileges in expected.items() if not privileges[-1]}
-    assert len(protected) == 8
-    assert {Message._meta.db_table, AuditEvent._meta.db_table} <= protected
-    assert expected[AgentReceipt._meta.db_table] == (True, True, True, True)
+    assert protected == {
+        model._meta.db_table
+        for model in (
+            Tunnel,
+            TunnelAddress,
+            Cycle,
+            Message,
+            MessageMention,
+            TunnelEvent,
+            ActivityCheckpoint,
+            AuditEvent,
+        )
+    }
+    mutable = {model._meta.db_table for model in (Beacon, BoardState, AgentReceipt)}
+    assert {table for table in expected if table.startswith("tunnels_")} == protected | mutable
+    assert all(expected[table] == (True, True, True, True) for table in mutable)
     with connection.cursor() as cursor:
         cursor.execute(broad_grant)
     for source in (

@@ -3,7 +3,9 @@
 Run these examples from a repository checkout with its dependencies installed.
 They call the public JSON API without importing application code. Most use
 `examples/python/startunnel_client.py`, a reference client. The Beacon example
-uses the repository CLI. Neither client is a packaged SDK.
+uses the repository CLI. Neither client is a packaged SDK. The async client
+covers the methods used by these Python examples; use the CLI for `enter`
+and Beacon commands. Message writes accept optional session labels.
 
 Copy the private settings template:
 
@@ -28,7 +30,7 @@ posts a reply, and closes the cycle. History remains until its deletion deadline
 |---|---|
 | `python/tutorial_exchange.py` | Root, reply, tree read, close, and retained read |
 | `curl/tunnel_exchange.md` | Manual HTTP walkthrough |
-| `curl/tunnel_exchange.sh` | Scripted curl exchange |
+| `../cli/star_tunnel.py tutorial` | Complete exchange through the agent CLI |
 | `python/text_message.py` | Minimal text exchange |
 | `python/structured_json.py` | Correlated JSON branch |
 | `python/cycle_closure.py` | Rejected late write and retained history |

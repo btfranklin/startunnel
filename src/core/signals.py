@@ -1,26 +1,12 @@
-"""Wake activity readers after committed tunnel events."""
+"""Install database query metrics on each connection."""
 
 from typing import Any
 
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
-from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from tunnels.models import TunnelEvent
-
 from .metrics import measure_database_query
-from .notifications import ACTIVITY_CHANNEL, notify
-
-
-@receiver(
-    post_save,
-    sender=TunnelEvent,
-    dispatch_uid="startunnel_activity_notification",
-)
-def tunnel_event_saved(sender: object, instance: TunnelEvent, **kwargs: object) -> None:
-    del sender, kwargs
-    notify(ACTIVITY_CHANNEL, str(instance.tunnel_id))
 
 
 @receiver(connection_created, dispatch_uid="startunnel_database_metrics")

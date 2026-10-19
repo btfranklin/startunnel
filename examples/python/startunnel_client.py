@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -124,6 +123,7 @@ class StarTunnelClient:
         expires_in_seconds: int | None = None,
         root_mentions: list[str] | None = None,
         root_correlation_id: str | None = None,
+        root_session: str | None = None,
     ) -> JsonObject:
         """Create a stable tunnel and its first immutable root message."""
 
@@ -134,6 +134,7 @@ class StarTunnelClient:
             expires_in_seconds=expires_in_seconds,
             root_mentions=root_mentions,
             root_correlation_id=root_correlation_id,
+            root_session=root_session,
         )
         return await self._json_request(
             "POST",
@@ -152,6 +153,7 @@ class StarTunnelClient:
         idempotency_key: str,
         mentions: list[str] | None = None,
         correlation_id: str | None = None,
+        session: str | None = None,
     ) -> JsonObject:
         """Add one immutable reply below a required parent message."""
 
@@ -164,6 +166,7 @@ class StarTunnelClient:
                 content=content,
                 mentions=mentions,
                 correlation_id=correlation_id,
+                session=session,
             ),
             idempotency_key=idempotency_key,
             expected={200, 201},
@@ -411,7 +414,7 @@ class StarTunnelClient:
     ) -> None:
         """Close the active cycle without retiring its stable tunnel address."""
 
-        await self._empty_request(
+        await self._request(
             "POST",
             "/api/v1/cycles/close",
             json={"address": address, "expected_cycle_id": expected_cycle_id},
@@ -447,6 +450,7 @@ class StarTunnelClient:
         idempotency_key: str,
         cycle_label: str = "",
         expires_in_seconds: int | None = None,
+        root_session: str | None = None,
     ) -> JsonObject:
         """Start a rooted cycle in a dormant tunnel."""
 
@@ -459,6 +463,7 @@ class StarTunnelClient:
                 root_content=root_content,
                 cycle_label=cycle_label,
                 expires_in_seconds=expires_in_seconds,
+                root_session=root_session,
             ),
             idempotency_key=idempotency_key,
             expected={201},
@@ -474,6 +479,7 @@ class StarTunnelClient:
         idempotency_key: str,
         cycle_label: str = "",
         expires_in_seconds: int | None = None,
+        root_session: str | None = None,
     ) -> JsonObject:
         """Atomically replace the active cycle under the same address."""
 
@@ -483,6 +489,7 @@ class StarTunnelClient:
             root_content=root_content,
             cycle_label=cycle_label,
             expires_in_seconds=expires_in_seconds,
+            root_session=root_session,
         )
         body["expected_cycle_id"] = expected_cycle_id
         return await self._json_request(
@@ -502,10 +509,13 @@ class StarTunnelClient:
         expires_in_seconds: int | None,
         root_mentions: list[str] | None,
         root_correlation_id: str | None,
+        root_session: str | None,
     ) -> JsonObject:
         root: JsonObject = {"content": root_content, "mentions": list(root_mentions or [])}
         if root_correlation_id is not None:
             root["correlation_id"] = root_correlation_id
+        if root_session is not None:
+            root["session"] = root_session
         cycle: JsonObject = {"label": cycle_label, "root": root}
         if expires_in_seconds is not None:
             cycle["expires_in_seconds"] = expires_in_seconds
@@ -519,6 +529,7 @@ class StarTunnelClient:
         content: JsonObject,
         mentions: list[str] | None,
         correlation_id: str | None,
+        session: str | None,
     ) -> JsonObject:
         body: JsonObject = {
             "address": address,
@@ -528,6 +539,8 @@ class StarTunnelClient:
         }
         if correlation_id is not None:
             body["correlation_id"] = correlation_id
+        if session is not None:
+            body["session"] = session
         return body
 
     @staticmethod
@@ -659,10 +672,14 @@ class StarTunnelClient:
         root_content: JsonObject,
         cycle_label: str,
         expires_in_seconds: int | None,
+        root_session: str | None,
     ) -> JsonObject:
+        root: JsonObject = {"content": root_content, "mentions": []}
+        if root_session is not None:
+            root["session"] = root_session
         cycle: JsonObject = {
             "label": cycle_label,
-            "root": {"content": root_content, "mentions": []},
+            "root": root,
         }
         if expires_in_seconds is not None:
             cycle["expires_in_seconds"] = expires_in_seconds
@@ -685,7 +702,6 @@ class StarTunnelClient:
         path: str,
         *,
         json: JsonObject | None = None,
-        params: Mapping[str, str | int] | None = None,
         idempotency_key: str | None = None,
         expected: set[int],
     ) -> JsonObject:
@@ -693,28 +709,10 @@ class StarTunnelClient:
             method,
             path,
             json=json,
-            params=params,
             idempotency_key=idempotency_key,
             expected=expected,
         )
         return self._as_object(response)
-
-    async def _empty_request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json: JsonObject | None = None,
-        idempotency_key: str | None = None,
-        expected: set[int],
-    ) -> None:
-        await self._request(
-            method,
-            path,
-            json=json,
-            idempotency_key=idempotency_key,
-            expected=expected,
-        )
 
     async def _request(
         self,
@@ -722,7 +720,6 @@ class StarTunnelClient:
         path: str,
         *,
         json: JsonObject | None = None,
-        params: Mapping[str, str | int] | None = None,
         idempotency_key: str | None = None,
         expected: set[int],
     ) -> httpx.Response:
@@ -732,7 +729,6 @@ class StarTunnelClient:
                 method,
                 path,
                 json=json,
-                params=params,
                 headers=headers,
             )
         except httpx.RequestError as error:

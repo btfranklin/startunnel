@@ -36,6 +36,7 @@ from core.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_ba
 from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
 from core.rate_limits import _consume, consume_login_attempt
+from tunnels.beacons import publish_beacon
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.models import Cycle, Tunnel
 
@@ -176,7 +177,7 @@ def test_instance_tunnel_quota_cannot_be_exceeded_concurrently(
 ) -> None:
     credentials = [credential_factory(name=f"Quota agent {index}")[0] for index in range(4)]
     limits = replace(Limits(), non_retired_tunnels=1)
-    monkeypatch.setattr("tunnels.cycles.limits_for", lambda credential: limits)
+    monkeypatch.setattr("tunnels.cycles.instance_limits.effective_limits", lambda: limits)
     barrier = threading.Barrier(len(credentials))
     with ThreadPoolExecutor(max_workers=len(credentials)) as executor:
         results = list(
@@ -210,7 +211,10 @@ def test_notifications_follow_commit_and_rollback() -> None:
         assert list(listener.notifies(timeout=0.2, stop_after=1)) == []
 
 
-def test_bulk_lifecycle_events_wake_activity_listeners(credential_factory: Any) -> None:
+@pytest.mark.parametrize("with_beacon", [False, True])
+def test_bulk_lifecycle_events_wake_activity_listeners(
+    credential_factory: Any, with_beacon: bool
+) -> None:
     credential, _ = credential_factory(name="Lifecycle notifier")
     with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
         listener.execute(f"LISTEN {ACTIVITY_CHANNEL}")
@@ -222,14 +226,26 @@ def test_bulk_lifecycle_events_wake_activity_listeners(credential_factory: Any) 
         first = list(listener.notifies(timeout=2, stop_after=1))
         assert [item.payload for item in first] == [str(created.tunnel.id)]
 
-        close_cycle(
-            credential=credential,
-            idempotency_key="lifecycle-notify-close",
-            address=created.address,
-            expected_cycle_id=created.cycle.id,
-        )
+        if with_beacon:
+            publish_beacon(
+                credential=credential,
+                idempotency_key="lifecycle-notify-publish",
+                address=created.address,
+                text="Review this.",
+            )
+            published = list(listener.notifies(timeout=2, stop_after=1))
+            assert [item.payload for item in published] == [str(created.tunnel.id)]
+        with transaction.atomic():
+            close_cycle(
+                credential=credential,
+                idempotency_key="lifecycle-notify-close",
+                address=created.address,
+                expected_cycle_id=created.cycle.id,
+            )
+            assert list(listener.notifies(timeout=0.1, stop_after=1)) == []
         second = list(listener.notifies(timeout=2, stop_after=1))
         assert [item.payload for item in second] == [str(created.tunnel.id)]
+        assert list(listener.notifies(timeout=0.2, stop_after=1)) == []
 
 
 @pytest.mark.asyncio

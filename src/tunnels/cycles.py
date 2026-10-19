@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from agents.models import AgentCredential
+from core import limits as instance_limits
 from core.audit import record_event
 from core.errors import (
     CycleClosed,
@@ -32,13 +33,12 @@ from core.limits import MAX_CYCLE_SECONDS, MAX_LABEL_CHARACTERS, MIN_CYCLE_SECON
 from core.logging import current_request_id
 from core.metrics import TUNNELS_CREATED
 from core.models import AgentReceipt
-from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
+from core.notifications import notify_maintenance
 
 from .access import (
     active_cycle,
     credential_is_active,
     cycle_is_readable,
-    limits_for,
     resolve_tunnel,
     select_cycle,
 )
@@ -47,6 +47,7 @@ from .codec import (
     display_address,
     encode_token,
 )
+from .events import append_events
 from .messages import (
     _add_session_request_data,
     _create_message,
@@ -208,7 +209,9 @@ def create_tunnel(
     root_correlation_id: str | None = None,
     root_session: str | None = None,
 ) -> CreatedTunnel:
-    limits = limits_for(credential)
+    if not credential_is_active(credential):
+        raise InvalidCredential()
+    limits = instance_limits.effective_limits()
     seconds = _cycle_lifetime(expires_in_seconds)
     tunnel_label = _validate_label(label, field="A tunnel label")
     normalized_cycle_label = _validate_label(cycle_label, field="A cycle label")
@@ -285,14 +288,12 @@ def create_tunnel(
         label=tunnel_label,
         state=Tunnel.State.ACTIVE,
         next_cycle_number=2,
-        next_event_position=3,
     )
     _address_row, address = _allocate_random_address(tunnel=tunnel, generation=1)
     opened = _open_cycle(
         tunnel=tunnel,
         credential=credential,
         number=1,
-        start_position=1,
         label=normalized_cycle_label,
         expires_at=now + timedelta(seconds=seconds),
         payload=root_payload,
@@ -376,7 +377,7 @@ def list_cycles(
     before_number: int | None = None,
     snapshot_number: int | None = None,
 ) -> CyclePage:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     if limit < 1 or limit > limits.maximum_list_page:
         raise InvalidRequest(f"limit must be from 1 through {limits.maximum_list_page}.")
     tunnel = resolve_tunnel(credential=credential, address=address)
@@ -434,7 +435,6 @@ def _open_cycle(
     tunnel: Tunnel,
     credential: AgentCredential,
     number: int,
-    start_position: int,
     expires_at: datetime,
     label: str,
     payload: ValidatedPayload,
@@ -442,7 +442,6 @@ def _open_cycle(
     mentions: list[AgentCredential],
     session: str | None = None,
 ) -> StartedCycle:
-    message_position = start_position + 1
     cycle = Cycle.objects.create(
         tunnel=tunnel,
         creator=credential,
@@ -469,24 +468,14 @@ def _open_cycle(
     cycle.message_count = 1
     cycle.content_bytes = root.byte_count
     cycle.save(update_fields=["root_message", "message_count", "content_bytes"])
-    TunnelEvent.objects.bulk_create(
-        [
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                position=start_position,
-                event_type=TunnelEvent.Type.CYCLE_STARTED,
-            ),
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                message=root,
-                position=message_position,
-                event_type=TunnelEvent.Type.MESSAGE_POSTED,
-            ),
-        ]
+    message_position = append_events(
+        tunnel=tunnel,
+        events=[
+            TunnelEvent(cycle=cycle, event_type=TunnelEvent.Type.CYCLE_STARTED),
+            TunnelEvent(cycle=cycle, message=root, event_type=TunnelEvent.Type.MESSAGE_POSTED),
+        ],
+        update_fields=("state", "dormant_at", "next_cycle_number"),
     )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
     return StartedCycle(
         tunnel=tunnel,
         cycle=cycle,
@@ -520,17 +509,13 @@ def _start_cycle_locked(
     if tunnel.state != Tunnel.State.DORMANT or previous is not None:
         raise LifecycleConflict()
     number = tunnel.next_cycle_number
-    start_position = tunnel.next_event_position
     tunnel.state = Tunnel.State.ACTIVE
     tunnel.dormant_at = None
     tunnel.next_cycle_number = number + 1
-    tunnel.next_event_position = start_position + 2
-    tunnel.save(update_fields=["state", "dormant_at", "next_cycle_number", "next_event_position"])
     opened = _open_cycle(
         tunnel=tunnel,
         credential=credential,
         number=number,
-        start_position=start_position,
         expires_at=now + timedelta(seconds=seconds),
         label=label,
         payload=payload,
@@ -612,7 +597,7 @@ def start_cycle(
     root_correlation_id: str | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     seconds, label, payload, correlation, mention_ids = _prepare_cycle_root(
         limits=limits,
         root_content=root_content,
@@ -705,7 +690,7 @@ def rollover_cycle(
     root_correlation_id: str | None = None,
     root_session: str | None = None,
 ) -> StartedCycle:
-    limits = limits_for(credential)
+    limits = instance_limits.effective_limits()
     seconds, label, payload, correlation, mention_ids = _prepare_cycle_root(
         limits=limits,
         root_content=root_content,
@@ -799,8 +784,6 @@ def _close_locked_cycle(
         if reason == "expired"
         else settings.STARTUNNEL_HISTORY_RETENTION_SECONDS
     )
-    close_position = tunnel.next_event_position
-    dormant_position = close_position + 1
     cycle.state = Cycle.State.CLOSED
     cycle.closed_at = closed_at
     cycle.retention_seconds = retention_seconds
@@ -823,24 +806,17 @@ def _close_locked_cycle(
         transaction.on_commit(notify_maintenance)
     tunnel.state = Tunnel.State.DORMANT
     tunnel.dormant_at = now
-    tunnel.next_event_position = dormant_position + 1
-    tunnel.save(update_fields=["state", "dormant_at", "next_event_position"])
-    TunnelEvent.objects.bulk_create(
-        [
+    append_events(
+        tunnel=tunnel,
+        events=[
             TunnelEvent(
-                tunnel=tunnel,
                 cycle=cycle,
-                position=close_position,
                 event_type=TunnelEvent.Type.CYCLE_CLOSED,
                 metadata={"reason": reason},
             ),
-            TunnelEvent(
-                tunnel=tunnel,
-                cycle=cycle,
-                position=dormant_position,
-                event_type=TunnelEvent.Type.TUNNEL_DORMANT,
-            ),
-        ]
+            TunnelEvent(cycle=cycle, event_type=TunnelEvent.Type.TUNNEL_DORMANT),
+        ],
+        update_fields=("state", "dormant_at"),
     )
     from .beacons import end_beacon_for_cycle_locked
 
@@ -849,7 +825,6 @@ def _close_locked_cycle(
         cycle=cycle,
         reason="expired" if reason == "expired" else "cycle_closed",
     )
-    notify(ACTIVITY_CHANNEL, str(tunnel.id))
     record_event(
         actor_credential=actor_credential,
         actor_user=actor_user,

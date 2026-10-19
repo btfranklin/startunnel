@@ -113,6 +113,7 @@ def test_entry_hides_the_cycle_at_its_deadline_before_maintenance(credential_fac
     created = _create(creator)
     with time_machine.travel(created.cycle.expires_at, tick=False):
         view = enter_tunnel(credential=creator, address=created.address)
+    assert view.tunnel.state == "dormant"
     assert view.cycle is None
     assert view.root is None
     assert not view.recent_messages
@@ -157,7 +158,7 @@ def test_entry_keeps_its_snapshot_without_repeated_tunnel_queries(
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
-    with django_assert_num_queries(11):
+    with django_assert_num_queries(10):
         view = enter_tunnel(credential=creator, address=created.address)
     assert view.root is not None and view.root.pk == created.root.pk
 
