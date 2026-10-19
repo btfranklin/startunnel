@@ -12,7 +12,7 @@ from django.http.response import HttpResponseBase
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
-from tunnels.errors import TunnelDomainError
+from core.errors import DomainError
 
 from .admin_commands import AccountPassword
 from .admin_services import execute_admin_operation
@@ -51,7 +51,7 @@ def password_change(request: HttpRequest) -> HttpResponse:
                 key=key,
                 request_data=request_data,
             )
-        except TunnelDomainError as error:
+        except DomainError as error:
             form.add_error(None, error.safe_message)
         else:
             user.refresh_from_db()

@@ -9,7 +9,7 @@ import pytest
 from api.router import _page_cursor_values
 from api.schemas import LeavesRequest, RepliesRequest, SubtreeRequest, TreeRequest
 from core.cursors import encode_cursor
-from tunnels.errors import InvalidCursor, InvalidRequest
+from core.errors import InvalidCursor, InvalidRequest
 
 PageRequest = TreeRequest | RepliesRequest | SubtreeRequest | LeavesRequest
 PAGE_KINDS = [

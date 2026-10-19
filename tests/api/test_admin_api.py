@@ -16,10 +16,10 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
-from accounts.models import AdminOperation, User
+from accounts.models import AdminReceipt, User
 from agents.models import AgentCredential
-from tunnels.maintenance import cleanup_once
-from tunnels.models import AuditEvent
+from core.maintenance import cleanup_once
+from core.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -57,7 +57,7 @@ def test_agent_creation_errors_are_safe_audited_and_atomic(
     assert response.status_code == status
     assert response.json()["error"]["code"] == code
     assert AgentCredential.objects.count() == 1
-    assert not AdminOperation.objects.exists()
+    assert not AdminReceipt.objects.exists()
     event = AuditEvent.objects.get(action="admin.operation_failed")
     assert event.actor_admin_credential == admin_key
     assert event.channel == "admin_api"
@@ -79,7 +79,7 @@ def test_account_creation_rejects_case_only_username_collision(
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
     assert User.objects.count() == 1
-    assert not AdminOperation.objects.exists()
+    assert not AdminReceipt.objects.exists()
     event = AuditEvent.objects.get(action="admin.operation_failed")
     assert event.actor_admin_credential == admin_key
     assert event.metadata["operation"] == "accounts.create"
@@ -269,7 +269,7 @@ def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: An
     assert replay.json() == created
     inspect = client.get("/api/v1/admin/operations/" + created["operation"]["id"], **headers)
     assert "secret" not in inspect.content.decode()
-    assert AdminOperation.objects.count() == 1
+    assert AdminReceipt.objects.count() == 1
     assert (
         client.get("/api/v1/admin/accounts/" + created["resource"]["id"], **headers).status_code
         == 200
@@ -308,7 +308,7 @@ def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory
     )
     assert response.status_code == 200
     result = response.json()
-    receipt = AdminOperation.objects.get(pk=result["operation"]["id"])
+    receipt = AdminReceipt.objects.get(pk=result["operation"]["id"])
     assert (
         timedelta(hours=24, seconds=-1)
         < receipt.expires_at - receipt.created_at
@@ -319,9 +319,9 @@ def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory
         assert client.get(path, **headers).status_code == 200
     with time_machine.travel(receipt.expires_at, tick=False):
         assert client.get(path, **headers).status_code == 400
-        assert AdminOperation.objects.filter(pk=receipt.pk).exists()
+        assert AdminReceipt.objects.filter(pk=receipt.pk).exists()
         assert cleanup_once()["admin_operations_purged"] == 1
-        assert not AdminOperation.objects.filter(pk=receipt.pk).exists()
+        assert not AdminReceipt.objects.filter(pk=receipt.pk).exists()
         assert AuditEvent.objects.filter(pk=result["operation"]["audit_event_id"]).exists()
         assert client.get("/api/v1/admin/me", **headers).status_code == 200
 
@@ -382,4 +382,4 @@ def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
     assert (
         client.get("/api/v1/admin/status", HTTP_AUTHORIZATION="Bearer " + second).status_code == 200
     )
-    assert AdminOperation.objects.count() == 1
+    assert AdminReceipt.objects.count() == 1

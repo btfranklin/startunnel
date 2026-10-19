@@ -17,7 +17,7 @@ from agents.services import (
     validate_key,
 )
 from api.auth import activity_bearer, agent_bearer
-from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
+from core.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 
 pytestmark = pytest.mark.django_db
 

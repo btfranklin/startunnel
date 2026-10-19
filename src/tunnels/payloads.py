@@ -8,9 +8,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.errors import InvalidRequest, PayloadTooLarge
 from core.limits import DEFAULT_LIMITS
-
-from .errors import InvalidRequest, PayloadTooLarge
 
 MAX_DEPTH = 32
 

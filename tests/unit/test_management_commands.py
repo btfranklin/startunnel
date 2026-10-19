@@ -20,16 +20,16 @@ from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import CredentialError, authenticate_key
 from core.management.commands import provision_live_agent_proof, provision_load_profile
-from tunnels.cycles import create_tunnel
-from tunnels.management.commands.maintenance_loop import (
+from core.management.commands.maintenance_loop import (
     Command as MaintenanceCommand,
 )
-from tunnels.management.commands.maintenance_loop import (
+from core.management.commands.maintenance_loop import (
     _connection_kwargs as maintenance_connection_kwargs,
 )
-from tunnels.management.commands.maintenance_loop import (
+from core.management.commands.maintenance_loop import (
     _should_report_cycle,
 )
+from tunnels.cycles import create_tunnel
 from tunnels.models import Tunnel
 
 pytestmark = pytest.mark.django_db
@@ -77,7 +77,7 @@ def test_runtime_inspection_handles_database_and_status_failures(
 
 def test_maintenance_once_outputs_safe_counts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.cleanup_once",
+        "core.management.commands.maintenance_loop.cleanup_once",
         lambda: {"cycles_closed": 2},
     )
     output = StringIO()
@@ -133,7 +133,7 @@ def test_sqlite_maintenance_loop_waits_until_deadline(
     command = MaintenanceCommand()
     monkeypatch.setattr(command, "_reconcile", lambda once: {"cycles_closed": 0})
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.next_deadline",
+        "core.management.commands.maintenance_loop.next_deadline",
         lambda **kwargs: __import__("django.utils.timezone", fromlist=["now"]).now(),
     )
     command._sqlite_loop(stop)  # type: ignore[arg-type]
@@ -167,14 +167,12 @@ def test_postgres_loop_drains_due_work_and_records_notification(
     stop = Stop()
     command = MaintenanceCommand()
     monkeypatch.setattr(command, "_reconcile", lambda once: next(reconciliations))
+    monkeypatch.setattr("core.management.commands.maintenance_loop.has_due_work", lambda: next(due))
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.has_due_work", lambda: next(due)
+        "core.management.commands.maintenance_loop.next_deadline", lambda **kwargs: None
     )
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.next_deadline", lambda **kwargs: None
-    )
-    monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.record_notification_wake",
+        "core.management.commands.maintenance_loop.record_notification_wake",
         lambda: wakes.append(True),
     )
     command._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
@@ -204,7 +202,7 @@ def test_postgres_loop_does_not_busy_loop_after_delete_failure(
         lambda once: {"cycle_delete_failures": 1},
     )
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.has_due_work",
+        "core.management.commands.maintenance_loop.has_due_work",
         lambda: (_ for _ in ()).throw(AssertionError("must not drain failed work")),
     )
 
@@ -212,7 +210,7 @@ def test_postgres_loop_does_not_busy_loop_after_delete_failure(
         assert skip_overdue_deletions
 
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.next_deadline", deadline_after_failure
+        "core.management.commands.maintenance_loop.next_deadline", deadline_after_failure
     )
     command._postgres_loop(Listener(), stop)  # type: ignore[arg-type]
 
@@ -239,6 +237,8 @@ def test_maintenance_recovers_from_orm_errors_with_backoff(
 
         def wait(self, seconds: float) -> bool:
             waits.append(seconds)
+            if len(waits) == 3:
+                self.stopped = True
             return self.stopped
 
     class Listener:
@@ -261,12 +261,11 @@ def test_maintenance_recovers_from_orm_errors_with_backoff(
 
     def cleanup() -> dict[str, int]:
         attempts.append(True)
-        if len(attempts) < 3:
+        if len(attempts) != 3:
             raise OperationalError("Synthetic SQL text must not enter logs.")
-        stop.set()
         return {"cycles_closed": 0}
 
-    module = "tunnels.management.commands.maintenance_loop."
+    module = "core.management.commands.maintenance_loop."
     monkeypatch.setattr(module + "threading.Event", lambda: stop)
     monkeypatch.setattr(module + "signal.signal", lambda *args: None)
     monkeypatch.setattr(module + "psycopg.connect", lambda **kwargs: Listener())
@@ -275,12 +274,12 @@ def test_maintenance_recovers_from_orm_errors_with_backoff(
     monkeypatch.setattr(module + "close_old_connections", lambda: closed.append(True))
     monkeypatch.setattr(module + "record_maintenance_error", errors.append)
     MaintenanceCommand().handle(once=False)
-    assert len(attempts) == 3
-    assert waits == [1.0, 2.0]
-    assert closed == [True, True]
-    assert errors == ["OperationalError", "OperationalError"]
+    assert len(attempts) == 4
+    assert waits == [1.0, 2.0, 1.0]
+    assert closed == [True, True, True]
+    assert errors == ["OperationalError", "OperationalError", "OperationalError"]
     events = [json.loads(SafeJsonFormatter().format(record)) for record in caplog.records]
-    assert len(events) == 2
+    assert len(events) == 3
     assert all(event["exception_type"] == "OperationalError" for event in events)
     assert "Synthetic SQL text" not in json.dumps(events)
 
@@ -302,17 +301,17 @@ def test_maintenance_handle_backs_off_after_postgres_error(
         def set(self) -> None:
             return None
 
-    monkeypatch.setattr("tunnels.management.commands.maintenance_loop.threading.Event", Stop)
+    monkeypatch.setattr("core.management.commands.maintenance_loop.threading.Event", Stop)
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.signal.signal", lambda *args: None
+        "core.management.commands.maintenance_loop.signal.signal", lambda *args: None
     )
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.psycopg.connect",
+        "core.management.commands.maintenance_loop.psycopg.connect",
         lambda **kwargs: (_ for _ in ()).throw(psycopg.OperationalError("down")),
     )
     errors: list[str] = []
     monkeypatch.setattr(
-        "tunnels.management.commands.maintenance_loop.record_maintenance_error",
+        "core.management.commands.maintenance_loop.record_maintenance_error",
         errors.append,
     )
     MaintenanceCommand().handle(once=False)

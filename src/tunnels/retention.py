@@ -7,9 +7,10 @@ from uuid import UUID
 
 from django.db import transaction
 
-from accounts.models import AdminOperation
+from accounts.models import AdminReceipt
+from core.models import AgentReceipt
 
-from .models import Beacon, Cycle, IdempotencyRecord, Message, Tunnel
+from .models import Beacon, Cycle, Message, Tunnel
 
 
 @transaction.atomic
@@ -41,8 +42,8 @@ def delete_due_cycle_content(*, cycle_id: UUID, now: datetime) -> bool:
             "content_bytes",
         ]
     )
-    IdempotencyRecord.objects.filter(resource_id__in=beacon_ids).update(response={})
-    AdminOperation.objects.filter(
+    AgentReceipt.objects.filter(resource_id__in=beacon_ids).update(response={})
+    AdminReceipt.objects.filter(
         operation="beacons.withdraw", response__resource__id__in=[str(id) for id in beacon_ids]
     ).update(response={})
     Beacon.objects.filter(cycle=cycle).delete()

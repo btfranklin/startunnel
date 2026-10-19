@@ -8,9 +8,9 @@ import pytest
 import time_machine
 from django.utils import timezone
 
-from tunnels.errors import IdempotencyConflict, InvalidRequest
-from tunnels.idempotency import begin, finish, validate_idempotency_key
-from tunnels.models import IdempotencyRecord
+from core.errors import IdempotencyConflict, InvalidRequest
+from core.idempotency import begin, finish, validate_idempotency_key
+from core.models import AgentReceipt
 
 pytestmark = pytest.mark.django_db
 
@@ -86,7 +86,7 @@ def test_expired_record_can_be_reused(credential_factory: Any, expired_seconds: 
     assert replacement.record.expires_at == now + timedelta(hours=24)
     assert replacement.record.response == {}
     assert replacement.record.resource_id is None
-    assert IdempotencyRecord.objects.count() == 1
+    assert AgentReceipt.objects.count() == 1
 
 
 def test_request_object_key_order_does_not_change_replay(credential_factory: Any) -> None:

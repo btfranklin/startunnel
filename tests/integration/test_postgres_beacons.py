@@ -11,9 +11,9 @@ import pytest
 from django.db import close_old_connections
 
 from agents.models import AgentCredential
+from core.errors import CycleClosed, LifecycleConflict
 from tunnels.beacons import beacon_data, beacon_queryset, publish_beacon, withdraw_beacon
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import CycleClosed, LifecycleConflict
 from tunnels.messages import post_reply
 from tunnels.models import Beacon, BoardState, TunnelEvent
 

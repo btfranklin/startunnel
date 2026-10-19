@@ -144,7 +144,7 @@ def test_fixed_maintenance_failure_keeps_cycle_id_and_safe_exception() -> None:
     except RuntimeError:
         exception_info = sys.exc_info()
     record = logging.LogRecord(
-        name="tunnels.maintenance",
+        name="core.maintenance",
         level=logging.ERROR,
         pathname=__file__,
         lineno=1,

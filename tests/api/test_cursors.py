@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from core.cursors import cursor_int, cursor_uuid, decode_cursor, encode_cursor
-from tunnels.errors import InvalidCursor
+from core.errors import InvalidCursor
 
 
 def test_cursor_round_trip_keeps_kind_and_typed_values() -> None:

@@ -16,14 +16,14 @@ from django.utils import timezone
 from accounts.admin_access import issue_admin_key
 from accounts.admin_commands import derive_secret
 from accounts.admin_data import agent_resource, key_resource
-from accounts.models import AdminOperation, User
+from accounts.models import AdminReceipt, User
 from agents.services import create_credential
-from tunnels.models import AuditEvent
+from core.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
 
-def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) -> AdminOperation:
+def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) -> AdminReceipt:
     canonical = json.dumps(
         {"operation": operation, "data": data},
         sort_keys=True,
@@ -31,7 +31,7 @@ def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) ->
         default=str,
         allow_nan=False,
     ).encode()
-    return AdminOperation.objects.create(
+    return AdminReceipt.objects.create(
         owner=actor,
         operation=operation,
         key_digest=hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), key.encode(), "sha256"),
@@ -41,7 +41,7 @@ def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) ->
     )
 
 
-def _store_response(receipt: AdminOperation, resource: dict[str, Any]) -> None:
+def _store_response(receipt: AdminReceipt, resource: dict[str, Any]) -> None:
     receipt.response = {
         "resource": resource,
         "operation": {"id": str(receipt.id), "audit_event_id": str(uuid4())},
@@ -98,7 +98,7 @@ def test_existing_key_receipt_keeps_uuid_and_datetime_spelling(
         assert response.content.decode().strip() == secret
     receipt.refresh_from_db()
     assert bytes(receipt.request_digest) == fingerprint
-    assert AdminOperation.objects.count() == 1
+    assert AdminReceipt.objects.count() == 1
     assert not AuditEvent.objects.filter(action="keys.create").exists()
 
 
@@ -133,4 +133,4 @@ def test_existing_agent_receipt_keeps_omitted_browser_defaults(
         assert response.status_code == 200, response.content
         assert response["X-Startunnel-Operation-Id"] == str(receipt.id)
         assert response.content.decode().strip() == secret
-    assert AdminOperation.objects.count() == 1
+    assert AdminReceipt.objects.count() == 1

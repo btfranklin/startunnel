@@ -12,9 +12,9 @@ from django.db import close_old_connections
 
 from accounts.models import User
 from agents.models import AgentCredential
+from core.errors import CycleClosed, LifecycleConflict, TunnelUnavailable
 from tunnels.admin_actions import retire_tunnel_as_admin, rotate_address_as_admin
 from tunnels.cycles import close_cycle, create_tunnel, rollover_cycle, start_cycle
-from tunnels.errors import CycleClosed, LifecycleConflict, TunnelUnavailable
 from tunnels.messages import post_reply
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
@@ -318,7 +318,7 @@ def test_retirement_racing_start_always_ends_retired(credential_factory: Any) ->
 def test_concurrent_identical_lifecycle_retries_replay_success(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
-    from tunnels.idempotency import find_replay
+    from core.idempotency import find_replay
 
     creator, _ = credential_factory()
     created = create_tunnel(

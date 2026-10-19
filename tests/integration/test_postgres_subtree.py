@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
+from core.errors import InvalidRequest
 from core.limits import Limits
 from tunnels.cycles import create_tunnel
-from tunnels.errors import InvalidRequest
 from tunnels.messages import get_subtree, post_reply
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]

@@ -14,8 +14,17 @@ from django.utils import timezone
 from accounts.admin_commands import BeaconWithdraw
 from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation
-from accounts.models import AdminOperation
+from accounts.models import AdminReceipt
 from core.cursors import decode_cursor, encode_cursor
+from core.errors import (
+    IdempotencyConflict,
+    InvalidCursor,
+    InvalidRequest,
+    LifecycleConflict,
+    TunnelUnavailable,
+)
+from core.maintenance import cleanup_once
+from core.models import AgentReceipt
 from tunnels.admin_actions import (
     retire_tunnel_as_admin,
     retirement_confirmation,
@@ -24,16 +33,8 @@ from tunnels.admin_actions import (
 )
 from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import (
-    IdempotencyConflict,
-    InvalidCursor,
-    InvalidRequest,
-    LifecycleConflict,
-    TunnelUnavailable,
-)
-from tunnels.maintenance import cleanup_once
 from tunnels.messages import post_reply
-from tunnels.models import Beacon, BoardState, Cycle, IdempotencyRecord, TunnelEvent
+from tunnels.models import Beacon, BoardState, Cycle, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
@@ -398,7 +399,7 @@ def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_facto
 
     assert delete_due_cycle_content(cycle_id=created.cycle.id, now=timezone.now())
     assert not Beacon.objects.filter(pk=result["id"]).exists()
-    receipts = list(IdempotencyRecord.objects.filter(resource_id=result["id"]))
+    receipts = list(AgentReceipt.objects.filter(resource_id=result["id"]))
     assert len(receipts) == 2
     assert all(receipt.response == {} for receipt in receipts)
     with pytest.raises(TunnelUnavailable):
@@ -446,7 +447,7 @@ def test_retention_clears_admin_beacon_summary_and_rejects_replay(
         )
 
     response = withdraw()
-    receipt = AdminOperation.objects.get(pk=response["operation"]["id"])
+    receipt = AdminReceipt.objects.get(pk=response["operation"]["id"])
     fingerprint = bytes(receipt.request_digest)
     close_cycle(
         credential=creator,
@@ -463,7 +464,7 @@ def test_retention_clears_admin_beacon_summary_and_rejects_replay(
     assert bytes(receipt.request_digest) == fingerprint
     with pytest.raises(InvalidRequest):
         withdraw()
-    assert AdminOperation.objects.count() == 1
+    assert AdminReceipt.objects.count() == 1
 
 
 @pytest.mark.parametrize("lifetime", [0, 86_401, True, 1.5])

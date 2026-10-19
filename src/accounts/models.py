@@ -75,9 +75,9 @@ class AdminCredential(models.Model):
         )
 
 
-class AdminOperation(models.Model):
+class AdminReceipt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="admin_operations")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="admin_receipts")
     operation = models.CharField(max_length=120)
     key_digest = models.BinaryField(max_length=32)
     request_digest = models.BinaryField(max_length=32)
@@ -89,6 +89,7 @@ class AdminOperation(models.Model):
     expires_at = models.DateTimeField(db_index=True)
 
     class Meta:
+        db_table = "accounts_adminoperation"
         constraints = [
             models.UniqueConstraint(
                 fields=["owner", "key_digest"], name="unique_admin_operation_key"

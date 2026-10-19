@@ -10,10 +10,10 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
+from core.errors import CycleClosed, CycleUnavailable, InvalidCredential, TunnelUnavailable
 from core.limits import Limits
 
 from .codec import InvalidAddress, canonical_address
-from .errors import CycleClosed, CycleUnavailable, InvalidCredential, TunnelUnavailable
 from .models import Cycle, Tunnel, TunnelAddress
 
 

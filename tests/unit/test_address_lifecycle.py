@@ -4,12 +4,13 @@ from typing import Any
 
 import pytest
 
+from core.errors import InvalidRequest, LifecycleConflict, TunnelUnavailable
+from core.models import AuditEvent
 from tunnels.admin_actions import retire_tunnel_as_admin, rotate_address_as_admin
 from tunnels.codec import display_address
 from tunnels.cycles import create_tunnel, get_tunnel_status
-from tunnels.errors import InvalidRequest, LifecycleConflict, TunnelUnavailable
 from tunnels.messages import post_reply
-from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress, TunnelEvent
+from tunnels.models import Cycle, Tunnel, TunnelAddress, TunnelEvent
 
 pytestmark = pytest.mark.django_db
 

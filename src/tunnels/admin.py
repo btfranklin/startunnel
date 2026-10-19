@@ -4,9 +4,7 @@ from core.admin import InspectionAdmin
 
 from .models import (
     ActivityCheckpoint,
-    AuditEvent,
     Cycle,
-    IdempotencyRecord,
     Message,
     MessageMention,
     Tunnel,
@@ -40,7 +38,5 @@ class TunnelEventAdmin(InspectionAdmin):
     list_display = ("id", "tunnel_id", "position", "event_type", "occurred_at")
 
 
-admin.site.register(IdempotencyRecord, InspectionAdmin)
-admin.site.register(AuditEvent, InspectionAdmin)
 admin.site.register(MessageMention, InspectionAdmin)
 admin.site.register(ActivityCheckpoint, InspectionAdmin)

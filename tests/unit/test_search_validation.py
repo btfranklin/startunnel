@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from core.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
 from tunnels.cycles import create_tunnel
-from tunnels.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
 from tunnels.messages import post_reply
 from tunnels.search import (
     SearchHit,

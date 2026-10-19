@@ -9,6 +9,7 @@ import pytest
 from django.db import DatabaseError, IntegrityError
 from django.utils import timezone
 
+from core.errors import DependencyUnavailable, RateLimited
 from core.limits import Limits
 from core.models import RateLimitBucket
 from core.rate_limits import (
@@ -17,7 +18,6 @@ from core.rate_limits import (
     consume_api_operation,
     consume_login_attempt,
 )
-from tunnels.errors import DependencyUnavailable, RateLimited
 
 pytestmark = pytest.mark.django_db
 

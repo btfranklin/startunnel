@@ -11,9 +11,9 @@ from asgiref.sync import async_to_sync
 from django.utils import timezone
 
 from core.cursors import decode_cursor, encode_cursor
+from core.errors import InvalidCredential, InvalidCursor, InvalidRequest
 from tunnels.beacons import BOARD_WAIT_CURSOR_KIND, publish_beacon, read_board, wait_for_board
 from tunnels.cycles import create_tunnel
-from tunnels.errors import InvalidCredential, InvalidCursor, InvalidRequest
 from tunnels.models import ActivityCheckpoint, Beacon, BoardState
 
 pytestmark = pytest.mark.django_db(transaction=True)

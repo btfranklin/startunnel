@@ -7,7 +7,8 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-from .errors import InvalidRequest
+from core.errors import InvalidRequest
+
 from .models import Cycle, Message
 
 

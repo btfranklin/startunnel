@@ -149,6 +149,11 @@ through the admin API. An exact retry must return the same operation receipt.
 The known address, messages, and checkpoint must remain. Accounts, credentials,
 and historical audit records must remain across both restores.
 
+Before the shared-record ownership migrations, the proof seeds audit records,
+agent and admin receipts, and content types with user and group permissions.
+The migrations must keep their tables, row IDs, permission IDs, and joins.
+An additional migration run must preserve those records and exact retries.
+
 The isolated runner removes its containers and volumes. Dumps remain inside
 the disposable container. Temporary snapshots and recovery keys stay private
 and are removed at exit. Output reports safe check names, not keys or content.

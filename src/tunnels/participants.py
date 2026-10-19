@@ -13,10 +13,10 @@ from uuid import UUID
 from django.db.models import Count, Max, Min, OuterRef, Subquery
 
 from agents.models import AgentCredential
+from core.errors import InvalidRequest
 from core.limits import DEFAULT_LIMITS
 
 from .access import limits_for, resolve_tunnel, select_cycle
-from .errors import InvalidRequest
 from .models import ActivityCheckpoint, Cycle, Message, MessageMention, Tunnel
 
 

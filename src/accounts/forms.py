@@ -12,8 +12,8 @@ from .models import User
 
 
 def _limit_login(form: AuthenticationForm) -> None:
+    from core.errors import RateLimited
     from core.rate_limits import consume_login_attempt
-    from tunnels.errors import RateLimited
 
     username = str(form.data.get("username", ""))
     source = client_ip(form.request) if form.request else "unknown"

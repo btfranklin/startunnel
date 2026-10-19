@@ -33,9 +33,9 @@ from accounts.admin_commands import (
 )
 from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation, list_admin_resources
-from accounts.models import AdminCredential, AdminOperation, User
-from tunnels.errors import IdempotencyConflict, InvalidCredential, InvalidRequest, LifecycleConflict
-from tunnels.models import AuditEvent
+from accounts.models import AdminCredential, AdminReceipt, User
+from core.errors import IdempotencyConflict, InvalidCredential, InvalidRequest, LifecycleConflict
+from core.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -85,7 +85,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
         allow_nan=False,
     ).encode()
     expected = hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), old_body, "sha256")
-    receipt = AdminOperation.objects.get(pk=first["operation"]["id"])
+    receipt = AdminReceipt.objects.get(pk=first["operation"]["id"])
     assert bytes(receipt.request_digest) == expected
     assert run(actor, TunnelStart, {**data, "root_session": None}, key) == first
     with pytest.raises(IdempotencyConflict):
@@ -121,7 +121,7 @@ def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
     assert not target.has_usable_password()
     credential = authenticate_admin_key(created["secret"])
     assert credential.owner == target
-    stored = AdminOperation.objects.get(pk=created["operation"]["id"])
+    stored = AdminReceipt.objects.get(pk=created["operation"]["id"])
     assert created["secret"] not in str(stored.response)
     event = AuditEvent.objects.get(pk=created["operation"]["audit_event_id"])
     assert event.actor_user == actor
@@ -235,7 +235,7 @@ def test_receipts_are_owner_scoped_and_keys_replay_only_when_available(user_fact
         run(other, AgentCreate, {"name": "worker"}, key)["operation"]["id"]
         != result["operation"]["id"]
     )
-    receipt = AdminOperation.objects.get(pk=result["operation"]["id"])
+    receipt = AdminReceipt.objects.get(pk=result["operation"]["id"])
     receipt.expires_at = timezone.now() - timedelta(seconds=1)
     receipt.save(update_fields=["expires_at"])
     assert (
@@ -411,7 +411,7 @@ def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
     with pytest.raises(InvalidRequest):
         run(actor, AccountCreate, {"username": "invalid-key-owner", "key_name": ""})
     assert User.objects.count() == initial
-    assert AdminOperation.objects.count() == 0
+    assert AdminReceipt.objects.count() == 0
     cases: list[tuple[type[AdminCommand], dict[str, Any]]] = [
         (AccountPassword, {"admin_id": str(actor.id), "password": "x"}),
         (
@@ -436,7 +436,7 @@ def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
             key=str(uuid4()),
             request_data={"name": "nonfinite", "bad": float("nan")},
         )
-    assert AdminOperation.objects.count() == 0
+    assert AdminReceipt.objects.count() == 0
 
 
 def test_audit_pages_are_chronological_and_filtered(user_factory: Any) -> None:

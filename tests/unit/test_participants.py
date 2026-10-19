@@ -10,10 +10,10 @@ from asgiref.sync import async_to_sync
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
+from core.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.admin_actions import start_cycle_as_admin
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
 from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint
 from tunnels.participants import list_participants

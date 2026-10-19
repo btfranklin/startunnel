@@ -13,10 +13,12 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from agents.models import AgentCredential
-from tunnels import cycles, maintenance, messages
+from core import maintenance
+from core.errors import CycleClosed
+from core.models import AgentReceipt
+from tunnels import cycles, messages
 from tunnels.access import resolve_tunnel
-from tunnels.errors import CycleClosed
-from tunnels.models import Cycle, IdempotencyRecord, Message, Tunnel, TunnelEvent
+from tunnels.models import Cycle, Message, Tunnel, TunnelEvent
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -151,10 +153,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
         TunnelEvent.Type.TUNNEL_DORMANT,
     ]
     assert tunnel.next_event_position == len(events) + 1
-    assert (
-        IdempotencyRecord.objects.filter(credential=writer, operation="post_reply").exists()
-        is posted
-    )
+    assert AgentReceipt.objects.filter(credential=writer, operation="post_reply").exists() is posted
     if boundary == "expiry":
         assert cycle.closed_at == expiry
         assert cycle.close_reason == "expired"

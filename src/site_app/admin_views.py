@@ -14,7 +14,7 @@ from accounts.admin_commands import AccountPassword, AdminCommand, KeyCreate, Ke
 from accounts.admin_data import AdminOperationResult, OperationReference
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import User
-from tunnels.errors import TunnelDomainError
+from core.errors import DomainError
 
 
 def private_download(
@@ -73,7 +73,7 @@ def admin_access(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Browser access was updated. Sign in again if required.")
         else:
             raise Http404
-    except (TunnelDomainError, ValueError) as error:
+    except (DomainError, ValueError) as error:
         messages.error(request, str(error))
     return redirect("site:admins")
 
@@ -92,7 +92,7 @@ def audit(request: HttpRequest) -> HttpResponse:
             cursor=request.GET.get("cursor"),
             action=request.GET.get("action") or None,
         )
-    except (TunnelDomainError, ValueError) as error:
+    except (DomainError, ValueError) as error:
         messages.error(request, str(error))
         events = {"items": [], "next_cursor": None}
     return render(

@@ -53,7 +53,7 @@ class SafeJsonFormatter(logging.Formatter):
                 value = getattr(record, field, None)
                 if value is not None:
                     event[field] = value
-        if record.name == "tunnels.maintenance" and message == CYCLE_DELETION_FAILED:
+        if record.name == "core.maintenance" and message == CYCLE_DELETION_FAILED:
             cycle_id = getattr(record, "cycle_id", None)
             if isinstance(cycle_id, UUID):
                 event["cycle_id"] = str(cycle_id)

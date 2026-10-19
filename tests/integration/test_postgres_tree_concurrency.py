@@ -15,12 +15,12 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
+from core.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 from core.limits import Limits
 from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.codec import parse_address
 from tunnels.context import get_context
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 from tunnels.messages import PostedReply, get_subtree, list_leaves, list_replies, post_reply
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
@@ -270,7 +270,7 @@ def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
             root_content={"type": "text", "text": "No available address."},
         )
     assert Tunnel.objects.count() == 2
-    assert credential.idempotency_records.count() == 2
+    assert credential.agent_receipts.count() == 2
 
 
 def test_concurrent_exact_idempotency_retry_creates_one_reply(
@@ -412,7 +412,7 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
 def test_subtree_rejects_root_deleted_before_recursive_read(
     credential_factory: Any, after_sequence: int
 ) -> None:
-    from tunnels.errors import CycleUnavailable
+    from core.errors import CycleUnavailable
     from tunnels.messages import _postgresql_subtree_page
     from tunnels.retention import delete_due_cycle_content
 

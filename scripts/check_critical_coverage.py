@@ -61,7 +61,7 @@ CRITICAL_TARGETS = (
     ),
     CriticalTarget("src/tunnels/retention.py", ("delete_due_cycle_content",)),
     CriticalTarget("src/core/rate_limits.py", ("_consume",)),
-    CriticalTarget("src/tunnels/maintenance.py", ("cleanup_once",)),
+    CriticalTarget("src/core/maintenance.py", ("cleanup_once",)),
 )
 
 POSTGRES_TARGETS = (CriticalTarget("src/tunnels/messages.py", ("_postgresql_subtree_page",)),)

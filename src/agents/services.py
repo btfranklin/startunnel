@@ -15,8 +15,8 @@ from django.utils import timezone
 from accounts.models import User
 from core import limits as instance_limits
 from core.audit import record_event
+from core.errors import InvalidRequest, QuotaExceeded
 from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
-from tunnels.errors import InvalidRequest, QuotaExceeded
 
 from .models import AgentCredential
 

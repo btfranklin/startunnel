@@ -18,6 +18,10 @@ from scripts import check_structure
         ("accounts", "admin_commands"),
         ("accounts", "admin_data"),
         ("accounts", "admin_services"),
+        ("core", "audit"),
+        ("core", "errors"),
+        ("core", "idempotency"),
+        ("core", "maintenance"),
     ],
 )
 @pytest.mark.parametrize("dependency", ["api", "ninja", "django.http", "django.template", "openai"])

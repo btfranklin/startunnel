@@ -12,8 +12,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from core.errors import InvalidCredential, InvalidRequest, LifecycleConflict
 from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
-from tunnels.errors import InvalidCredential, InvalidRequest, LifecycleConflict
 
 from .models import AdminCredential, User
 

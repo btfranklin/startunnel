@@ -32,8 +32,8 @@ from accounts.admin_services import admin_status, execute_admin_operation, list_
 from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
 from agents.models import AgentCredential
+from core.errors import DomainError, InvalidRequest, TunnelUnavailable
 from tunnels.admin_actions import retirement_confirmation
-from tunnels.errors import InvalidRequest, TunnelDomainError, TunnelUnavailable
 from tunnels.models import Cycle, Tunnel, TunnelAddress
 
 from .admin_views import private_download
@@ -143,7 +143,7 @@ def create_admin_account(request: HttpRequest) -> HttpResponse:
                 key=request.POST.get("idempotency_key", ""),
                 request_data=request_data,
             )
-        except TunnelDomainError as error:
+        except DomainError as error:
             form.add_error(None, str(error))
         else:
             if result.get("secret"):
@@ -185,7 +185,7 @@ def set_admin_state(request: HttpRequest) -> HttpResponse:
             key=request.POST.get("idempotency_key", ""),
             request_data=request_data,
         )
-    except TunnelDomainError as error:
+    except DomainError as error:
         messages.error(request, str(error))
     else:
         messages.success(request, "The admin account state was updated.")
@@ -221,7 +221,7 @@ def create_agent(request: HttpRequest) -> HttpResponse:
                 key=request.POST.get("idempotency_key", ""),
                 request_data=request_data,
             )
-        except TunnelDomainError as error:
+        except DomainError as error:
             form.add_error(None, str(error))
         else:
             return private_download(
@@ -259,7 +259,7 @@ def revoke_agent(request: HttpRequest) -> HttpResponseRedirect:
             key=request.POST.get("idempotency_key", ""),
             request_data=request_data,
         )
-    except TunnelDomainError as error:
+    except DomainError as error:
         messages.error(request, str(error))
     else:
         messages.success(request, f"Revoked {credential.name}.")
@@ -319,7 +319,7 @@ def tunnels(request: HttpRequest) -> HttpResponse:
             messages.error(request, "That tunnel is not available.")
         except TunnelUnavailable:
             messages.error(request, "That tunnel is not available.")
-        except TunnelDomainError as error:
+        except DomainError as error:
             messages.error(request, str(error))
         return redirect("site:tunnels")
 

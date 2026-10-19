@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 from django.db import models
@@ -347,54 +346,3 @@ class ActivityCheckpoint(models.Model):
 
     def __str__(self) -> str:
         return f"Checkpoint {self.last_event_position} for {self.credential_id}"
-
-
-class IdempotencyRecord(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    credential = models.ForeignKey(
-        AgentCredential, on_delete=models.CASCADE, related_name="idempotency_records"
-    )
-    operation = models.CharField(max_length=120)
-    key_digest = models.BinaryField(max_length=32)
-    request_digest = models.BinaryField(max_length=32)
-    response = models.JSONField(default=dict)
-    resource_id = models.UUIDField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(db_index=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["credential", "operation", "key_digest"],
-                name="unique_idempotency_key_per_operation",
-            )
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.operation}:{self.id}"
-
-
-class AuditEvent(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    actor_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
-    )
-    actor_credential = models.ForeignKey(
-        AgentCredential, on_delete=models.SET_NULL, null=True, blank=True
-    )
-    actor_admin_credential = models.ForeignKey(
-        "accounts.AdminCredential", on_delete=models.SET_NULL, null=True, blank=True
-    )
-    channel = models.CharField(max_length=20, blank=True)
-    action = models.CharField(max_length=80)
-    target_type = models.CharField(max_length=80)
-    target_id = models.UUIDField(null=True, blank=True)
-    request_id = models.UUIDField(null=True, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        ordering = ["-created_at", "id"]
-
-    def __str__(self) -> str:
-        return f"{self.action}:{self.id}"

@@ -8,8 +8,8 @@ from ninja.security import HttpBearer
 from agents.models import AgentCredential
 from agents.services import CredentialError, authenticate_key
 from core import limits as instance_limits
+from core.errors import InvalidCredential
 from core.rate_limits import consume_api_operation
-from tunnels.errors import InvalidCredential
 
 
 class AgentBearer(HttpBearer):

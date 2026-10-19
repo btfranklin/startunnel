@@ -27,11 +27,12 @@ from accounts.admin_commands import (
 )
 from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation
-from accounts.models import AdminCredential, AdminOperation, User
+from accounts.models import AdminCredential, AdminReceipt, User
+from core.errors import IdempotencyConflict, InvalidCredential
+from core.models import AuditEvent
 from tunnels.admin_actions import close_cycle_as_admin
 from tunnels.cycles import create_tunnel
-from tunnels.errors import IdempotencyConflict, InvalidCredential
-from tunnels.models import AuditEvent, Cycle
+from tunnels.models import Cycle
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -132,7 +133,7 @@ def test_identical_concurrent_admin_keys_create_one_result_and_audit() -> None:
         first, second = list(pool.map(lambda _: create(), range(2)))
     assert first == second
     assert User.objects.filter(username="created-once").count() == 1
-    assert AdminOperation.objects.filter(owner=actor).count() == 1
+    assert AdminReceipt.objects.filter(owner=actor).count() == 1
     assert AuditEvent.objects.filter(action="accounts.create").count() == 1
 
 
@@ -165,7 +166,7 @@ def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.Monkey
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(create, (1, 2)))
     assert len({item["resource"]["id"] for item in results}) == 2
-    assert AdminOperation.objects.filter(owner=actor).count() == 2
+    assert AdminReceipt.objects.filter(owner=actor).count() == 2
     assert AuditEvent.objects.filter(action="agents.create").count() == 2
 
 
@@ -206,7 +207,7 @@ def test_concurrent_changed_admin_requests_with_one_key_conflict(
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(execute, requests))
     assert sorted(outcomes) == ["conflict", "success"]
-    assert AdminOperation.objects.filter(owner=actor).count() == 1
+    assert AdminReceipt.objects.filter(owner=actor).count() == 1
     assert AuditEvent.objects.filter(action__in=["accounts.create", "agents.create"]).count() == 1
 
 
@@ -220,7 +221,7 @@ def test_concurrent_retry_replaces_one_expired_receipt() -> None:
         key="expired-admin-key",
         request_data=data,
     )
-    receipt = AdminOperation.objects.get(pk=first["operation"]["id"])
+    receipt = AdminReceipt.objects.get(pk=first["operation"]["id"])
     receipt.expires_at = timezone.now() - timedelta(seconds=1)
     receipt.save(update_fields=["expires_at"])
     both_started = Barrier(2)
@@ -242,7 +243,7 @@ def test_concurrent_retry_replaces_one_expired_receipt() -> None:
         results = list(pool.map(lambda _: retry(), range(2)))
     assert results[0] == results[1]
     assert results[0]["operation"]["id"] != str(receipt.id)
-    assert AdminOperation.objects.filter(owner=actor).count() == 1
+    assert AdminReceipt.objects.filter(owner=actor).count() == 1
     assert AuditEvent.objects.filter(action="agents.create").count() == 2
 
 

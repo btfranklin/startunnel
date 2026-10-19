@@ -8,7 +8,7 @@ from uuid import UUID
 from django.core import signing
 from django.core.signing import BadSignature
 
-from tunnels.errors import InvalidCursor
+from core.errors import InvalidCursor
 
 CURSOR_SALT = "startunnel.api.cursor"
 MAX_CURSOR_CHARACTERS = 4_096

@@ -14,12 +14,13 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_services import list_admin_resources
+from core.errors import CycleUnavailable, TunnelUnavailable
+from core.models import AgentReceipt
 from tunnels import admin_actions, cycles, messages
 from tunnels.access import cycle_is_readable
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import CycleUnavailable, TunnelUnavailable
 from tunnels.messages import post_reply, read_tree
-from tunnels.models import Cycle, IdempotencyRecord, Message, TunnelEvent
+from tunnels.models import Cycle, Message, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
@@ -116,7 +117,7 @@ def test_due_deletion_keeps_minimal_tombstone_and_is_idempotent(
         delete_after=now - timedelta(seconds=1),
         final_sequence=2,
     )
-    IdempotencyRecord.objects.create(
+    AgentReceipt.objects.create(
         credential=created.tunnel.creator,
         operation="test-delete",
         key_digest=b"k" * 32,
@@ -134,7 +135,7 @@ def test_due_deletion_keeps_minimal_tombstone_and_is_idempotent(
     retained_events = TunnelEvent.objects.filter(cycle=created.cycle)
     assert retained_events.exists()
     assert not retained_events.exclude(message__isnull=True).exists()
-    assert IdempotencyRecord.objects.filter(resource_id=reply.message.id).exists()
+    assert AgentReceipt.objects.filter(resource_id=reply.message.id).exists()
     assert not delete_due_cycle_content(cycle_id=created.cycle.id, now=now)
     assert not delete_due_cycle_content(cycle_id=uuid4(), now=now)
 
@@ -161,7 +162,7 @@ def test_expired_history_is_not_materialized_by_reads(credential_factory: Any) -
         delete_after=now,
         final_sequence=2,
     )
-    from tunnels.errors import CycleUnavailable
+    from core.errors import CycleUnavailable
 
     with pytest.raises(CycleUnavailable):
         read_tree(
@@ -245,7 +246,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
     with time_machine.travel(deadline, tick=False), pytest.raises(CycleUnavailable):
         retry()
     assert Cycle.objects.count() == count
-    assert IdempotencyRecord.objects.filter(
+    assert AgentReceipt.objects.filter(
         credential=credential,
         operation={"create": "create_tunnel", "start": "start_cycle", "rollover": "rollover_cycle"}[
             operation

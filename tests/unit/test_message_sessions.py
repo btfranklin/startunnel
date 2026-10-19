@@ -9,12 +9,12 @@ from typing import Any
 import pytest
 from asgiref.sync import async_to_sync
 
+from core.errors import IdempotencyConflict, InvalidRequest
 from tunnels.activity import read_activity_async
 from tunnels.codec import canonical_address
 from tunnels.context import context_item_payload, get_context
 from tunnels.cycles import close_cycle, create_tunnel, rollover_cycle, start_cycle
 from tunnels.entry import enter_tunnel, entry_payload
-from tunnels.errors import IdempotencyConflict, InvalidRequest
 from tunnels.message_data import message_payload
 from tunnels.messages import post_reply, read_tree
 from tunnels.participants import list_participants
@@ -98,7 +98,7 @@ def test_exact_retries_include_labels_and_match_absent_session_request_data(
         "root_mentions": [],
         "root_correlation_id": "",
     }
-    stored_create = credential.idempotency_records.get(operation="create_tunnel")
+    stored_create = credential.agent_receipts.get(operation="create_tunnel")
     assert bytes(stored_create.request_digest) == _request_digest(unlabeled_create)
     assert create_tunnel(**common, root_session=None).replay
     assert created.root.session is None
@@ -121,7 +121,7 @@ def test_exact_retries_include_labels_and_match_absent_session_request_data(
         "mentions": [],
         "correlation_id": "",
     }
-    stored_reply = credential.idempotency_records.get(operation="post_reply")
+    stored_reply = credential.agent_receipts.get(operation="post_reply")
     assert bytes(stored_reply.request_digest) != _request_digest(unlabeled_reply)
     assert post_reply(**reply).replay
     assert first.message.session == "chat-a"
@@ -130,7 +130,7 @@ def test_exact_retries_include_labels_and_match_absent_session_request_data(
     unlabeled_result = post_reply(
         **{**reply, "idempotency_key": "session-reply-unlabeled", "session": None}
     )
-    stored_unlabeled_reply = credential.idempotency_records.get(
+    stored_unlabeled_reply = credential.agent_receipts.get(
         resource_id=str(unlabeled_result.message.id)
     )
     assert bytes(stored_unlabeled_reply.request_digest) == _request_digest(unlabeled_reply)
@@ -216,7 +216,7 @@ def test_unlabeled_cycle_retries_match_absent_session_request_data(
         "root_mentions": [],
         "root_correlation_id": "",
     }
-    record = credential.idempotency_records.get(operation="start_cycle")
+    record = credential.agent_receipts.get(operation="start_cycle")
     assert bytes(record.request_digest) == _request_digest(unlabeled_data)
     assert start_cycle(**common, root_session=None).replay
     with pytest.raises(IdempotencyConflict):
@@ -231,7 +231,7 @@ def test_unlabeled_cycle_retries_match_absent_session_request_data(
     rolled = rollover_cycle(**rollover)
     unlabeled_data["expected_cycle_id"] = str(started.cycle.id)
     unlabeled_data["root_content"] = rollover["root_content"]
-    record = credential.idempotency_records.get(operation="rollover_cycle")
+    record = credential.agent_receipts.get(operation="rollover_cycle")
     assert bytes(record.request_digest) == _request_digest(unlabeled_data)
     assert rolled.root.session is None
     assert rollover_cycle(**rollover, root_session=None).replay

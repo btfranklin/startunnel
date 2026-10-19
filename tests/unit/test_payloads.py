@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from tunnels.errors import InvalidRequest, PayloadTooLarge
+from core.errors import InvalidRequest, PayloadTooLarge
 from tunnels.payloads import validate_content
 
 

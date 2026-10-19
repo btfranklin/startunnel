@@ -13,7 +13,7 @@ from accounts.admin_access import authenticate_admin_key, issue_admin_key, valid
 from accounts.admin_data import key_resource
 from accounts.admin_services import list_admin_resources
 from accounts.models import AdminCredential
-from tunnels.errors import InvalidCredential
+from core.errors import InvalidCredential
 
 pytestmark = pytest.mark.django_db
 

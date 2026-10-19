@@ -10,6 +10,14 @@ from uuid import uuid4
 import pytest
 from django.utils import timezone
 
+from core.errors import (
+    CycleUnavailable,
+    InvalidCredential,
+    InvalidRequest,
+    LifecycleConflict,
+    QuotaExceeded,
+    TunnelUnavailable,
+)
 from core.limits import Limits
 from tunnels.access import cycle_is_readable, resolve_tunnel
 from tunnels.admin_actions import (
@@ -18,14 +26,6 @@ from tunnels.admin_actions import (
     start_cycle_as_admin,
 )
 from tunnels.cycles import _close_locked_cycle, close_cycle, create_tunnel
-from tunnels.errors import (
-    CycleUnavailable,
-    InvalidCredential,
-    InvalidRequest,
-    LifecycleConflict,
-    QuotaExceeded,
-    TunnelUnavailable,
-)
 from tunnels.messages import get_message, list_replies, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel
 
@@ -70,7 +70,7 @@ def test_create_rejects_long_correlation_and_instance_quota(
 def test_create_replay_rejects_missing_resources(credential_factory: Any) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-create-replay")
-    record = credential.idempotency_records.get(operation="create_tunnel")
+    record = credential.agent_receipts.get(operation="create_tunnel")
     record.resource_id = None
     record.save(update_fields=["resource_id"])
     with pytest.raises(TunnelUnavailable):
@@ -159,7 +159,7 @@ def test_post_reply_replay_rejects_missing_resource(credential_factory: Any) -> 
         parent_id=created.root.id,
         content={"type": "text", "text": "Reply."},
     )
-    record = credential.idempotency_records.get(operation="post_reply")
+    record = credential.agent_receipts.get(operation="post_reply")
     record.resource_id = None
     record.save(update_fields=["resource_id"])
     with pytest.raises(TunnelUnavailable):

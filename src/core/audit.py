@@ -8,16 +8,17 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from django.apps import apps
-
 from .logging import current_request_id
+from .models import AuditEvent
 
 if TYPE_CHECKING:
     from accounts.models import AdminCredential, User
     from agents.models import AgentCredential
 
 
-_admin_context: ContextVar[tuple[Any, str] | None] = ContextVar("admin_audit_context", default=None)
+_admin_context: ContextVar[tuple[AdminCredential | None, str] | None] = ContextVar(
+    "admin_audit_context", default=None
+)
 
 
 @contextmanager
@@ -40,15 +41,14 @@ def record_event(
     actor_admin_credential: AdminCredential | None = None,
     channel: str = "",
     request_id: UUID | None = None,
-) -> Any:
+) -> AuditEvent:
     """Store an event that contains identifiers and safe metadata only."""
 
     context = _admin_context.get()
     if context is not None:
         actor_admin_credential = actor_admin_credential or context[0]
         channel = channel or context[1]
-    audit_event = apps.get_model("tunnels", "AuditEvent")
-    return audit_event.objects.create(
+    return AuditEvent.objects.create(
         actor_user=actor_user,
         actor_credential=actor_credential,
         actor_admin_credential=actor_admin_credential,

@@ -214,3 +214,8 @@ use concrete response types. Existing retry fingerprints and JSON remain unchang
 
 Admin key reads now share one availability rule. Rate rules and fixed server
 bounds have shared core owners. Agent key format checks use `validate_key`.
+
+Shared errors, agent receipts, audit records, and maintenance now have core
+owners. Admin receipts keep an account owner. The planned v0.2.0 migrations
+keep existing tables, row IDs, content types, and permission grants.
+Maintenance retry delay resets after a successful drain.

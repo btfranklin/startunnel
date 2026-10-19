@@ -21,14 +21,15 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
+from core.errors import DomainError, IdempotencyConflict, InvalidRequest, LifecycleConflict
+from core.idempotency import validate_idempotency_key
 from core.limits import DEFAULT_LIMITS
 from core.maintenance_status import read_maintenance_status
+from core.models import AuditEvent
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
 from tunnels.beacons import beacon_data, beacon_queryset
-from tunnels.errors import IdempotencyConflict, InvalidRequest, LifecycleConflict, TunnelDomainError
-from tunnels.idempotency import validate_idempotency_key
-from tunnels.models import AuditEvent, Beacon, Cycle, Tunnel, TunnelAddress
+from tunnels.models import Beacon, Cycle, Tunnel, TunnelAddress
 
 from .admin_access import validate_actor
 from .admin_commands import AdminCommand, TunnelStart, derive_secret
@@ -43,7 +44,7 @@ from .admin_data import (
     audit_resource,
     key_resource,
 )
-from .models import AdminCredential, AdminOperation, User
+from .models import AdminCredential, AdminReceipt, User
 
 
 def admin_status() -> AdminStatusData:
@@ -217,7 +218,7 @@ def list_admin_resources(
     }
 
 
-def _replay(receipt: AdminOperation) -> AdminOperationResult:
+def _replay(receipt: AdminReceipt) -> AdminOperationResult:
     response = dict(receipt.response)
     if receipt.operation == "beacons.withdraw":
         beacon = (
@@ -282,7 +283,7 @@ def execute_admin_operation(
         return _execute_admin_operation(
             actor=actor, credential=credential, command=command, key=key, request_data=request_data
         )
-    except TunnelDomainError as error:
+    except DomainError as error:
         with suppress(DatabaseError):
             if User.objects.filter(pk=actor.pk).exists():
                 metadata = {
@@ -335,7 +336,7 @@ def _execute_admin_operation(
         "derivation_nonce": secrets.token_bytes(32),
         "expires_at": timezone.now() + timedelta(hours=24),
     }
-    receipt, created = AdminOperation.objects.select_for_update().get_or_create(
+    receipt, created = AdminReceipt.objects.select_for_update().get_or_create(
         owner=actor, key_digest=digest, defaults=defaults
     )
     if not created and receipt.expires_at > timezone.now():
@@ -344,7 +345,7 @@ def _execute_admin_operation(
         return _replay(receipt)
     if not created:
         receipt.delete()
-        receipt = AdminOperation.objects.create(owner=actor, key_digest=digest, **defaults)
+        receipt = AdminReceipt.objects.create(owner=actor, key_digest=digest, **defaults)
     with admin_audit_context(credential, "admin_api" if credential else "browser"):
         try:
             resource, target_type, target_id = command.perform(actor, receipt)

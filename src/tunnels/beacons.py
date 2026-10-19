@@ -24,18 +24,7 @@ from core.activity_listener import activity_listener
 from core.async_database import ASYNC_DATABASE_EXECUTOR
 from core.audit import record_event
 from core.cursors import cursor_int, decode_cursor, encode_cursor
-from core.limits import (
-    DEFAULT_BOARD_LIMIT,
-    MAX_BEACON_CHARACTERS,
-    MAX_BEACON_SECONDS,
-    MAX_BOARD_LIMIT,
-)
-from core.logging import current_request_id
-from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
-
-from .access import credential_is_active, cycle_is_readable, resolve_tunnel
-from .codec import canonical_address
-from .errors import (
+from core.errors import (
     CycleClosed,
     InvalidCredential,
     InvalidCursor,
@@ -43,18 +32,21 @@ from .errors import (
     LifecycleConflict,
     TunnelUnavailable,
 )
-from .idempotency import begin as begin_idempotency
-from .idempotency import find_replay, finish
-from .models import (
-    Beacon,
-    BoardState,
-    Cycle,
-    IdempotencyRecord,
-    Message,
-    Tunnel,
-    TunnelAddress,
-    TunnelEvent,
+from core.idempotency import begin as begin_idempotency
+from core.idempotency import find_replay, finish
+from core.limits import (
+    DEFAULT_BOARD_LIMIT,
+    MAX_BEACON_CHARACTERS,
+    MAX_BEACON_SECONDS,
+    MAX_BOARD_LIMIT,
 )
+from core.logging import current_request_id
+from core.models import AgentReceipt
+from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
+
+from .access import credential_is_active, cycle_is_readable, resolve_tunnel
+from .codec import canonical_address
+from .models import Beacon, BoardState, Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
 DEFAULT_BEACON_SECONDS = 3_600
 BOARD_PAGE_CURSOR_KIND = "beacon_board_page"
@@ -268,7 +260,7 @@ def end_beacon_for_cycle_locked(
         _end_locked(tunnel=tunnel, cycle=cycle, beacon=beacon, reason=reason)
 
 
-def _replayed_beacon(record: IdempotencyRecord) -> dict[str, Any]:
+def _replayed_beacon(record: AgentReceipt) -> dict[str, Any]:
     if record.resource_id is None:
         raise TunnelUnavailable()
     beacon = Beacon.objects.select_related("cycle").filter(pk=record.resource_id).first()

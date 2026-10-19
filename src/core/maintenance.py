@@ -11,13 +11,12 @@ from django.db import transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 
-from accounts.models import AdminOperation
+from accounts.models import AdminReceipt
 from core.maintenance_liveness import publish_local_maintenance_heartbeat
-from core.models import MaintenanceState, RateLimitBucket
-
-from .cycles import _close_locked_cycle
-from .models import AuditEvent, Beacon, Cycle, IdempotencyRecord, Tunnel
-from .retention import delete_due_cycle_content
+from core.models import AgentReceipt, AuditEvent, MaintenanceState, RateLimitBucket
+from tunnels.cycles import _close_locked_cycle
+from tunnels.models import Beacon, Cycle, Tunnel
+from tunnels.retention import delete_due_cycle_content
 
 ADVISORY_LOCK_ID = 7_195_415_308_821
 MAINTENANCE_BATCH_SIZE = 100
@@ -52,12 +51,10 @@ def next_deadline(*, skip_overdue_deletions: bool = False) -> datetime | None:
         deletions.order_by("delete_after").values_list("delete_after", flat=True).first()
     )
     idempotency_expiry = (
-        IdempotencyRecord.objects.order_by("expires_at")
-        .values_list("expires_at", flat=True)
-        .first()
+        AgentReceipt.objects.order_by("expires_at").values_list("expires_at", flat=True).first()
     )
     admin_operation_expiry = (
-        AdminOperation.objects.order_by("expires_at").values_list("expires_at", flat=True).first()
+        AdminReceipt.objects.order_by("expires_at").values_list("expires_at", flat=True).first()
     )
     oldest_audit = (
         AuditEvent.objects.order_by("created_at").values_list("created_at", flat=True).first()
@@ -129,7 +126,7 @@ def _expire_beacons(*, now: datetime) -> tuple[int, int]:
         .order_by("expires_at", "id")
         .values_list("id", "cycle__tunnel_id")[:MAINTENANCE_BATCH_SIZE]
     )
-    from .beacons import _end_locked
+    from tunnels.beacons import _end_locked
 
     expired = 0
     for beacon_id, tunnel_id in candidates:
@@ -229,11 +226,11 @@ def cleanup_once(*, now: datetime | None = None) -> dict[str, int]:
     lag = oldest_overdue_deletion_seconds(now=checked_at)
     deleted, deletion_failures, delete_candidates = _delete_due_cycles(now=checked_at)
     idempotency = _delete_batch(
-        IdempotencyRecord.objects.filter(expires_at__lte=checked_at),
+        AgentReceipt.objects.filter(expires_at__lte=checked_at),
         ordered_field="expires_at",
     )
     admin_operations = _delete_batch(
-        AdminOperation.objects.filter(expires_at__lte=checked_at),
+        AdminReceipt.objects.filter(expires_at__lte=checked_at),
         ordered_field="expires_at",
     )
     audit = _delete_batch(

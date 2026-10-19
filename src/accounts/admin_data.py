@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any, NotRequired, TypedDict, cast
 
 from agents.models import AgentCredential
+from core.models import AuditEvent
 from tunnels.admin_actions import retirement_confirmation
-from tunnels.models import AuditEvent, Cycle, Tunnel, TunnelAddress
+from tunnels.models import Cycle, Tunnel, TunnelAddress
 
 from .models import AdminCredential, User
 

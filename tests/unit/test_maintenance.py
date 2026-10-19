@@ -14,12 +14,9 @@ from django.contrib.sessions.models import Session
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from accounts.models import AdminOperation
+from accounts.models import AdminReceipt
 from core.logging import SafeJsonFormatter
-from core.maintenance_status import read_maintenance_status
-from core.models import MaintenanceState, RateLimitBucket
-from tunnels.cycles import create_tunnel
-from tunnels.maintenance import (
+from core.maintenance import (
     _delete_batch,
     _delete_due_cycles,
     cleanup_once,
@@ -28,9 +25,12 @@ from tunnels.maintenance import (
     record_maintenance_error,
     record_notification_wake,
 )
-from tunnels.management.commands.maintenance_loop import Command as MaintenanceCommand
+from core.maintenance_status import read_maintenance_status
+from core.management.commands.maintenance_loop import Command as MaintenanceCommand
+from core.models import AgentReceipt, AuditEvent, MaintenanceState, RateLimitBucket
+from tunnels.cycles import create_tunnel
 from tunnels.messages import post_reply
-from tunnels.models import AuditEvent, Cycle, IdempotencyRecord, Message
+from tunnels.models import Cycle, Message
 
 pytestmark = pytest.mark.django_db
 
@@ -84,7 +84,7 @@ def test_cleanup_purges_all_due_noncontent_categories(
 ) -> None:
     credential, _ = credential_factory()
     now = timezone.now()
-    record = IdempotencyRecord.objects.create(
+    record = AgentReceipt.objects.create(
         credential=credential,
         operation="expired",
         key_digest=b"i" * 32,
@@ -112,7 +112,7 @@ def test_cleanup_purges_all_due_noncontent_categories(
     assert counts["audit_events_purged"] == 1
     assert counts["sessions_purged"] == 1
     assert counts["rate_limit_buckets_purged"] == 1
-    assert not IdempotencyRecord.objects.filter(pk=record.pk).exists()
+    assert not AgentReceipt.objects.filter(pk=record.pk).exists()
     assert not RateLimitBucket.objects.filter(pk=bucket.pk).exists()
 
 
@@ -121,10 +121,10 @@ def test_cleanup_limits_each_batch(
 ) -> None:
     credential, _ = credential_factory()
     now = timezone.now()
-    monkeypatch.setattr("tunnels.maintenance.MAINTENANCE_BATCH_SIZE", 2)
-    IdempotencyRecord.objects.bulk_create(
+    monkeypatch.setattr("core.maintenance.MAINTENANCE_BATCH_SIZE", 2)
+    AgentReceipt.objects.bulk_create(
         [
-            IdempotencyRecord(
+            AgentReceipt(
                 credential=credential,
                 operation="bounded",
                 key_digest=hashlib.sha256(str(index).encode()).digest(),
@@ -192,7 +192,7 @@ def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
         attempts.append(True)
         raise RuntimeError("Synthetic content deletion failure.")
 
-    monkeypatch.setattr("tunnels.maintenance.delete_due_cycle_content", fail_deletion)
+    monkeypatch.setattr("core.maintenance.delete_due_cycle_content", fail_deletion)
 
     class Stop:
         stopped = False
@@ -233,10 +233,10 @@ def test_admin_receipt_deadlines_and_cleanup_are_bounded(
     now = timezone.now()
     expiry = now - timedelta(seconds=1)
     future = now + timedelta(hours=1)
-    monkeypatch.setattr("tunnels.maintenance.MAINTENANCE_BATCH_SIZE", 2)
-    AdminOperation.objects.bulk_create(
+    monkeypatch.setattr("core.maintenance.MAINTENANCE_BATCH_SIZE", 2)
+    AdminReceipt.objects.bulk_create(
         [
-            AdminOperation(
+            AdminReceipt(
                 owner=owner,
                 operation="accounts.create",
                 key_digest=hashlib.sha256(str(index).encode()).digest(),
@@ -258,7 +258,7 @@ def test_admin_receipt_deadlines_and_cleanup_are_bounded(
     assert cleanup_once(now=now)["admin_operations_purged"] == 0
     assert not has_due_work(now=now)
     assert next_deadline() == future
-    assert list(AdminOperation.objects.values_list("expires_at", flat=True)) == [future]
+    assert list(AdminReceipt.objects.values_list("expires_at", flat=True)) == [future]
     assert AuditEvent.objects.filter(pk=audit.pk).exists()
 
 
@@ -275,7 +275,7 @@ def test_failed_cycle_does_not_block_later_deletion(
         final_sequence=2,
     )
     original = __import__(
-        "tunnels.maintenance", fromlist=["delete_due_cycle_content"]
+        "core.maintenance", fromlist=["delete_due_cycle_content"]
     ).delete_due_cycle_content
 
     def fail_one(*, cycle_id: Any, now: Any) -> bool:
@@ -283,8 +283,8 @@ def test_failed_cycle_does_not_block_later_deletion(
             raise RuntimeError("expected test failure")
         return bool(original(cycle_id=cycle_id, now=now))
 
-    monkeypatch.setattr("tunnels.maintenance.delete_due_cycle_content", fail_one)
-    with caplog.at_level(logging.ERROR, logger="tunnels.maintenance"):
+    monkeypatch.setattr("core.maintenance.delete_due_cycle_content", fail_one)
+    with caplog.at_level(logging.ERROR, logger="core.maintenance"):
         deleted, failures, candidates = _delete_due_cycles(now=now)
     assert (deleted, failures, candidates) == (1, 1, 2)
     assert Cycle.objects.get(pk=second.cycle.pk).state == Cycle.State.DELETED
@@ -307,7 +307,7 @@ def test_cleanup_records_deletion_failure_and_observed_lag(
         final_sequence=2,
     )
     monkeypatch.setattr(
-        "tunnels.maintenance.delete_due_cycle_content",
+        "core.maintenance.delete_due_cycle_content",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("expected test failure")),
     )
 

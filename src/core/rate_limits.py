@@ -12,8 +12,8 @@ from django.conf import settings
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.utils import timezone
 
+from core.errors import DependencyUnavailable, RateLimited
 from core.metrics import RATE_LIMITED
-from tunnels.errors import DependencyUnavailable, RateLimited
 
 from .limits import Limits
 from .models import RateLimitBucket

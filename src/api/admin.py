@@ -37,13 +37,13 @@ from accounts.admin_services import (
     execute_admin_operation,
     list_admin_resources,
 )
-from accounts.models import AdminCredential, AdminOperation, User
+from accounts.models import AdminCredential, AdminReceipt, User
 from core import limits as instance_limits
+from core.errors import InvalidCredential, InvalidRequest
 from core.limits import DEFAULT_LIMITS
 from core.rate_limits import consume_admin_auth_attempt
 from core.security import client_ip
 from tunnels.beacons import beacon_data, beacon_queryset
-from tunnels.errors import InvalidCredential, InvalidRequest
 from tunnels.models import Tunnel
 
 from .schemas import BeaconResponse, ErrorResponse, IdempotencyKey
@@ -449,7 +449,7 @@ def audit(
 
 @router.get("/operations/{uuid:operation_id}", response={200: OperationRecord, **ADMIN_ERRORS})
 def operation(request: AdminRequest, operation_id: UUID) -> OperationRecord:
-    row = AdminOperation.objects.filter(pk=operation_id, expires_at__gt=timezone.now()).first()
+    row = AdminReceipt.objects.filter(pk=operation_id, expires_at__gt=timezone.now()).first()
     if row is None:
         raise InvalidRequest("This operation is not available.")
     return OperationRecord(

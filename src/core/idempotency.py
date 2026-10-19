@@ -14,15 +14,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from core.errors import IdempotencyConflict, InvalidRequest
 from core.limits import MAX_IDEMPOTENCY_KEY_CHARACTERS, MIN_IDEMPOTENCY_KEY_CHARACTERS
-
-from .errors import IdempotencyConflict, InvalidRequest
-from .models import IdempotencyRecord
+from core.models import AgentReceipt
 
 
 @dataclass(frozen=True, slots=True)
 class IdempotencyResult:
-    record: IdempotencyRecord
+    record: AgentReceipt
     replay: bool
 
 
@@ -60,7 +59,7 @@ def find_replay(
     key_hash = _key_digest(key)
     request_hash = _request_digest(request_data)
     record = (
-        IdempotencyRecord.objects.select_for_update()
+        AgentReceipt.objects.select_for_update()
         .filter(
             credential=credential,
             operation=operation,
@@ -88,7 +87,7 @@ def begin(
         "request_digest": request_hash,
         "expires_at": now + timedelta(hours=24),
     }
-    record, created = IdempotencyRecord.objects.select_for_update().get_or_create(
+    record, created = AgentReceipt.objects.select_for_update().get_or_create(
         credential=credential, operation=operation, key_digest=key_hash, defaults=defaults
     )
     if not created and record.expires_at > now:
@@ -97,14 +96,14 @@ def begin(
         return IdempotencyResult(record=record, replay=True)
     if not created:
         record.delete()
-        record = IdempotencyRecord.objects.create(
+        record = AgentReceipt.objects.create(
             credential=credential, operation=operation, key_digest=key_hash, **defaults
         )
     return IdempotencyResult(record=record, replay=False)
 
 
 def finish(
-    record: IdempotencyRecord, *, response: dict[str, Any], resource_id: str | None = None
+    record: AgentReceipt, *, response: dict[str, Any], resource_id: str | None = None
 ) -> None:
     record.response = response
     record.resource_id = resource_id

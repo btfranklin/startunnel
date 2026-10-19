@@ -30,13 +30,13 @@ from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import create_credential
 from core.activity_listener import ActivityListener
+from core.errors import QuotaExceeded, RateLimited
 from core.limits import Limits
+from core.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch
 from core.models import RateLimitBucket
 from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL, notify
 from core.rate_limits import _consume, consume_login_attempt
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import QuotaExceeded, RateLimited
-from tunnels.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch
 from tunnels.migrations.sql.guards import revoke_runtime_history_delete
 from tunnels.models import Cycle, Tunnel
 
@@ -319,7 +319,7 @@ import sys
 import django
 django.setup()
 from django.core.management import call_command
-from tunnels.management.commands import maintenance_loop
+from core.management.commands import maintenance_loop
 maintenance_loop.RECONCILIATION_SECONDS = 0.2
 original_kwargs = maintenance_loop._connection_kwargs
 def tagged_kwargs():

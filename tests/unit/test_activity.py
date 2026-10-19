@@ -11,6 +11,12 @@ from asgiref.sync import async_to_sync
 
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
+from core.errors import (
+    CheckpointRegression,
+    InvalidCredential,
+    InvalidRequest,
+    TunnelUnavailable,
+)
 from tunnels.activity import (
     ActivityPage,
     _ActivityStart,
@@ -23,12 +29,6 @@ from tunnels.activity import (
 )
 from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.cycles import create_tunnel
-from tunnels.errors import (
-    CheckpointRegression,
-    InvalidCredential,
-    InvalidRequest,
-    TunnelUnavailable,
-)
 from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
 

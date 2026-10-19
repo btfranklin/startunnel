@@ -28,7 +28,11 @@ LISTEN/NOTIFY ---- maintenance deadlines
 - `tunnels.cycles` owns tunnel creation, cycle lifecycle, and cycle status reads.
 - `tunnels.admin_actions` owns admin lifecycle controls and address changes.
 - Models own persisted structure and database constraints.
-- `core` owns cross-cutting limits, notifications, rate limits, health, and maintenance state.
+- `core.errors` owns domain errors. `core.idempotency` owns agent retry receipts.
+- `core.maintenance` and its management command own deadline work.
+- `core.models` owns audit events, agent receipts, and runtime state.
+  `accounts.models` owns admin receipts.
+- `core` also owns shared limits, notifications, rate limits, and health.
 
 Views and API routers call domain services. Models do not import views or API schemas. Domain services do not depend on HTTP requests or templates.
 Admin actions call cycle services. Cycle services use message primitives.

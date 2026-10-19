@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 
+from core.errors import TunnelUnavailable
+from core.models import AuditEvent
 from tunnels.cycles import CreatedTunnel, StartedCycle, close_cycle, create_tunnel, start_cycle
-from tunnels.errors import TunnelUnavailable
-from tunnels.models import AuditEvent, Cycle, MessageMention, TunnelEvent
+from tunnels.models import Cycle, MessageMention, TunnelEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -104,7 +105,7 @@ def test_later_cycle_replay_rejects_corrupt_snapshot_without_another_write(
         )
 
     second = start()
-    receipt = creator.idempotency_records.get(operation="start_cycle")
+    receipt = creator.agent_receipts.get(operation="start_cycle")
     receipt.response = {**receipt.response, "event_position": False}
     receipt.save(update_fields=["response"])
     with pytest.raises(TunnelUnavailable):

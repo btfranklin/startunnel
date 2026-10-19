@@ -17,6 +17,7 @@ from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.activity_listener import activity_listener
 from core.async_database import ASYNC_DATABASE_EXECUTOR
+from core.errors import CheckpointRegression, InvalidRequest
 from core.limits import DEFAULT_LIMITS
 
 from .access import (
@@ -27,7 +28,6 @@ from .access import (
     resolve_tunnel,
 )
 from .codec import canonical_address
-from .errors import CheckpointRegression, InvalidRequest
 from .models import ActivityCheckpoint, MessageMention, Tunnel, TunnelEvent
 
 

@@ -10,8 +10,8 @@ import pytest
 from django.db import IntegrityError
 from django.utils import timezone
 
+from core.errors import CycleClosed, IdempotencyConflict, InvalidRequest, TunnelUnavailable
 from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.errors import CycleClosed, IdempotencyConflict, InvalidRequest, TunnelUnavailable
 from tunnels.messages import _resolve_mentions, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
@@ -68,7 +68,7 @@ def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
     assert replay.root.id == first.root.id
     assert replay.address == first.address
     assert first.tunnel.addresses.get().address == first.address
-    record = creator.idempotency_records.get()
+    record = creator.agent_receipts.get()
     assert first.address not in str(record.response)
 
     with pytest.raises(IdempotencyConflict):
@@ -102,7 +102,7 @@ def test_create_replay_rejects_an_invalid_historical_response(
 ) -> None:
     creator, _ = credential_factory()
     _create(creator, key="create-invalid-response")
-    record = creator.idempotency_records.get()
+    record = creator.agent_receipts.get()
     record.response = {**record.response, field: value}
     record.save(update_fields=["response"])
 
@@ -128,7 +128,7 @@ def test_failed_root_creation_rolls_back_every_resource(
     assert not Cycle.objects.exists()
     assert not Message.objects.exists()
     assert not TunnelEvent.objects.exists()
-    assert not creator.idempotency_records.exists()
+    assert not creator.agent_receipts.exists()
 
 
 def test_replies_form_an_immutable_ordered_tree_and_allow_self_reply(
@@ -331,7 +331,7 @@ def test_close_cycle_replays_exact_request_and_rejects_changed_request(
 def test_expired_idempotency_key_creates_a_new_random_address(credential_factory: Any) -> None:
     creator, _ = credential_factory()
     first = _create(creator, key="expired-create-key")
-    record = creator.idempotency_records.get()
+    record = creator.agent_receipts.get()
     record.expires_at = timezone.now() - timedelta(seconds=1)
     record.save(update_fields=["expires_at"])
 

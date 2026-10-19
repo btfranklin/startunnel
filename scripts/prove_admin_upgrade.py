@@ -23,8 +23,12 @@ PRE_BEACON_MIGRATION = ("tunnels", "0007_limit_cycle_root_checks_to_root_changes
 
 
 def targets_through(executor: Any, tunnel_migration: tuple[str, str]) -> list[tuple[str, str]]:
-    return [node for node in executor.loader.graph.leaf_nodes() if node[0] != "tunnels"] + [
-        tunnel_migration
+    owned = {"accounts", "agents", "core", "tunnels"}
+    return [node for node in executor.loader.graph.leaf_nodes() if node[0] not in owned] + [
+        ("accounts", "0002_admincredential_adminoperation"),
+        ("agents", "0002_remove_agentcredential_suspended_at"),
+        ("core", "0001_initial"),
+        tunnel_migration,
     ]
 
 
@@ -252,17 +256,16 @@ def upgraded(snapshot_path: Path) -> None:
 
     from accounts.admin_access import authenticate_admin_key
     from accounts.admin_services import list_admin_resources
-    from accounts.models import AdminCredential, AdminOperation, User
+    from accounts.models import AdminCredential, AdminReceipt, User
     from agents.models import AgentCredential
     from agents.services import authenticate_key
+    from core.errors import TunnelUnavailable
+    from core.models import AgentReceipt, AuditEvent
     from tunnels.access import resolve_tunnel
     from tunnels.cycles import create_tunnel
-    from tunnels.errors import TunnelUnavailable
     from tunnels.models import (
         ActivityCheckpoint,
-        AuditEvent,
         Cycle,
-        IdempotencyRecord,
         Message,
         MessageMention,
         Tunnel,
@@ -283,8 +286,8 @@ def upgraded(snapshot_path: Path) -> None:
     assert authenticate_key(expected["agent_key"]).pk == credential.pk
     admin_credential = AdminCredential.objects.get(pk=expected["admin_credential_id"])
     assert authenticate_admin_key(expected["admin_key"]).pk == admin_credential.pk
-    assert AdminOperation.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
-    assert not AdminOperation.objects.filter(pk=expected["removed_admin_operation_id"]).exists()
+    assert AdminReceipt.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
+    assert not AdminReceipt.objects.filter(pk=expected["removed_admin_operation_id"]).exists()
 
     for model in (
         Tunnel,
@@ -294,7 +297,7 @@ def upgraded(snapshot_path: Path) -> None:
         MessageMention,
         TunnelEvent,
         ActivityCheckpoint,
-        IdempotencyRecord,
+        AgentReceipt,
     ):
         assert model.objects.count() == 0, model.__name__
     for old_address in expected["old_addresses"]:
@@ -392,6 +395,8 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     import django
 
     django.setup()
+    from django.contrib.auth.models import Group, Permission
+    from django.contrib.contenttypes.models import ContentType
     from django.core.management import call_command
     from django.db import connection
     from django.db.migrations.executor import MigrationExecutor
@@ -399,13 +404,15 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     from django.utils import timezone
 
     from accounts.admin_access import authenticate_admin_key
-    from accounts.models import AdminCredential, AdminOperation, User
+    from accounts.admin_commands import AccountState
+    from accounts.admin_services import execute_admin_operation
+    from accounts.models import AdminCredential, AdminReceipt, User
     from agents.models import AgentCredential
+    from core.models import AgentReceipt, AuditEvent
     from tunnels.access import resolve_tunnel
     from tunnels.beacons import publish_beacon, read_board
     from tunnels.models import (
         ActivityCheckpoint,
-        AuditEvent,
         Beacon,
         Cycle,
         Message,
@@ -417,7 +424,8 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     executor = MigrationExecutor(connection)
     assert PRE_BEACON_MIGRATION in executor.loader.applied_migrations
-    executor.migrate(executor.loader.graph.leaf_nodes())
+    boundary = targets_through(executor, ("tunnels", "0008_beacon_board"))
+    executor.migrate(boundary)
 
     user = User.objects.get(pk=expected["user_id"])
     credential = AgentCredential.objects.get(pk=expected["credential_id"])
@@ -442,7 +450,7 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     assert audit.actor_user_id == user.pk and audit.action == "human.created"
     admin_credential = AdminCredential.objects.get(pk=expected["admin_credential_id"])
     assert authenticate_admin_key(expected["admin_key"]).pk == admin_credential.pk
-    assert AdminOperation.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
+    assert AdminReceipt.objects.filter(pk=expected["kept_admin_operation_id"]).exists()
     assert (
         AgentCredential.objects.get(pk=expected["credential_id"]).key_digest.hex()
         == expected["key_digest"]
@@ -460,6 +468,113 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     assert TunnelEvent.objects.filter(
         tunnel=tunnel, event_type=TunnelEvent.Type.BEACON_LIT
     ).exists()
+
+    admin_request: dict[str, Any] = {
+        "admin_id": str(user.pk),
+        "active": True,
+        "expected_active": True,
+    }
+    admin_command = AccountState(admin_id=user.pk, active=True, expected_active=True)
+    admin_result = execute_admin_operation(
+        actor=user,
+        command=admin_command,
+        key="ownership-proof-admin",
+        request_data=admin_request,
+    )
+    historical = executor.loader.project_state(boundary).apps
+    historical_audit = historical.get_model("tunnels", "AuditEvent")
+    historical_agent_receipt = historical.get_model("tunnels", "IdempotencyRecord")
+    historical_admin_receipt = historical.get_model("accounts", "AdminOperation")
+    historical_content_type = historical.get_model("contenttypes", "ContentType")
+    historical_permission = historical.get_model("auth", "Permission")
+    historical_group = historical.get_model("auth", "Group")
+    historical_user = historical.get_model("accounts", "User").objects.get(pk=user.pk)
+    audit_rows = list(historical_audit.objects.order_by("id").values())
+    agent_receipt_rows = list(historical_agent_receipt.objects.order_by("id").values())
+    admin_receipt_rows = list(historical_admin_receipt.objects.order_by("id").values())
+    beacon_rows = list(Beacon.objects.order_by("id").values())
+    content_type_ids: dict[tuple[str, str], int] = {}
+    permission_ids: dict[tuple[str, str, str], int] = {}
+    group = historical_group.objects.create(name="Ownership inspection proof")
+    for old_app, old_model, new_app, new_model in (
+        ("tunnels", "auditevent", "core", "auditevent"),
+        ("tunnels", "idempotencyrecord", "core", "agentreceipt"),
+        ("accounts", "adminoperation", "accounts", "adminreceipt"),
+    ):
+        content_type, _ = historical_content_type.objects.get_or_create(
+            app_label=old_app, model=old_model
+        )
+        content_type_ids[new_app, new_model] = content_type.pk
+        for action in ("add", "change", "delete", "view"):
+            permission, _ = historical_permission.objects.get_or_create(
+                content_type_id=content_type.pk,
+                codename=f"{action}_{old_model}",
+                defaults={"name": f"Can {action} old record"},
+            )
+            permission_ids[new_app, new_model, action] = permission.pk
+            historical_user.user_permissions.add(permission)
+            group.permissions.add(permission)
+    historical_user.groups.add(group)
+    user_joins = set(
+        historical_user.user_permissions.through.objects.values_list(
+            "id", "user_id", "permission_id"
+        )
+    )
+    group_joins = set(
+        group.permissions.through.objects.values_list("id", "group_id", "permission_id")
+    )
+    membership_rows = set(
+        historical_user.groups.through.objects.values_list("id", "user_id", "group_id")
+    )
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
+    call_command("migrate", interactive=False, verbosity=0)
+
+    assert list(AuditEvent.objects.order_by("id").values()) == audit_rows
+    assert list(AgentReceipt.objects.order_by("id").values()) == agent_receipt_rows
+    assert list(AdminReceipt.objects.order_by("id").values()) == admin_receipt_rows
+    assert list(Beacon.objects.order_by("id").values()) == beacon_rows
+    for (app_label, model_name), content_type_id in content_type_ids.items():
+        rows = ContentType.objects.filter(app_label=app_label, model=model_name)
+        assert list(rows.values_list("id", flat=True)) == [content_type_id]
+        for action in ("add", "change", "delete", "view"):
+            rows = Permission.objects.filter(
+                content_type_id=content_type_id, codename=f"{action}_{model_name}"
+            )
+            assert list(rows.values_list("id", flat=True)) == [
+                permission_ids[app_label, model_name, action]
+            ]
+    current_group = Group.objects.get(pk=group.pk)
+    assert (
+        set(user.user_permissions.through.objects.values_list("id", "user_id", "permission_id"))
+        == user_joins
+    )
+    assert (
+        set(
+            current_group.permissions.through.objects.values_list("id", "group_id", "permission_id")
+        )
+        == group_joins
+    )
+    assert (
+        set(user.groups.through.objects.values_list("id", "user_id", "group_id")) == membership_rows
+    )
+    replayed_beacon, replayed = publish_beacon(
+        credential=credential,
+        idempotency_key="upgrade-proof-beacon",
+        address=expected["fresh_address"],
+        text="Beacon migration proof",
+    )
+    assert replayed and replayed_beacon == result
+    assert (
+        execute_admin_operation(
+            actor=user,
+            command=admin_command,
+            key="ownership-proof-admin",
+            request_data=admin_request,
+        )
+        == admin_result
+    )
 
     client = Client(HTTP_HOST="localhost")
     original_headers = {"Authorization": "Bearer " + expected["admin_key"]}
@@ -653,6 +768,9 @@ def main() -> int:
                         "fresh tunnel, sessions, credentials, audit, and checkpoint survive "
                         "Beacon migration",
                         "Beacon publication works after the forward upgrade",
+                        "audit, Beacon, and receipt rows survive shared model ownership",
+                        "content type and permission IDs and grants survive ownership",
+                        "repeat migrate keeps permission identities and receipt retries",
                         "recovered admin withdraws Beacon with an exact receipt retry",
                         "Beacon withdrawal preserves the known address, messages, and checkpoint",
                         "admin credentials and non-tunnel receipts retained",

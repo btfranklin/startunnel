@@ -16,6 +16,7 @@ from ninja.errors import ValidationError as NinjaValidationError
 from agents.models import AgentCredential
 from core import cursors
 from core import limits as instance_limits
+from core.errors import DomainError, InvalidCursor, InvalidRequest, TunnelUnavailable
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.beacons import publish_beacon, read_board, wait_for_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
@@ -32,7 +33,6 @@ from tunnels.cycles import (
     start_cycle,
 )
 from tunnels.entry import enter_tunnel, entry_payload
-from tunnels.errors import InvalidCursor, InvalidRequest, TunnelDomainError, TunnelUnavailable
 from tunnels.message_data import cycle_payload, message_payload
 from tunnels.messages import (
     LeafPage,
@@ -171,8 +171,8 @@ def _error_response(
     return response
 
 
-@api.exception_handler(TunnelDomainError)
-def tunnel_error_handler(request: HttpRequest, error: TunnelDomainError) -> HttpResponse:
+@api.exception_handler(DomainError)
+def tunnel_error_handler(request: HttpRequest, error: DomainError) -> HttpResponse:
     return _error_response(
         request,
         code=error.code,

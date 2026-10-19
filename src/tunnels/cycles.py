@@ -17,9 +17,21 @@ from django.utils import timezone
 from accounts.models import User
 from agents.models import AgentCredential
 from core.audit import record_event
+from core.errors import (
+    CycleUnavailable,
+    InvalidCredential,
+    InvalidRequest,
+    LifecycleConflict,
+    QuotaExceeded,
+    TunnelUnavailable,
+)
+from core.idempotency import begin as begin_idempotency
+from core.idempotency import find_replay as find_idempotency_replay
+from core.idempotency import finish as finish_idempotency
 from core.limits import MAX_CYCLE_SECONDS, MAX_LABEL_CHARACTERS, MIN_CYCLE_SECONDS, Limits
 from core.logging import current_request_id
 from core.metrics import TUNNELS_CREATED
+from core.models import AgentReceipt
 from core.notifications import ACTIVITY_CHANNEL, notify, notify_maintenance
 
 from .access import (
@@ -35,17 +47,6 @@ from .codec import (
     display_address,
     encode_token,
 )
-from .errors import (
-    CycleUnavailable,
-    InvalidCredential,
-    InvalidRequest,
-    LifecycleConflict,
-    QuotaExceeded,
-    TunnelUnavailable,
-)
-from .idempotency import begin as begin_idempotency
-from .idempotency import find_replay as find_idempotency_replay
-from .idempotency import finish as finish_idempotency
 from .messages import (
     _add_session_request_data,
     _create_message,
@@ -55,14 +56,7 @@ from .messages import (
     _validate_mention_ids,
     _validate_session,
 )
-from .models import (
-    Cycle,
-    IdempotencyRecord,
-    Message,
-    Tunnel,
-    TunnelAddress,
-    TunnelEvent,
-)
+from .models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 from .payloads import ValidatedPayload, validate_content, validate_storable_text
 
 DEFAULT_CYCLE_SECONDS = 3_600
@@ -552,7 +546,7 @@ def _start_cycle_locked(
 
 
 def _replayed_cycle(
-    record: IdempotencyRecord, *, credential: AgentCredential, address: str
+    record: AgentReceipt, *, credential: AgentCredential, address: str
 ) -> StartedCycle:
     tunnel = resolve_tunnel(credential=credential, address=address)
     if not _can_control_with_credential(credential=credential, tunnel=tunnel):

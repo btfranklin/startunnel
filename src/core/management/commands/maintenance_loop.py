@@ -15,8 +15,7 @@ from django.core.management.base import BaseCommand
 from django.db import DatabaseError, close_old_connections
 from django.utils import timezone
 
-from core.notifications import MAINTENANCE_CHANNEL
-from tunnels.maintenance import (
+from core.maintenance import (
     ADVISORY_LOCK_ID,
     cleanup_once,
     has_due_work,
@@ -24,6 +23,7 @@ from tunnels.maintenance import (
     record_maintenance_error,
     record_notification_wake,
 )
+from core.notifications import MAINTENANCE_CHANNEL
 
 RECONCILIATION_SECONDS = 60.0
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class Command(BaseCommand):
             self._sqlite_loop(stop)
             return
 
-        backoff = 1.0
+        self.retry_delay = 1.0
         while not stop.is_set():
             try:
                 with psycopg.connect(
@@ -84,15 +84,14 @@ class Command(BaseCommand):
                         stop.wait(RECONCILIATION_SECONDS)
                         continue
                     self._postgres_loop(listener, stop)
-                    backoff = 1.0
             except (psycopg.Error, DatabaseError) as error:
                 logger.exception("Maintenance database operation failed.")
                 close_old_connections()
                 with suppress(Exception):
                     record_maintenance_error(type(error).__name__)
-                if stop.wait(backoff):
+                if stop.wait(self.retry_delay):
                     return
-                backoff = min(backoff * 2, RECONCILIATION_SECONDS)
+                self.retry_delay = min(self.retry_delay * 2, RECONCILIATION_SECONDS)
 
     def _postgres_loop(
         self,
@@ -131,6 +130,7 @@ class Command(BaseCommand):
             and not stop.is_set()
         ):
             counts = self._reconcile(once=False)
+        self.retry_delay = 1.0
         return counts
 
     def _reconcile(self, *, once: bool) -> dict[str, int]:

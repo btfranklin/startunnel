@@ -7,12 +7,13 @@ from typing import Any
 import pytest
 from django.utils import timezone
 
+from core.errors import CycleUnavailable, TunnelUnavailable
+from core.models import AgentReceipt
 from tunnels.activity import commit_checkpoint
 from tunnels.beacons import beacon_data, beacon_queryset, publish_beacon
 from tunnels.cycles import close_cycle, create_tunnel, start_cycle
-from tunnels.errors import CycleUnavailable, TunnelUnavailable
 from tunnels.messages import post_reply, read_tree
-from tunnels.models import Beacon, Cycle, IdempotencyRecord, Message, MessageMention, TunnelEvent
+from tunnels.models import Beacon, Cycle, Message, MessageMention, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -108,7 +109,7 @@ def test_retention_deletes_branched_content_and_preserves_retry_boundaries(
     )
     events = TunnelEvent.objects.filter(cycle=started.cycle)
     event_spine = list(events.values("id", "position", "event_type", "metadata"))
-    receipts = IdempotencyRecord.objects.filter(credential__in=[creator, responder])
+    receipts = AgentReceipt.objects.filter(credential__in=[creator, responder])
     receipt_ids = set(receipts.values_list("id", flat=True))
     assert receipts.filter(resource_id=started.cycle.id, expires_at__gt=now).exists()
     assert receipts.filter(resource_id=beacon["id"], expires_at__gt=now).exists()

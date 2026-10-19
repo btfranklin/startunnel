@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents.models import AgentCredential
 from agents.services import create_credential, revoke_credential
+from core.errors import InvalidRequest
 from core.limits import MAX_SESSION_CHARACTERS
 from tunnels.admin_actions import (
     close_cycle_as_admin,
@@ -26,16 +27,15 @@ from tunnels.admin_actions import (
     start_cycle_as_admin,
 )
 from tunnels.beacons import withdraw_beacon_as_admin
-from tunnels.errors import InvalidRequest
 from tunnels.models import Tunnel
 from tunnels.payloads import MessageContent
 
 from .admin_access import change_admin_state, issue_admin_key
 from .admin_data import admin_resource, agent_resource, key_resource, tunnel_resource
-from .models import AdminCredential, AdminOperation, User
+from .models import AdminCredential, AdminReceipt, User
 
 
-def derive_secret(receipt: AdminOperation, kind: str) -> str:
+def derive_secret(receipt: AdminReceipt, kind: str) -> str:
     raw = hmac.digest(
         settings.IDEMPOTENCY_SECRET.encode(),
         b"admin-secret:" + kind.encode() + receipt.id.bytes + bytes(receipt.derivation_nonce),
@@ -62,7 +62,7 @@ class AdminCommand(BaseModel):
         return None
 
     @abstractmethod
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         raise NotImplementedError
 
 
@@ -73,7 +73,7 @@ class AccountCreate(AdminCommand):
     password: str | None = None
     key_name: str = "initial"
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         username = User.normalize_username(self.username).strip()
         account = User(username=username)
         try:
@@ -111,7 +111,7 @@ class AccountState(AccountCommand):
     active: bool
     expected_active: bool
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         account = change_admin_state(
             actor=actor,
             admin_id=self.admin_id,
@@ -125,7 +125,7 @@ class AccountPassword(AccountCommand):
     operation = "accounts.password"
     password: str | None = None
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         account = User.objects.get(pk=self.admin_id)
         if self.password:
             try:
@@ -142,7 +142,7 @@ class KeyCreate(AccountCommand):
     name: str
     expires_at: datetime | None = None
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         account = User.objects.get(pk=self.admin_id)
         receipt.secret_kind = "admin_key"
         created, _ = issue_admin_key(
@@ -164,7 +164,7 @@ class KeyRevoke(AdminCommand):
     def target_id(self) -> UUID:
         return self.key_id
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         created = AdminCredential.objects.get(pk=self.key_id)
         created.revoked_at = created.revoked_at or timezone.now()
         created.save(update_fields=["revoked_at"])
@@ -177,7 +177,7 @@ class AgentCreate(AdminCommand):
     name: str
     expires_at: datetime | None = None
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         receipt.secret_kind = "agent_key"
         issued = create_credential(
             actor=actor,
@@ -198,7 +198,7 @@ class AgentRevoke(AdminCommand):
     def target_id(self) -> UUID:
         return self.credential_id
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         agent = AgentCredential.objects.get(pk=self.credential_id)
         revoke_credential(actor=actor, credential=agent)
         agent.refresh_from_db()
@@ -214,7 +214,7 @@ class BeaconWithdraw(AdminCommand):
     def target_id(self) -> UUID:
         return self.beacon_id
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         resource = withdraw_beacon_as_admin(actor=actor, beacon_id=self.beacon_id)
         return resource, "beacon", self.beacon_id
 
@@ -239,7 +239,7 @@ class TunnelStart(TunnelCommand):
     cycle_label: str = ""
     expires_in_seconds: int | None = None
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         start_cycle_as_admin(
             actor=actor,
             tunnel_id=self.tunnel_id,
@@ -256,7 +256,7 @@ class TunnelRollover(TunnelStart):
     operation = "tunnels.rollover"
     expected_cycle_id: UUID
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         rollover_cycle_as_admin(
             actor=actor,
             tunnel_id=self.tunnel_id,
@@ -274,7 +274,7 @@ class TunnelClose(TunnelCommand):
     operation = "tunnels.close"
     expected_cycle_id: UUID
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         close_cycle_as_admin(
             actor=actor, tunnel_id=self.tunnel_id, expected_cycle_id=self.expected_cycle_id
         )
@@ -285,7 +285,7 @@ class TunnelRotate(TunnelCommand):
     operation = "tunnels.rotate"
     expected_address_generation: int
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         rotate_address_as_admin(
             actor=actor,
             tunnel_id=self.tunnel_id,
@@ -298,7 +298,7 @@ class TunnelRetire(TunnelRotate):
     operation = "tunnels.retire"
     confirmation: str
 
-    def perform(self, actor: User, receipt: AdminOperation) -> tuple[dict[str, Any], str, UUID]:
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
         retire_tunnel_as_admin(
             actor=actor,
             tunnel_id=self.tunnel_id,

@@ -15,10 +15,11 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from agents.models import AgentCredential
+from core.errors import IdempotencyConflict
+from core.models import AgentReceipt
 from tunnels.cycles import create_tunnel
-from tunnels.errors import IdempotencyConflict
 from tunnels.messages import post_reply
-from tunnels.models import IdempotencyRecord, Message
+from tunnels.models import Message
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
@@ -56,7 +57,7 @@ def test_concurrent_agent_requests_with_changed_input_conflict(credential_factor
         results = [future.result(timeout=20) for future in futures]
     successes = [result for result in results if result is not None]
     assert len(successes) == 1
-    receipt = IdempotencyRecord.objects.get(credential=credential, operation="post_reply")
+    receipt = AgentReceipt.objects.get(credential=credential, operation="post_reply")
     assert receipt.resource_id == successes[0]
     assert Message.objects.filter(cycle=created.cycle).count() == 2
 
@@ -78,7 +79,7 @@ def test_waiting_agent_retry_recovers_after_expired_receipt_is_replaced(
         parent_id=created.root.id,
         content={"type": "text", "text": "Old request."},
     )
-    expired = IdempotencyRecord.objects.get(credential=credential, operation="post_reply")
+    expired = AgentReceipt.objects.get(credential=credential, operation="post_reply")
     expired.expires_at = timezone.now() - timedelta(seconds=1)
     expired.save(update_fields=["expires_at"])
 
@@ -92,7 +93,7 @@ def test_waiting_agent_retry_recovers_after_expired_receipt_is_replaced(
 
     def get_after_both_arrive(queryset: QuerySet[Any], *args: Any, **kwargs: Any) -> Any:
         if (
-            queryset.model is IdempotencyRecord
+            queryset.model is AgentReceipt
             and queryset.query.select_for_update
             and not getattr(first_lookup, "started", False)
         ):
@@ -159,7 +160,7 @@ def test_waiting_agent_retry_recovers_after_expired_receipt_is_replaced(
         results = [future.result(timeout=20) for future in futures]
 
     monkeypatch.setattr(QuerySet, "get", original_get)
-    receipt = IdempotencyRecord.objects.get(credential=credential, operation="post_reply")
+    receipt = AgentReceipt.objects.get(credential=credential, operation="post_reply")
     assert receipt.pk != expired.pk
     successes = [resource_id for resource_id, _ in results if resource_id is not None]
     if changed_input:

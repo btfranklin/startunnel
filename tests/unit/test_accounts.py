@@ -68,7 +68,7 @@ def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any
 def test_login_form_maps_rate_limit_to_generic_authentication_error(
     rf: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tunnels.errors import RateLimited
+    from core.errors import RateLimited
 
     def limited(**kwargs: Any) -> None:
         assert kwargs == {"source_ip": "192.0.2.4", "username": "Someone"}
@@ -178,7 +178,7 @@ def test_admin_create_page_returns_form_errors(client: Client, user_factory: Any
 def test_each_login_path_rejects_valid_credentials_after_the_limit(
     client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch, login_path: str
 ) -> None:
-    from tunnels.errors import RateLimited
+    from core.errors import RateLimited
 
     user = user_factory(username="limited-admin")
     user.is_staff = True

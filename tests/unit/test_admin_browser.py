@@ -7,7 +7,7 @@ import pytest
 from django.test import Client
 
 from accounts.models import AdminCredential, User
-from tunnels.models import AuditEvent
+from core.models import AuditEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -49,7 +49,7 @@ def test_browser_can_remove_final_password_and_session_expires(
     assert response.status_code == 302
     actor.refresh_from_db()
     assert not actor.has_usable_password()
-    operation = actor.admin_operations.get(operation="accounts.password")
+    operation = actor.admin_receipts.get(operation="accounts.password")
     event = AuditEvent.objects.get(metadata__operation_id=str(operation.id))
     assert event.action == "accounts.password"
     assert event.channel == "browser"
@@ -117,7 +117,7 @@ def test_password_form_records_operation_and_preserves_session(
     actor.refresh_from_db()
     assert actor.check_password("New-safe-browser-password-67!")
     assert client.get("/app/account/").status_code == 200
-    assert actor.admin_operations.get().operation == "accounts.password"
+    assert actor.admin_receipts.get().operation == "accounts.password"
 
 
 def test_django_model_admin_cannot_bypass_product_services(
