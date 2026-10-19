@@ -1,0 +1,14 @@
+{
+  "version": "v0.2.0",
+  "supported_from": ["v0.1.0"],
+  "configuration_changes": [
+    "Upgrade the server first, then download and install its CLI on each agent host. Existing installed clients use startunnel update. Keep existing credentials.",
+    "The new runtime does not use STARTUNNEL_ADDRESS_SECRET or STARTUNNEL_ADDRESS_DERIVATION_SECRET. Keep their old files with the pre-upgrade backup for recovery.",
+    "Re-create the included Caddy service after checking out the release so its file mount reads the new configuration.",
+    "Operators select HTTP or HTTPS through STARTUNNEL_BASE_URL. The application no longer sets HSTS; an HTTPS operator can set it at the proxy.",
+    "Admin and agent operation receipts expire after 24 hours. Routine backup creation no longer includes a production-server restore drill.",
+    "The image and Compose default to one web worker. Docker health checks remain enabled; Caddy no longer performs duplicate readiness polling."
+  ],
+  "database": "Forward upgrade from v0.1.0. Migration 0004_store_glyph_addresses deletes all existing tunnels and their addresses, cycles, messages, mentions, events, checkpoints, agent retry records, and tunnel-control admin receipts. Accounts, passwords, admin keys, agent credentials, other admin receipts, and audit records remain. The reset runs once; later upgrades preserve new tunnels. Other forward migrations add message sessions and Beacons, move shared model ownership without losing rows or permission identities, and remove unused message digests. Back up and verify recovery before upgrading. Custom unversioned installations require an ancestor source revision and unchanged applied migration files, tested on a restored copy of the installed database.",
+  "rollback": "The tunnel reset has no reverse migration. To recover v0.1.0 or old tunnels, restore the matching pre-upgrade database, image, source checkout, configuration, and all secrets together, including the retired address secrets. Do not run the old image against the upgraded schema. Keep the verified off-server backup until the new instance passes external authentication and message-exchange checks."
+}

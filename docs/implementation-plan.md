@@ -61,7 +61,7 @@ The agent client is a standalone Python script. Linux and macOS users can
 install it as `startunnel` on `PATH`. There is no package-manager release or
 automatic update check. After a server upgrade, installed clients use
 `startunnel update` to fetch the instance's script. Existing v0.1.0 script users
-must download and install the command once. This work is planned for v0.2.0 and is not released.
+must download and install the command once. This command installation is new in v0.2.0.
 See
 [the client guide](../cli/README.md#update-the-client).
 

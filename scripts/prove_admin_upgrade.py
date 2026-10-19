@@ -539,10 +539,10 @@ def beacon_upgraded(snapshot_path: Path) -> None:
         rows = ContentType.objects.filter(app_label=app_label, model=model_name)
         assert list(rows.values_list("id", flat=True)) == [content_type_id]
         for action in ("add", "change", "delete", "view"):
-            rows = Permission.objects.filter(
+            permission_rows = Permission.objects.filter(
                 content_type_id=content_type_id, codename=f"{action}_{model_name}"
             )
-            assert list(rows.values_list("id", flat=True)) == [
+            assert list(permission_rows.values_list("id", flat=True)) == [
                 permission_ids[app_label, model_name, action]
             ]
     current_group = Group.objects.get(pk=group.pk)
@@ -628,34 +628,131 @@ def beacon_upgraded(snapshot_path: Path) -> None:
     connection.close()
 
 
+def published_baseline(snapshot_path: Path) -> None:
+    """Seed and fully migrate the published runtime before its database dump."""
+    baseline(snapshot_path)
+    import django
+
+    django.setup()
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
+    connection.close()
+    published_recovery(snapshot_path)
+
+
+def published_recovery(snapshot_path: Path) -> None:
+    """Verify a restored database with the original application runtime."""
+    import django
+
+    django.setup()
+    from django.db import connection
+
+    from accounts.admin_access import authenticate_admin_key
+    from accounts.models import User
+    from agents.services import authenticate_key
+    from tunnels.models import Message, Tunnel
+
+    expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    user = User.objects.get(pk=expected["user_id"])
+    assert user.password == expected["password_hash"]
+    assert user.check_password(expected["password"])
+    assert str(authenticate_key(expected["agent_key"]).pk) == expected["credential_id"]
+    assert str(authenticate_admin_key(expected["admin_key"]).pk) == expected["admin_credential_id"]
+    assert Tunnel.objects.filter(pk=expected["historical_tunnel_id"]).exists()
+    root = Message.objects.get(pk=expected["historical_root_id"])
+    reply = Message.objects.get(pk=expected["historical_reply_id"])
+    assert root.text_payload == "Root retained" and reply.text_payload == "Reply retained"
+    assert reply.parent_id == root.pk and root.parent_id is None
+    connection.close()
+
+
+def published_record(path: Path) -> dict[str, str]:
+    """Require the published v0.1.0 identity and an immutable image."""
+    from scripts.start_production import validate_image_reference
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if record.get("version") != "v0.1.0":
+        raise ValueError("The published baseline must be v0.1.0.")
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "v0.1.0^{commit}"], cwd=ROOT, text=True
+    ).strip()
+    if record.get("source_commit") != revision:
+        raise ValueError("Published baseline source differs from the v0.1.0 tag.")
+    image = validate_image_reference(record.get("image", ""))
+    if record.get("platform") != "linux/amd64":
+        raise ValueError("Published v0.1.0 uses the linux/amd64 platform.")
+    return {
+        "version": "v0.1.0",
+        "source_commit": revision,
+        "image": image,
+        "platform": "linux/amd64",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--phase", choices=("baseline", "session-preserved", "upgrade", "beacon-upgrade")
+        "--phase",
+        choices=(
+            "baseline",
+            "session-preserved",
+            "upgrade",
+            "beacon-upgrade",
+            "published-baseline",
+            "published-recovery",
+        ),
     )
     parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--baseline-record", type=Path, help="Published v0.1.0 release.json")
     arguments = parser.parse_args()
     if arguments.phase:
         if arguments.snapshot is None:
             parser.error("--snapshot is required with --phase")
-        phases = {
+        phase_handlers = {
             "baseline": baseline,
+            "published-baseline": published_baseline,
+            "published-recovery": published_recovery,
             "session-preserved": session_preserved,
             "upgrade": upgraded,
             "beacon-upgrade": beacon_upgraded,
         }
-        phases[arguments.phase](arguments.snapshot)
+        phase_handlers[arguments.phase](arguments.snapshot)
         return 0
 
     sys.path.insert(0, str(ROOT))
     from scripts.compose_isolation import IsolatedComposeProject, generated_project_name
 
+    record = published_record(arguments.baseline_record) if arguments.baseline_record else None
     os.umask(0o077)
     project_name = generated_project_name("admin-upgrade")
     with tempfile.TemporaryDirectory(prefix="startunnel-admin-upgrade-") as directory:
         temporary = Path(directory).resolve()
         overlay = temporary / "postgres-port.yaml"
         overlay.write_text('services:\n  postgres:\n    ports: ["127.0.0.1::5432"]\n')
+        if record:
+            user = f"{os.getuid()}:{os.getgid()}" if sys.platform == "linux" else "10001:10001"
+            with overlay.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    "  published-proof:\n"
+                    f"    image: {record['image']}\n"
+                    f"    platform: {record['platform']}\n"
+                    f"    user: {json.dumps(user)}\n"
+                    "    entrypoint: [/app/.venv/bin/python]\n"
+                    "    read_only: true\n"
+                    "    tmpfs: [/tmp:mode=1777]\n"
+                    "    networks: [startunnel]\n"
+                    "    environment:\n"
+                    "      DJANGO_SETTINGS_MODULE: startunnel.settings.test\n"
+                    "      STARTUNNEL_API_KEY_PEPPER: upgrade-proof-api-pepper\n"
+                    "      STARTUNNEL_IDEMPOTENCY_SECRET: upgrade-proof-idempotency-secret\n"
+                    "      TEST_DATABASE_URL: postgresql://startunnel_admin:startunnel_admin@postgres:5432/admin_upgrade_source\n"
+                    "    volumes:\n"
+                    f"      - {json.dumps(str(Path(__file__).resolve()) + ':/proof/run.py:ro')}\n"
+                    f"      - {json.dumps(str(temporary) + ':/proof-data')}\n"
+                )
 
         class ProofProject(IsolatedComposeProject):
             def compose_files(self) -> tuple[str, ...]:
@@ -666,11 +763,14 @@ def main() -> int:
             port = stack.capture("Local database port", "port", "postgres", "5432").rsplit(":", 1)[
                 1
             ]
-            for database in (
+            databases = [
                 "admin_upgrade_source",
                 "admin_upgrade_restored",
                 "admin_upgrade_beacon_restored",
-            ):
+            ]
+            if record:
+                databases.append("admin_upgrade_recovery")
+            for database in databases:
                 stack.run(
                     "Create disposable proof database",
                     "exec",
@@ -687,17 +787,42 @@ def main() -> int:
                 DJANGO_SETTINGS_MODULE="startunnel.settings.test",
                 PYTHONPATH=str(ROOT / "src"),
             )
+            if record:
+                environment.update(
+                    STARTUNNEL_API_KEY_PEPPER="upgrade-proof-api-pepper",
+                    STARTUNNEL_IDEMPOTENCY_SECRET="upgrade-proof-idempotency-secret",
+                )
             snapshot = temporary / "snapshot.json"
-            for phase, source_database, target_database in (
+            if record:
+                stack.run("Pull published baseline", "pull", "published-proof", timeout_seconds=300)
+                labels = json.loads(
+                    subprocess.check_output(
+                        [
+                            "docker",
+                            "image",
+                            "inspect",
+                            record["image"],
+                            "--format",
+                            "{{json .Config.Labels}}",
+                        ],
+                        env=stack.environment,
+                        text=True,
+                    )
+                )
+                assert labels.get("org.opencontainers.image.revision") == record["source_commit"]
+                assert labels.get("org.opencontainers.image.version") == record["version"]
+            phases = [
                 ("baseline", None, "admin_upgrade_source"),
                 ("session-preserved", "admin_upgrade_source", "admin_upgrade_restored"),
                 ("upgrade", None, "admin_upgrade_restored"),
-                (
-                    "beacon-upgrade",
-                    "admin_upgrade_restored",
-                    "admin_upgrade_beacon_restored",
-                ),
-            ):
+                ("beacon-upgrade", "admin_upgrade_restored", "admin_upgrade_beacon_restored"),
+            ]
+            if record:
+                phases[0] = ("published-baseline", None, "admin_upgrade_source")
+                phases.insert(
+                    1, ("published-recovery", "admin_upgrade_source", "admin_upgrade_recovery")
+                )
+            for phase, source_database, target_database in phases:
                 if source_database is not None:
                     dump_directory = stack.capture(
                         "Create private container dump directory",
@@ -738,6 +863,24 @@ def main() -> int:
                 environment["TEST_DATABASE_URL"] = (
                     f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/{target_database}"
                 )
+                if phase.startswith("published-"):
+                    stack.run(
+                        "Verify published runtime baseline",
+                        "run",
+                        "--rm",
+                        "--no-deps",
+                        "--env",
+                        "TEST_DATABASE_URL="
+                        f"postgresql://startunnel_admin:startunnel_admin@postgres:5432/{target_database}",
+                        "published-proof",
+                        "/proof/run.py",
+                        "--phase",
+                        phase,
+                        "--snapshot",
+                        "/proof-data/snapshot.json",
+                        timeout_seconds=180,
+                    )
+                    continue
                 subprocess.run(
                     [
                         sys.executable,
@@ -758,6 +901,7 @@ def main() -> int:
                     "status": "passed",
                     "project": project_name,
                     "database": "PostgreSQL restored initial baseline",
+                    "published_baseline": record,
                     "checks": [
                         "password and account ID",
                         "agent digest and authentication",
@@ -780,8 +924,12 @@ def main() -> int:
                     ],
                     "disposable_volumes_removed": True,
                     "limits": (
-                        "No published predecessor or production snapshot claimed. "
-                        "No reverse migration proof."
+                        (
+                            "Published v0.1.0 runtime and restored database verified. "
+                            if record
+                            else "Synthetic initial baseline only. "
+                        )
+                        + "No production snapshot or reverse migration proof."
                     ),
                 }
             )

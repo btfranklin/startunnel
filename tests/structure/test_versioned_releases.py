@@ -52,7 +52,16 @@ def test_release_writer_records_custom_registry_and_platform(
     image = "registry.example:5000/team/startunnel@sha256:" + "b" * 64
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        sys, "argv", ["release_record.py", "--write", "v0.1.0", image, "--platform", "linux/arm64"]
+        sys,
+        "argv",
+        [
+            "release_record.py",
+            "--write",
+            release_record.candidate_version(),
+            image,
+            "--platform",
+            "linux/arm64",
+        ],
     )
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "a" * 40)
     assert release_record.main() == 0
@@ -223,6 +232,7 @@ def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
         "apply",
         "apply-link",
         "bad-image",
+        "plan-failure",
         "migration-failure",
         "wrong-compose-image",
         "absent-web",
@@ -287,6 +297,10 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
             return "e" * 40 if mode == "bad-image" else str(candidate["source_commit"])
         if "up" in command and mode == "migration-failure":
             raise subprocess.CalledProcessError(1, command)
+        if "--plan" in command:
+            assert os.environ["STARTUNNEL_APP_IMAGE"] == candidate["image"]
+            if mode == "plan-failure":
+                raise subprocess.CalledProcessError(1, command)
         return ""
 
     monkeypatch.setattr(upgrade, "run", run)
@@ -338,22 +352,25 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         assert "--wait" in commands[startup_index]
     else:
         assert not any("stop" in command or "up" in command for command in commands)
-    if mode != "mismatched-web":
+    if mode not in ("mismatched-web", "bad-image", "wrong-compose-image"):
         migration_check = next(
-            command for command in commands if "migrate" in command and "--check" in command
+            command for command in commands if "migrate" in command and "--plan" in command
         )
         assert migration_check[-6:] == [
             "--no-deps",
-            "web",
+            "migrate",
             "/app/.venv/bin/python",
             "manage.py",
             "migrate",
-            "--check",
+            "--plan",
         ]
         assert "--rm" in migration_check
         assert "exec" not in migration_check
+        pull_index = next(index for index, command in enumerate(commands) if "pull" in command)
+        assert pull_index < commands.index(migration_check)
     else:
-        assert not any("--check" in command for command in commands)
+        assert not any("--plan" in command for command in commands)
+    assert not any("--check" in command for command in commands)
     assert not any("down" in command or "--volumes" in command for command in commands)
     if custom:
         compose_calls = [command for command in commands if command[:2] == ["docker", "compose"]]

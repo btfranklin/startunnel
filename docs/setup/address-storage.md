@@ -1,6 +1,6 @@
 # One-time tunnel reset
 
-This reset is planned for v0.2.0, which is not released.
+The v0.2.0 upgrade includes this reset for databases that still store address digests.
 
 The upgrade from address digests to stored glyph addresses deletes all existing
 tunnels. This is a breaking upgrade. It deletes their addresses, cycles, messages,

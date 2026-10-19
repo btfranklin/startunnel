@@ -78,12 +78,10 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
-These steps describe planned v0.2.0. Apply them only after v0.2.0 is published
-and its release record lists the installed version as supported. The current
-v0.1.0 release record does not contain these pending changes. For published
-v0.1.0, use its [tagged maintenance guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/maintain.md).
-Test current source on a new instance with a
-[custom image](image.md#build-a-custom-image).
+These steps update the server and its team's clients to v0.2.0. Use the
+published release's `release.json` and matching tagged guides. The supported
+published predecessor is v0.1.0. Custom or unversioned deployments must check
+their installed source and migration history as described below.
 
 For a database that still stores address digests, this upgrade performs a
 [one-time tunnel reset](address-storage.md). It deletes all existing tunnels
@@ -94,7 +92,7 @@ For databases that already store glyph addresses, removing the unused
 per-message content digest preserves existing messages and payloads. The
 application no longer stores a per-message content digest.
 
-1. After v0.2.0 is published, select it from [GitHub Releases](https://github.com/btfranklin/startunnel/releases).
+1. Select v0.2.0 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.2.0).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.
    Keep the source commit and immutable image digest together.
@@ -102,6 +100,9 @@ application no longer stores a per-message content digest.
    backup and recovery secrets outside the server. Record the installed image
    digest and its source revision label. Keep the old image available and plan
    a short maintenance window.
+   Keep all old secret files with the recovery copy. The new runtime ignores
+   `STARTUNNEL_ADDRESS_SECRET` and `STARTUNNEL_ADDRESS_DERIVATION_SECRET`, but
+   the old image needs them to recover a pre-upgrade backup.
 3. Run `git status --short` and resolve tracked changes. Run `umask 022`,
    `git fetch --tags origin`, and `git checkout --detach COMMIT`, replacing
    `COMMIT` with the full source commit from the release record. Run `umask 077`
@@ -116,8 +117,10 @@ application no longer stores a per-message content digest.
    For another config name, add `--env-file /absolute/path/team.env` to both
    commands. The preview checks the release record, clean checkout, selected
    Compose model, secret files, and installed image labels. It checks existing
-   web containers and runs a migration check in a temporary container from the
-   old image. Web does not need to be running; PostgreSQL must be available.
+   web containers, pulls the new image, verifies its source label, and shows
+   its read-only database migration plan in a temporary container. Web does
+   not need to be running; PostgreSQL must be available. The preview does not
+   change configuration, stored data, or running services.
 
    Versioned installations must appear in `supported_from`. Unversioned
    installations need an ancestor source commit and unchanged migration files.
@@ -153,8 +156,8 @@ application no longer stores a per-message content digest.
    printed snapshot, configuration, migrations, and service state. Retry from
    the old configuration only if the database and writers remain unchanged.
 6. Tell each CLI user to install the client from the upgraded instance. The
-   command installation is planned for v0.2.0. Existing v0.1.0 script users
-   must perform this initial installation on each CLI machine:
+   command installation is new in v0.2.0. Existing v0.1.0 script users must
+   perform this initial installation on each CLI machine:
 
    ```shell
    curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"

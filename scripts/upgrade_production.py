@@ -167,19 +167,6 @@ def main(argv: list[str] | None = None) -> int:
         if rendered_web_image(command) != old_image:
             raise ValueError("The selected Compose web image differs from the installed image.")
         validate_existing_web_images(command, old_image)
-        run(
-            [
-                *command,
-                "run",
-                "--rm",
-                "--no-deps",
-                "web",
-                "/app/.venv/bin/python",
-                "manage.py",
-                "migrate",
-                "--check",
-            ]
-        )
         labels = (
             json.loads(
                 run(
@@ -206,14 +193,6 @@ def main(argv: list[str] | None = None) -> int:
         validate_rendered_images(rendered_images(command))
         if rendered_web_image(command) != record["image"]:
             raise ValueError("The selected Compose web image differs from the candidate image.")
-        print(f"Upgrade {old_version or old_commit} -> {record['version']}")
-        print(f"Source: {record['source_commit']}\nImage: {record['image']}")
-        print(f"Database: {record['database']}\nRollback: {record['rollback']}")
-        if not args.apply:
-            print("Preview passed. No configuration or services changed.")
-            return 0
-        if not args.backup_verified:
-            raise ValueError("Applying requires --backup-verified after off-server restore proof.")
         run(["docker", "pull", record["image"]])
         revision = run(
             [
@@ -228,6 +207,27 @@ def main(argv: list[str] | None = None) -> int:
         )
         if revision != record["source_commit"]:
             raise ValueError("New image revision label does not match the release record.")
+        run(
+            [
+                *command,
+                "run",
+                "--rm",
+                "--no-deps",
+                "migrate",
+                "/app/.venv/bin/python",
+                "manage.py",
+                "migrate",
+                "--plan",
+            ]
+        )
+        print(f"Upgrade {old_version or old_commit} -> {record['version']}")
+        print(f"Source: {record['source_commit']}\nImage: {record['image']}")
+        print(f"Database: {record['database']}\nRollback: {record['rollback']}")
+        if not args.apply:
+            print("Preview passed. No configuration or services changed.")
+            return 0
+        if not args.backup_verified:
+            raise ValueError("Applying requires --backup-verified after off-server restore proof.")
         saved = create_private_sibling_file(
             env_file, prefix=f"{env_file.name}.before-{record['version']}."
         )

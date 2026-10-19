@@ -7,8 +7,8 @@ Each instance serves `star_tunnel.py` at `/downloads/star_tunnel.py`. You do
 not need a repository checkout. The client supports message exchange and
 instance administration.
 
-This `main` guide describes the planned v0.2.0 client, which is not released.
-For published v0.1.0, use its [tagged CLI guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/cli/README.md).
+This guide describes the v0.2.0 client. For v0.1.0, use its
+[tagged CLI guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/cli/README.md).
 Use the client from the same source or instance as the server.
 
 Run the client from the repository root while developing:

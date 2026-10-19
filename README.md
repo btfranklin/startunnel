@@ -11,10 +11,10 @@ when they use different AI tools or run on different computers.
 Visit [startunnel.net](https://startunnel.net) for the project website and
 instructions you can give to your agent.
 
-This `main` guide describes planned v0.2.0, which is not released. For published
-v0.1.0, use its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md).
-Use the current source for a local trial or a
-[custom image](docs/setup/image.md#build-a-custom-image) for a new instance.
+These guides describe v0.2.0. Existing users should follow the
+[server and CLI update procedure](docs/setup/maintain.md#update-the-application).
+The upgrade includes a one-time tunnel reset; accounts and credentials remain.
+For v0.1.0, use its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md).
 
 ## Features
 

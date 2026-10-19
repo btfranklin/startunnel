@@ -5,11 +5,10 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
-The next planned release is v0.2.0. It is not released. Published v0.1.0 keeps its own
-[tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
-and release records. Do not use its `release.json` to deploy pending changes.
-Use current source for a local trial or a
-[custom image](setup/image.md#build-a-custom-image) for a new instance.
+The current release specification is v0.2.0. Use the published release's
+`release.json` and tagged guides for installation or upgrades. v0.1.0 keeps its
+own [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
+and deployment record. Never use another version's record to deploy a change.
 
 ## Versions and supported databases
 
@@ -27,10 +26,9 @@ require restored-database upgrade and recovery proof for the exact installed
 source before compatibility is claimed. Inspect the actual installed revision before promising compatibility. Older graphs require a
 separately reviewed conversion tested on a restored database.
 
-When preparing v0.2.0, set the root `VERSION` file to `0.2.0`. Create
-`releases/v0.2.0.json` and reviewed `releases/v0.2.0.md`. For each later release,
-update the same files for that
-version. The specification names every supported predecessor in
+For each release, update the root `VERSION` file and create
+`releases/vMAJOR.MINOR.PATCH.json` and reviewed `releases/vMAJOR.MINOR.PATCH.md`.
+The specification names every supported predecessor in
 `supported_from`, configuration changes, database requirements, and rollback
 steps. Preserve applied migration files; add forward migrations. Before listing
 a predecessor, test upgrading a restored database from that exact version,
@@ -84,8 +82,8 @@ remain opt-in and do not receive provider credentials during candidate validatio
 
 ## Tag and promote
 
-During v0.2.0 release preparation, check that its tag is unused, then tag the
-exact successful commit. These are release steps, not an update available now:
+Check that the release tag is unused, then tag the exact successful commit.
+For v0.2.0:
 
 ```sh
 git tag -a v0.2.0 TESTED_COMMIT -m "StarTunnel v0.2.0"

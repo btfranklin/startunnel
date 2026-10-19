@@ -191,10 +191,21 @@ between macOS system groups and groups already present in the Linux image.
 Candidate runtime images retain their original user settings. The `artifacts`
 directory can be a symlink to another writable directory.
 
-This proves a synthetic matching initial baseline. It does not establish
-compatibility with a production snapshot or a published predecessor, and it
-does not prove reverse migrations. Test the exact installed baseline separately
-before an installation upgrade. The first release keeps `supported_from` empty.
+The default proof uses a synthetic matching initial baseline. For the published
+v0.1.0 predecessor, download its `release.json` outside the checkout and run:
+
+```shell
+pdm run python scripts/prove_admin_upgrade.py --baseline-record /absolute/path/v0.1.0/release.json
+```
+
+This mode seeds and fully migrates the actual published v0.1.0 image, checks
+its source and version labels, and restores its dump into a separate database.
+The old image must authenticate existing passwords and keys and read the old
+messages from that restored database. The forward upgrade must pass the reset,
+new-write, repeat-migration, and recovery checks above. Manual candidate CI runs
+include both proof modes. This supports v0.1.0 in `supported_from`; it does not
+verify a particular production backup or reverse migrations. Test a restored
+copy of the actual installed database before an installation upgrade.
 
 ## Required focused evidence
 

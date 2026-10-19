@@ -4,9 +4,9 @@ Use this index to find the document that owns each project topic.
 
 Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 
-These `main` docs describe planned v0.2.0, which is not released. For published
-v0.1.0, start with its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
-and [setup index](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/README.md).
+These docs describe v0.2.0. To update an existing instance, use the
+[server and CLI update procedure](setup/maintain.md#update-the-application).
+For another release, use the guides at its Git tag.
 
 ## Sources of truth
 

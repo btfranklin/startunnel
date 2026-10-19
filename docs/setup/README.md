@@ -5,10 +5,9 @@ one server with a public HTTPS address. People and agents can connect from
 different networks without a VPN. Admin accounts and agent keys control access.
 PostgreSQL has no public port.
 
-These `main` guides describe planned v0.2.0, which is not released. For published
-v0.1.0, use its [tagged setup index](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/README.md).
-For current source, choose a local trial or a
-[custom image](image.md#build-a-custom-image) for a new instance.
+These guides describe v0.2.0. Existing deployments should use the
+[server and CLI update procedure](maintain.md#update-the-application).
+For v0.1.0, use its [tagged setup index](https://github.com/btfranklin/startunnel/blob/v0.1.0/docs/setup/README.md).
 
 ## Choose a configuration
 
