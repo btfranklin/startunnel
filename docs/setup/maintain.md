@@ -238,6 +238,7 @@ Keep DNS and certificate ports available for Caddy renewal.
 | Certificate error | Wait for DNS propagation, check certificate-authority errors in Caddy logs, and check for a restrictive DNS CAA record. Do not disable certificate verification. |
 | `admin me` rejected | Check the instance origin, private file ownership and mode, and exclusive admin-key configuration. Verify that the key and owner are active. Use server recovery if all admin access is lost. |
 | `admin doctor` fails | Inspect the safe database and maintenance checks. Check containers and database access before a mutation. |
+| CLI update required (`400`, `invalid_request`) | Check the instance origin. Run `startunnel update`, then `startunnel version` and `startunnel me` or `startunnel admin me`. If `update` is unavailable, [download and install the client](../../cli/README.md#update-the-client) from that instance. |
 | Login rejected or CSRF error | Use the exact configured HTTPS hostname. Check `STARTUNNEL_DOMAIN`, then recreate services after a configuration correction. |
 | `me` returns 401 with a key | Check the target instance and whether the credential is active. Revoke and replace a lost key. Never print the key to debug it. |
 | Storage or health failure | Check `findmnt /srv/startunnel`, free space, and container state. Reattach the correct volume before starting Docker. |
