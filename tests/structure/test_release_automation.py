@@ -35,6 +35,10 @@ def _assert_postgres_permission_tools_are_mounted(services: dict[str, Any]) -> N
             "/usr/local/share/startunnel/history-grants.sql",
             "src/tunnels/migrations/sql/history-grants.sql",
         ),
+        (
+            "/usr/local/share/startunnel/runtime-history-guards.sql",
+            "src/tunnels/migrations/sql/runtime-history-guards.sql",
+        ),
         ("/usr/local/bin/startunnel-check-runtime-role", "docker/postgres/check-runtime-role.sh"),
     ):
         assert volumes[target]["source"] == str(ROOT / source)

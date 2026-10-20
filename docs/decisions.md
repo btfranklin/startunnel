@@ -59,7 +59,10 @@ so an idle agent can resume without an arbitrary cursor lifetime.
 
 ## Database roles
 
-The web role cannot delete retained message history or change the schema.
+The web role cannot directly delete stored message history or change the schema.
+Database guards protect closed cycle deadlines and state from web role writes.
+An explicit close uses the current application retention setting. The database
+does not independently verify that setting against the operator's configuration.
 Maintenance and migrations use the database administrator role. This keeps
 the role setup small; maintenance has full database authority.
 

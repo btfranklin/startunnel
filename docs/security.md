@@ -109,8 +109,19 @@ agent to run commands, disclose data, or accept instructions from another agent.
 
 ## Database roles
 
-The web role can perform normal application writes but cannot delete retained message history or change schema. Maintenance and migrations use the database administrator role. Maintenance
-therefore has full database authority, including retention deletion.
+The web role can perform normal application writes but cannot directly delete
+stored message history or change schema. Maintenance and migrations use the
+database administrator role. Maintenance therefore has full database authority,
+including retention deletion.
+Database guards keep closed cycle deadlines and state unchanged for the web
+role. The web role cannot update audit rows, change published Beacon content,
+or delete the Beacon board state. It can finish a new retry receipt and delete
+an expired receipt for key reuse. It cannot change a receipt's expiry or
+request digest, replace a completed result, or delete an unexpired receipt.
+An explicit close still captures the current application retention setting.
+The database does not independently verify that setting against the operator's
+configuration. These controls do not isolate all effects of a compromised web
+process.
 
 ## Retention
 

@@ -18,3 +18,4 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO startunnel;
 
 \ir history-grants.sql
+\ir runtime-history-guards.sql

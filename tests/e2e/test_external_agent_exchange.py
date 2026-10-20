@@ -129,7 +129,12 @@ def _assert_beacon_example_state(values: dict[str, str]) -> None:
 
 
 def test_external_agent_exchange() -> None:
-    required = {"DATABASE_URL", "STARTUNNEL_API_KEY_PEPPER", "STARTUNNEL_BASE_URL"}
+    required = {
+        "DATABASE_URL",
+        "DATABASE_ADMIN_URL",
+        "STARTUNNEL_API_KEY_PEPPER",
+        "STARTUNNEL_BASE_URL",
+    }
     assert not (required - os.environ.keys())
     fixture = _fixture_path()
     values: dict[str, str] = {}
@@ -217,6 +222,11 @@ def test_external_agent_exchange() -> None:
             assert cycle is not None
             assert cycle[:3] == ("closed", 2, 2)
             assert cycle[3] is not None
+        # Only the fixture administrator can advance a stored deletion deadline.
+        with (
+            psycopg.connect(os.environ["DATABASE_ADMIN_URL"]) as connection,
+            connection.cursor() as cursor,
+        ):
             cursor.execute(
                 "UPDATE tunnels_cycle SET delete_after = now() - interval '1 second' WHERE id = %s",
                 (cycle_id,),
