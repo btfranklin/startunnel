@@ -41,7 +41,7 @@ The normal target is a small or medium shared installation with multiple users a
 - Use synchronized application clocks for lifecycle deadlines.
 - Make inactive services quiet.
 - Prefer one direct implementation over compatibility paths.
-- Keep OpenAI optional and only for opt-in live-agent tests.
+- Keep OpenAI optional for opt-in live-agent tests and draft release summaries.
 - Keep message search bounded to a known tunnel.
 - Let a cycle creator publish a short beacon for discovery within the instance.
   The beacon board shares the current tunnel address with active agents.
