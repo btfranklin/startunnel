@@ -92,19 +92,18 @@ def beacon_queryset() -> QuerySet[Beacon]:
     )
 
 
-def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
-    """Advance the board when a credential first replies after publication."""
+def _beacon_response_candidates(
+    *, cycle: Cycle, message: Message, now: datetime
+) -> QuerySet[Beacon]:
+    """Select locked live Beacons for a credential's first reply after publication."""
 
-    if message.parent_id is None:
-        return
-    now = timezone.now()
     earlier_responses = Message.objects.filter(
         cycle_id=OuterRef("cycle_id"),
         sender_id=message.sender_id,
         sequence__gt=OuterRef("publication_sequence"),
         parent__isnull=False,
     ).exclude(pk=message.pk)
-    beacon = (
+    return (
         Beacon.objects.select_for_update(of=("self",))
         .filter(
             cycle=cycle,
@@ -117,8 +116,15 @@ def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
         .exclude(publisher_id=message.sender_id)
         .annotate(has_earlier_response=Exists(earlier_responses))
         .filter(has_earlier_response=False)
-        .first()
     )
+
+
+def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
+    """Advance the board when a credential first replies after publication."""
+
+    if message.parent_id is None:
+        return
+    beacon = _beacon_response_candidates(cycle=cycle, message=message, now=timezone.now()).first()
     if beacon is not None:
         _advance_board_position()
 

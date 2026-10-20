@@ -5,9 +5,11 @@ from uuid import uuid4
 
 import pytest
 from django.db import connection, transaction
+from django.utils import timezone
 
 from accounts.models import AdminReceipt
 from core.models import AgentReceipt
+from tunnels.beacons import _beacon_response_candidates, publish_beacon
 from tunnels.cycles import create_tunnel
 from tunnels.models import Cycle, Message
 
@@ -42,25 +44,25 @@ def test_beacon_lookup_indexes_match_the_actual_query_expressions(
                     byte_count=1,
                 )
             )
-    Message.objects.bulk_create(replies, batch_size=500)
+    Message.objects.bulk_create([row for row in replies if row.sequence <= 64], batch_size=500)
+    Cycle.objects.update(message_count=64, next_sequence=65, content_bytes=64)
+    publish_beacon(
+        credential=publisher,
+        idempotency_key="beacon-index-publication",
+        address=created.address,
+        text="Inspect index eligibility.",
+    )
+    Message.objects.bulk_create([row for row in replies if row.sequence > 64], batch_size=500)
     Cycle.objects.update(message_count=128, next_sequence=129, content_bytes=128)
     current = replies[-1]
     resource_id = uuid4()
-    # Match note_beacon_response's earlier-response probe. The sender occurs in
-    # many cycles, while only a few of its replies follow this publication.
-    earlier_responses = (
-        Message.objects.filter(
-            cycle_id=current.cycle_id,
-            sender_id=responder.pk,
-            sequence__gt=64,
-            parent__isnull=False,
-        )
-        .exclude(pk=current.pk)
-        .order_by()
-        .values("pk")[:1]
-    )
+    # Explain the production candidate query, including its correlated response
+    # probe and the same one-row bound used by first().
+    candidates = _beacon_response_candidates(
+        cycle=current.cycle, message=current, now=timezone.now()
+    )[:1]
     probes = [
-        (earlier_responses, "message_beacon_responders"),
+        (candidates, "message_beacon_responders"),
         (AgentReceipt.objects.filter(resource_id=resource_id), "resource_id"),
         (
             AdminReceipt.objects.filter(
@@ -71,7 +73,8 @@ def test_beacon_lookup_indexes_match_the_actual_query_expressions(
     ]
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("ANALYZE tunnels_message")
-        # Receipt expression probes need no fixture rows; check their eligibility.
+        # Disabling sequential scans proves eligibility, not normal planner choice
+        # or execution time. Receipt expression probes need no fixture rows.
         cursor.execute("SET LOCAL enable_seqscan = off")
         for query, expected_index in probes:
             plan = query.explain(format="json")
