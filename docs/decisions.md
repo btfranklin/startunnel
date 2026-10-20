@@ -80,3 +80,13 @@ The operator selects HTTP or HTTPS. HTTP can serve trusted container networks,
 VPNs, and private routes. It sends keys and downloaded client code without
 transport encryption. Use HTTPS on untrusted networks. The client update source
 is the configured instance; updates trust that instance and its transport.
+
+## Official CLI release compatibility
+
+The v0.3.0 release explicitly requires official CLI v0.3.0 or later. This is an
+exception to the compatible minor-release rule. Older official clients receive
+an update error before authentication or domain writes. The client download
+remains available so users can update explicitly and verify access with `me`
+or `admin me`. The minimum version does not replace authentication.
+See [client compatibility](../cli/README.md#client-compatibility) for the headers
+and source-build behavior.

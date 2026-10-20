@@ -18,6 +18,10 @@ changes need an explicit compatibility decision and migration instructions,
 including during the initial `0.x` series. Never move a published tag or replace
 a published version's deployment record. Fix a released defect in a new version.
 
+The [v0.3.0 official CLI requirement](decisions.md#official-cli-release-compatibility)
+is an explicit exception to compatible minor releases. It requires a separate
+client update after the server update.
+
 The first published baseline is `v0.1.0`. The standard released path to
 `v0.3.0` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
 start with the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
