@@ -13,6 +13,7 @@ Compose proofs must use disposable projects through the isolated runner.
 | [check_docs.py](check_docs.py) | Check documentation routes, links, and example includes |
 | [check_examples.py](check_examples.py) | Check example syntax and credential handling |
 | [check_openapi.py](check_openapi.py) | Generate or check the public wire schema |
+| [generate_client_contract.py](generate_client_contract.py) | Generate or check the bundled CLI response definitions |
 | [check_secrets.py](check_secrets.py) | Scan the selected Git scope for secrets |
 | [check_structure.py](check_structure.py) | Check repository ownership and import direction |
 | [check_templates.py](check_templates.py) | Run template lint checks |

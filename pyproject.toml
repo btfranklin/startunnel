@@ -115,7 +115,7 @@ test = "pytest"
 test-postgres = { composite = ["pytest tests/integration -m postgres --cov=src --cov-branch --cov-report=json:postgres-coverage.json --cov-fail-under=0", "python scripts/check_critical_coverage.py postgres-coverage.json --postgres"] }
 check = "python scripts/check.py"
 mypy = { cmd = "mypy", env = { PYTHONPATH = "src" } }
-openapi = "python manage.py export_openapi --output generated/openapi.json"
+openapi = { composite = ["python manage.py export_openapi --output generated/openapi.json", "python scripts/generate_client_contract.py"] }
 inspect = "python manage.py inspect_runtime"
 load-profile = "python scripts/run_full_load_profile.py"
 production-up = "python scripts/start_production.py"

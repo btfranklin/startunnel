@@ -7,6 +7,11 @@ for stable `error.code` values and recovery actions.
 
 The [CLI](../cli/README.md#agent-api-commands) provides a command for each agent
 operation. It accepts these same JSON request bodies on stdin.
+The CLI's offline `schema` command bundles response definitions generated from
+this API contract. `pdm run openapi` updates both artifacts. The bundled
+definitions describe the client build; they do not verify a remote server.
+See [CLI response help](../cli/README.md#agent-command-help) for stdout changes
+and the CLI error envelope.
 
 ## Routes
 

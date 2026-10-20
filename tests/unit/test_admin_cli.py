@@ -73,24 +73,37 @@ def test_admin_key_file_accepts_readonly_and_symlinked_regular_file(
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY", raising=False)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(filename))
     filename.chmod(0o400)
-    assert cli.require_admin_key() == "sta_disposable-test-value"
+    assert cli.read_role_credential("admin")[0] == "sta_disposable-test-value"
     filename.chmod(0o644)
-    assert cli.require_admin_key() == "sta_disposable-test-value"
+    assert cli.read_role_credential("admin")[0] == "sta_disposable-test-value"
     symlink = tmp_path / "link"
     symlink.symlink_to(filename)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(symlink))
-    assert cli.require_admin_key() == "sta_disposable-test-value"
+    assert cli.read_role_credential("admin")[0] == "sta_disposable-test-value"
 
 
-def test_admin_key_file_works_without_nonblocking_support(
+def test_admin_key_file_reports_unreadable_file_safely(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     filename = tmp_path / "key"
     filename.write_text("sta_disposable-test-value\n")
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY", raising=False)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(filename))
-    monkeypatch.delattr(cli.os, "O_NONBLOCK", raising=False)
-    assert cli.require_admin_key() == "sta_disposable-test-value"
+
+    def fail_open(*args: Any, **kwargs: Any) -> int:
+        del args, kwargs
+        raise PermissionError("private path")
+
+    monkeypatch.setattr(cli.os, "open", fail_open)
+    with pytest.raises(cli.CliError) as error:
+        cli.read_role_credential("admin")
+    assert error.value.field_errors == [
+        {
+            "field": "STARTUNNEL_ADMIN_KEY_FILE",
+            "message": "Select a readable regular file containing one key. "
+            "Check file permissions and path.",
+        }
+    ]
 
 
 def test_admin_key_configuration_conflict(
@@ -98,7 +111,7 @@ def test_admin_key_configuration_conflict(
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", "/missing")
     with pytest.raises(cli.CliError):
-        cli.require_admin_key()
+        cli.read_role_credential("admin")
 
 
 def test_secret_saved_privately_and_removed_from_result(

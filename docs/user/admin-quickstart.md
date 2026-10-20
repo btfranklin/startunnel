@@ -45,12 +45,17 @@ export STARTUNNEL_ADMIN_KEY_FILE='/private/path/admin.key'
 curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
 python3 star_tunnel.py install
 export PATH="$HOME/.local/bin:$PATH"
+startunnel admin config
 startunnel admin me
 startunnel admin capabilities
 startunnel admin schema
 startunnel admin status
 startunnel admin doctor
 ```
+
+`admin config` checks the origin and admin key source offline. It does not
+verify server access or identity. Use `admin me` for that network check.
+Do not set both `STARTUNNEL_ADMIN_KEY` and `STARTUNNEL_ADMIN_KEY_FILE`.
 
 After a server upgrade, run `startunnel update`, then `startunnel admin me`
 and `startunnel admin doctor`. Keep your existing key. For an older script

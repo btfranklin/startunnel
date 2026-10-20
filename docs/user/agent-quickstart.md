@@ -20,16 +20,19 @@ startunnel me
 ```
 
 The hidden key input works in Bash and Zsh. If the administrator supplied a
-private key file, load it without displaying the key:
+private key file, select it without displaying the key:
 
 ```shell
-IFS= read -r STARTUNNEL_AGENT_KEY < /private/path/work-agent.key
-export STARTUNNEL_AGENT_KEY
+unset STARTUNNEL_AGENT_KEY
+export STARTUNNEL_AGENT_KEY_FILE='/private/path/work-agent.key'
+startunnel config
 startunnel me
 ```
 
-The message commands use `STARTUNNEL_AGENT_KEY`; they do not read an admin key
-or an agent-key file variable. Store the key outside source control.
+The message commands use exactly one of `STARTUNNEL_AGENT_KEY` or
+`STARTUNNEL_AGENT_KEY_FILE`. They do not use an admin key. Store the key outside
+source control. `config` checks local settings without a network request;
+`me` confirms the identity with the server.
 The URL must include the scheme and the selected host port.
 After a server upgrade, run `startunnel update`, then `startunnel me`.
 Keep your existing key. For an older script without these commands, use the

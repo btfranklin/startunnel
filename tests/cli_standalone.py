@@ -119,6 +119,7 @@ class StandaloneClientTests(unittest.TestCase):
         version = self.successful_json(self.run_client("version"))
         self.assertEqual(version["version"], "unreleased")
         self.assertIsNone(version["source_revision"])
+        self.assertEqual(version["command_path"], str(self.client.resolve()))
         self.assertEqual(version["sha256"], hashlib.sha256(self.client.read_bytes()).hexdigest())
         schema = self.successful_json(self.run_client("schema"))
         names = {command["command"] for command in schema["commands"]}
@@ -127,10 +128,49 @@ class StandaloneClientTests(unittest.TestCase):
         self.assertEqual(
             filtered["commands"], [c for c in schema["commands"] if c["command"] == "read-tree"]
         )
+        self.assertEqual(filtered["client"]["version"], version["version"])
+        self.assertEqual(filtered["contract_source"], "bundled")
+        self.assertFalse(filtered["remote_server_verified"])
+        self.assertEqual(
+            filtered["commands"][0]["stdout_schemas"]["200"],
+            {"$ref": "#/components/schemas/TreeResponse"},
+        )
+        tree = filtered["components"]["schemas"]["TreeResponse"]
+        self.assertIn("next_page_cursor", tree["required"])
+        self.assertIn({"type": "null"}, tree["properties"]["next_page_cursor"]["anyOf"])
+        admin = self.successful_json(self.run_client("admin", "schema", "agents", "create"))
+        output = admin["commands"][0]["stdout_schemas"]["200"]
+        self.assertIn("secret_output", output["required"])
+        self.assertNotIn("secret", output["properties"])
         help_result = self.run_client("--help")
         self.assertEqual(help_result.returncode, 0)
         self.assertEqual(help_result.stderr, b"")
         self.assertIn(b"--help", help_result.stdout)
+        self.assertEqual(self.requests, [])
+
+    def test_offline_config_reports_agent_and_admin_sources(self) -> None:
+        agent_file = self.directory / "agent.key"
+        admin_file = self.directory / "admin.key"
+        agent_file.write_text("st_standalone-agent-key\n", encoding="utf-8")
+        admin_file.write_text("sta_standalone-admin-key\n", encoding="utf-8")
+        environment = {
+            "STARTUNNEL_BASE_URL": self.base_url + "/",
+            "STARTUNNEL_AGENT_KEY_FILE": str(agent_file),
+            "STARTUNNEL_ADMIN_KEY_FILE": str(admin_file),
+        }
+        agent = self.successful_json(self.run_client("config", environment=environment))
+        admin = self.successful_json(self.run_client("admin", "config", environment=environment))
+        self.assertEqual(agent["base_url"], self.base_url)
+        self.assertEqual(agent["intended_role"], "agent")
+        self.assertEqual(agent["credential_source"], "STARTUNNEL_AGENT_KEY_FILE")
+        self.assertEqual(agent["credential_file"], str(agent_file.resolve()))
+        self.assertEqual(admin["intended_role"], "admin")
+        self.assertEqual(admin["credential_source"], "STARTUNNEL_ADMIN_KEY_FILE")
+        self.assertEqual(admin["credential_file"], str(admin_file.resolve()))
+        self.assertFalse(agent["authentication_verified"])
+        self.assertFalse(admin["authentication_verified"])
+        self.assertNotIn(b"standalone-agent-key", json.dumps(agent).encode())
+        self.assertNotIn(b"standalone-admin-key", json.dumps(admin).encode())
         self.assertEqual(self.requests, [])
 
     def test_agent_unicode_request_and_ascii_json_output(self) -> None:
@@ -300,9 +340,67 @@ class StandaloneClientTests(unittest.TestCase):
             after = self.successful_json(self.run_client("version", installed=command))
             self.assertEqual(command.read_bytes(), self.download)
             self.assertEqual(after["sha256"], hashlib.sha256(self.download).hexdigest())
+            self.assertEqual(after["command_path"], str(command.resolve()))
             self.assertNotEqual(before["sha256"], after["sha256"])
             self.assertEqual(self.requests[0]["path"], "/downloads/star_tunnel.py")
             self.assertIsNone(self.requests[0]["headers"].get("Authorization"))
+
+    def test_relative_and_symlink_invocations_report_and_update_the_resolved_file(self) -> None:
+        artifacts = ROOT / "artifacts"
+        artifacts.mkdir(exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(prefix="cli-paths-", dir=artifacts)
+        self.addCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        command = directory / "relative-client.py"
+        shutil.copyfile(self.client, command)
+        command.chmod(0o755)
+        result = subprocess.run(
+            [sys.executable, "relative-client.py", "version"],
+            cwd=directory,
+            env=self.environment,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        version = self.successful_json(result)
+        self.assertEqual(version["command_path"], str(command.resolve()))
+        self.assertEqual(version["sha256"], hashlib.sha256(command.read_bytes()).hexdigest())
+        second_command = directory / "second-client.py"
+        shutil.copyfile(self.client, second_command)
+        second_bytes = second_command.read_bytes()
+        second_result = subprocess.run(
+            [sys.executable, "-I", str(second_command), "version"],
+            cwd=directory,
+            env=self.environment,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        second = self.successful_json(second_result)
+        self.assertEqual(second["command_path"], str(second_command.resolve()))
+        self.assertNotEqual(version["command_path"], second["command_path"])
+
+        if os.name != "posix":
+            return
+        alias = directory / "client-link"
+        alias.symlink_to(command)
+        before = self.successful_json(self.run_client("version", installed=alias))
+        self.assertEqual(before["command_path"], str(command.resolve()))
+        self.download += b"\n# Update through a symlink.\n"
+        updated = self.successful_json(
+            self.run_client(
+                "update",
+                installed=alias,
+                environment={"STARTUNNEL_BASE_URL": self.base_url},
+            )
+        )
+        self.assertEqual(updated["command_path"], str(command.resolve()))
+        self.assertEqual(command.read_bytes(), self.download)
+        self.assertEqual(second_command.read_bytes(), second_bytes)
+        self.assertTrue(alias.is_symlink())
+        after = self.successful_json(self.run_client("version", installed=alias))
+        self.assertEqual(after["command_path"], str(command.resolve()))
+        self.assertEqual(after["sha256"], hashlib.sha256(command.read_bytes()).hexdigest())
 
 
 if __name__ == "__main__":

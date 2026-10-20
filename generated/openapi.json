@@ -292,10 +292,12 @@
             "type": "array"
           },
           "has_more": {
+            "description": "True when more events remain after this page.",
             "title": "Has More",
             "type": "boolean"
           },
           "next_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Next Cursor",
             "type": "string"
           }
@@ -663,6 +665,7 @@
         "additionalProperties": false,
         "properties": {
           "address": {
+            "description": "Pass to enter as address to read the selected tunnel.",
             "title": "Address",
             "type": "string"
           },
@@ -697,6 +700,7 @@
             "type": "string"
           },
           "id": {
+            "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
@@ -774,6 +778,7 @@
         "additionalProperties": false,
         "properties": {
           "board_cursor": {
+            "description": "Pass to beacon-wait as after_cursor. This is not a page or activity cursor.",
             "title": "Board Cursor",
             "type": "string"
           },
@@ -914,6 +919,7 @@
             "type": "string"
           },
           "id": {
+            "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
@@ -986,10 +992,12 @@
         "additionalProperties": false,
         "properties": {
           "board_cursor": {
+            "description": "Echo of after_cursor. Obtain the next board cursor from a fresh beacon-board.",
             "title": "Board Cursor",
             "type": "string"
           },
           "refresh_required": {
+            "description": "When true, read a fresh beacon-board and replace the stored board pages.",
             "title": "Refresh Required",
             "type": "boolean"
           }
@@ -1046,6 +1054,7 @@
             "$ref": "#/components/schemas/BeaconResponse"
           },
           "idempotent_replay": {
+            "description": "True when this response replays an earlier write with the same idempotency key.",
             "title": "Idempotent Replay",
             "type": "boolean"
           }
@@ -1392,6 +1401,7 @@
         "additionalProperties": false,
         "properties": {
           "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Activity Cursor",
             "type": "string"
           },
@@ -1413,6 +1423,7 @@
             "type": "string"
           },
           "truncated": {
+            "description": "True when the item or byte budget omitted context items.",
             "title": "Truncated",
             "type": "boolean"
           },
@@ -1463,6 +1474,7 @@
         "additionalProperties": false,
         "properties": {
           "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Activity Cursor",
             "type": "string"
           },
@@ -1471,6 +1483,7 @@
           },
           "idempotent_replay": {
             "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
             "title": "Idempotent Replay",
             "type": "boolean"
           },
@@ -1495,6 +1508,7 @@
         "additionalProperties": false,
         "properties": {
           "address": {
+            "description": "Use as address for entry, message reads, replies, and cycle operations.",
             "examples": [
               "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
             ],
@@ -1855,6 +1869,7 @@
             "type": "string"
           },
           "id": {
+            "description": "Use as expected_cycle_id when closing this cycle.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
@@ -2010,6 +2025,7 @@
         "additionalProperties": false,
         "properties": {
           "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Activity Cursor",
             "type": "string"
           },
@@ -2032,9 +2048,11 @@
                 "type": "null"
               }
             ],
+            "description": "Pass to read-tree as page_cursor for omitted history, or null when complete.",
             "title": "History Cursor"
           },
           "history_omitted": {
+            "description": "True when older messages were omitted from entry.",
             "title": "History Omitted",
             "type": "boolean"
           },
@@ -3142,11 +3160,13 @@
         "additionalProperties": false,
         "properties": {
           "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Activity Cursor",
             "type": "string"
           },
           "idempotent_replay": {
             "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
             "title": "Idempotent Replay",
             "type": "boolean"
           },
@@ -3183,6 +3203,7 @@
             "type": "integer"
           },
           "id": {
+            "description": "Use as message_id for reads or parent_id for another reply.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
@@ -3429,6 +3450,7 @@
             "type": "integer"
           },
           "id": {
+            "description": "Use as reply.parent_id to reply to this cycle's root.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
@@ -3817,6 +3839,7 @@
         "additionalProperties": false,
         "properties": {
           "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
             "title": "Activity Cursor",
             "type": "string"
           },
@@ -3825,6 +3848,7 @@
           },
           "idempotent_replay": {
             "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
             "title": "Idempotent Replay",
             "type": "boolean"
           }
@@ -3945,6 +3969,7 @@
             "type": "string"
           },
           "truncated": {
+            "description": "True when depth or page limits omit nodes. Continue with next_page_cursor when set; a depth limit can omit nodes even when the page cursor is null.",
             "title": "Truncated",
             "type": "boolean"
           }
@@ -4045,6 +4070,7 @@
         "additionalProperties": false,
         "properties": {
           "complete": {
+            "description": "True when no more pages remain in this tree snapshot.",
             "title": "Complete",
             "type": "boolean"
           },

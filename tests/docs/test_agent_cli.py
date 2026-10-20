@@ -901,6 +901,7 @@ def test_client_version_is_offline_and_describes_the_running_file() -> None:
     assert json.loads(result.stdout) == {
         "version": "unreleased",
         "source_revision": None,
+        "command_path": str(CLI.resolve()),
         "sha256": hashlib.sha256(CLI.read_bytes()).hexdigest(),
     }
 
@@ -922,7 +923,7 @@ def test_agent_schema_is_offline_and_can_filter_one_command(command: str | None)
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
     schema = json.loads(result.stdout)
-    assert schema["authentication"] == ["STARTUNNEL_AGENT_KEY"]
+    assert schema["authentication"] == ["STARTUNNEL_AGENT_KEY", "STARTUNNEL_AGENT_KEY_FILE"]
     assert schema["base_url_environment"] == "STARTUNNEL_BASE_URL"
     assert schema["openapi_path"] == "/api/v1/openapi.json"
     all_commands = cli.agent_schema()["commands"]
@@ -932,6 +933,301 @@ def test_agent_schema_is_offline_and_can_filter_one_command(command: str | None)
     ]
     if command is not None:
         assert len(schema["commands"]) == 1
+
+
+def test_agent_config_is_offline_and_reports_normalized_source() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test/",
+            "STARTUNNEL_AGENT_KEY": "st_private-config-key",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert json.loads(result.stdout) == {
+        "base_url": "https://example.test",
+        "base_url_source": "STARTUNNEL_BASE_URL",
+        "intended_role": "agent",
+        "credential_source": "STARTUNNEL_AGENT_KEY",
+        "credential_file": None,
+        "authentication_verified": False,
+    }
+    assert "st_private-config-key" not in result.stdout
+
+
+def test_agent_config_accepts_both_roles_but_reports_agent_source(tmp_path: Path) -> None:
+    agent_file = tmp_path / "agent.key"
+    admin_file = tmp_path / "admin.key"
+    agent_file.write_text("st_agent-private\n", encoding="utf-8")
+    admin_file.write_text("sta_admin-private\n", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test",
+            "STARTUNNEL_AGENT_KEY_FILE": str(agent_file),
+            "STARTUNNEL_ADMIN_KEY_FILE": str(admin_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["intended_role"] == "agent"
+    assert value["credential_source"] == "STARTUNNEL_AGENT_KEY_FILE"
+    assert value["credential_file"] == str(agent_file.resolve())
+    assert "st_agent-private" not in result.stdout
+
+
+def test_admin_config_is_offline_and_uses_its_own_credential_file(tmp_path: Path) -> None:
+    key_file = tmp_path / "admin.key"
+    key_file.write_text("sta_admin-private\n", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test/",
+            "STARTUNNEL_ADMIN_KEY_FILE": str(key_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "admin", "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["intended_role"] == "admin"
+    assert value["credential_source"] == "STARTUNNEL_ADMIN_KEY_FILE"
+    assert value["credential_file"] == str(key_file.resolve())
+    assert value["authentication_verified"] is False
+    assert "admin-private" not in result.stdout
+
+
+def test_agent_key_file_is_used_by_the_api_request(tmp_path: Path) -> None:
+    key_file = tmp_path / "agent.key"
+    key_file.write_text("st_file-agent-key\n", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "unused",
+            "STARTUNNEL_AGENT_KEY_FILE": str(key_file),
+        }
+    )
+    with serve(Response(200, {"agent": {"id": "safe-id"}})) as (base_url, scenario):
+        environment["STARTUNNEL_BASE_URL"] = base_url
+        result = subprocess.run(
+            [sys.executable, str(CLI), "me"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert scenario.requests[0]["headers"]["Authorization"] == "Bearer st_file-agent-key"
+
+
+def test_inherited_key_source_can_be_overridden_in_one_subprocess(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("STARTUNNEL_AGENT_KEY", "st_parent-key")
+    monkeypatch.delenv("STARTUNNEL_AGENT_KEY_FILE", raising=False)
+    key_file = tmp_path / "agent.key"
+    key_file.write_text("st_child-key", encoding="utf-8")
+    environment = os.environ.copy()
+    environment.pop("STARTUNNEL_AGENT_KEY")
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test/",
+            "STARTUNNEL_AGENT_KEY_FILE": str(key_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["credential_source"] == "STARTUNNEL_AGENT_KEY_FILE"
+    assert os.environ["STARTUNNEL_AGENT_KEY"] == "st_parent-key"
+
+
+def test_config_rejects_direct_and_file_sources_for_one_role(tmp_path: Path) -> None:
+    key_file = tmp_path / "agent.key"
+    key_file.write_text("st_private-key", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test",
+            "STARTUNNEL_AGENT_KEY": "st_private-direct-key",
+            "STARTUNNEL_AGENT_KEY_FILE": str(key_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "STARTUNNEL_AGENT_KEY" in result.stderr
+    assert "STARTUNNEL_AGENT_KEY_FILE" in result.stderr
+    assert "private" not in result.stderr
+
+
+def test_empty_direct_setting_conflicts_with_a_file_source(tmp_path: Path) -> None:
+    key_file = tmp_path / "agent.key"
+    key_file.write_text("st_private-key", encoding="utf-8")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test",
+            "STARTUNNEL_AGENT_KEY": "",
+            "STARTUNNEL_AGENT_KEY_FILE": str(key_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "STARTUNNEL_AGENT_KEY" in result.stderr
+    assert "STARTUNNEL_AGENT_KEY_FILE" in result.stderr
+    assert "private" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("contents", "directory", "mode"),
+    [
+        ("missing-file", False, 0o600),
+        ("", False, 0o600),
+        ("x" * 4097, False, 0o600),
+        (None, True, 0o700),
+        (b"\xff", False, 0o600),
+    ],
+)
+def test_config_rejects_invalid_key_files_safely(
+    tmp_path: Path, contents: str | bytes | None, directory: bool, mode: int
+) -> None:
+    key_file = tmp_path / "setting-visible-marker"
+    if directory:
+        key_file.mkdir(mode=mode)
+    else:
+        if contents not in {None, "missing-file"}:
+            key_file.write_bytes(
+                contents.encode("utf-8") if isinstance(contents, str) else contents
+            )
+        if contents != "missing-file":
+            key_file.chmod(mode)
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment.update(
+        {
+            "STARTUNNEL_BASE_URL": "https://example.test",
+            "STARTUNNEL_AGENT_KEY_FILE": str(key_file),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "configuration_error"
+    assert error["field_errors"][0]["field"] == "STARTUNNEL_AGENT_KEY_FILE"
+    assert str(key_file) not in result.stderr
+    assert "setting-visible-marker" not in result.stderr
+
+
+def test_config_rejects_missing_agent_credential() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
+    }
+    environment["STARTUNNEL_BASE_URL"] = "https://example.test"
+    result = subprocess.run(
+        [sys.executable, str(CLI), "config"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == "configuration_error"
+    assert {item["field"] for item in error["field_errors"]} == {
+        "STARTUNNEL_AGENT_KEY",
+        "STARTUNNEL_AGENT_KEY_FILE",
+    }
+
+
+def test_config_rejects_malformed_origin_without_reflection() -> None:
+    result = run_cli("http://user:private-origin-value@localhost:8", "config")
+
+    assert result.returncode == 1
+    assert json.loads(result.stderr)["error"]["field_errors"][0]["field"] == ("STARTUNNEL_BASE_URL")
+    assert "private-origin-value" not in result.stderr
+
+
+def test_revoked_agent_key_me_failure_does_not_reflect_key() -> None:
+    with serve(
+        Response(
+            401,
+            {"error": {"code": "invalid_credential", "message": "bad key"}},
+        )
+    ) as (base_url, scenario):
+        result = run_cli(
+            base_url,
+            "me",
+            extra_env={"STARTUNNEL_AGENT_KEY": "st_revoked-private-key"},
+        )
+
+    assert result.returncode == 1
+    assert "st_revoked-private-key" not in result.stderr
+    assert scenario.requests[0]["path"] == "/api/v1/me"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Executable installation requires Linux or macOS.")
@@ -1072,6 +1368,7 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     assert json.loads(version.stdout) == {
         "version": "v0.1.0",
         "source_revision": "a" * 40,
+        "command_path": str(command.resolve()),
         "sha256": hashlib.sha256(updated).hexdigest(),
     }
 

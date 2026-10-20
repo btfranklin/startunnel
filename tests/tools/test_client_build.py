@@ -46,6 +46,7 @@ def test_stamped_client_reports_metadata_outside_the_checkout(
     assert json.loads(result.stdout) == {
         "version": version,
         "source_revision": source_revision or None,
+        "command_path": str(client.resolve()),
         "sha256": hashlib.sha256(client.read_bytes()).hexdigest(),
     }
 

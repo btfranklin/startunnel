@@ -38,6 +38,12 @@ IdempotencyKey = HeaderEx[
 
 EXAMPLE_ADDRESS = "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
 EXAMPLE_DISPLAY_ADDRESS = "🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜦🝡"
+ACTIVITY_CURSOR_DESCRIPTION = (
+    "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events."
+)
+REPLAY_DESCRIPTION = (
+    "True when this response replays an earlier write with the same idempotency key."
+)
 
 
 class PublicSchema(Schema):
@@ -112,7 +118,7 @@ class MessageResponse(PublicSchema):
 
 
 class RootSummaryResponse(PublicSchema):
-    id: UUID
+    id: UUID = Field(description="Use as reply.parent_id to reply to this cycle's root.")
     parent_id: None = None
     sequence: int
     depth: int
@@ -121,7 +127,10 @@ class RootSummaryResponse(PublicSchema):
 class CreatedTunnelDetailsResponse(PublicSchema):
     id: UUID
     label: str
-    address: str = Field(examples=[EXAMPLE_ADDRESS])
+    address: str = Field(
+        examples=[EXAMPLE_ADDRESS],
+        description="Use as address for entry, message reads, replies, and cycle operations.",
+    )
     display_address: str = Field(examples=[EXAMPLE_DISPLAY_ADDRESS])
     address_transcription: str
     created_at: datetime
@@ -129,7 +138,7 @@ class CreatedTunnelDetailsResponse(PublicSchema):
 
 
 class CycleSummaryResponse(PublicSchema):
-    id: UUID
+    id: UUID = Field(description="Use as expected_cycle_id when closing this cycle.")
     number: int
     label: str
     state: str
@@ -143,9 +152,9 @@ class CycleSummaryResponse(PublicSchema):
 class CreateTunnelResponse(PublicSchema):
     tunnel: CreatedTunnelDetailsResponse
     cycle: CycleSummaryResponse
-    activity_cursor: str
+    activity_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
     trust_notice: str
-    idempotent_replay: bool = False
+    idempotent_replay: bool = Field(default=False, description=REPLAY_DESCRIPTION)
 
 
 class DirectoryCycleResponse(PublicSchema):
@@ -176,7 +185,7 @@ class PostReplyRequest(PublicSchema):
 
 
 class PostedMessageSummaryResponse(PublicSchema):
-    id: UUID
+    id: UUID = Field(description="Use as message_id for reads or parent_id for another reply.")
     cycle_id: UUID
     cycle_number: int
     parent_id: UUID
@@ -187,8 +196,8 @@ class PostedMessageSummaryResponse(PublicSchema):
 
 class PostReplyResponse(PublicSchema):
     message: PostedMessageSummaryResponse
-    activity_cursor: str
-    idempotent_replay: bool = False
+    activity_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
+    idempotent_replay: bool = Field(default=False, description=REPLAY_DESCRIPTION)
 
 
 class TreeRequest(PublicSchema):
@@ -216,7 +225,7 @@ class TreeResponse(PublicSchema):
     next_page_cursor: str | None = Field(
         description="Continue this snapshot with the same filters, or null when complete."
     )
-    complete: bool
+    complete: bool = Field(description="True when no more pages remain in this tree snapshot.")
     stats: TreeStatsResponse
 
 
@@ -289,8 +298,8 @@ class ActivityEventResponse(PublicSchema):
 
 class ActivityResponse(PublicSchema):
     events: list[ActivityEventResponse]
-    next_cursor: str
-    has_more: bool
+    next_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
+    has_more: bool = Field(description="True when more events remain after this page.")
 
 
 class CheckpointRequest(PublicSchema):
@@ -336,10 +345,10 @@ class ContextResponse(PublicSchema):
         description="Opaque fixed snapshot. Current access and retention rules still apply."
     )
     items: list[ContextItemResponse]
-    activity_cursor: str
+    activity_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
     used_items: int
     used_bytes: int
-    truncated: bool
+    truncated: bool = Field(description="True when the item or byte budget omitted context items.")
 
 
 class EnterRequest(PublicSchema):
@@ -354,9 +363,11 @@ class EnterResponse(PublicSchema):
     root: MessageResponse | None
     recent_messages: list[MessageResponse]
     snapshot_sequence: int | None
-    history_omitted: bool
-    history_cursor: str | None
-    activity_cursor: str
+    history_omitted: bool = Field(description="True when older messages were omitted from entry.")
+    history_cursor: str | None = Field(
+        description="Pass to read-tree as page_cursor for omitted history, or null when complete."
+    )
+    activity_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
 
 
 class SearchRequest(PublicSchema):
@@ -452,7 +463,12 @@ class SubtreeResponse(PublicSchema):
     next_page_cursor: str | None = Field(
         description="Continue this snapshot with the same filters, or null when complete."
     )
-    truncated: bool
+    truncated: bool = Field(
+        description=(
+            "True when depth or page limits omit nodes. Continue with next_page_cursor when set; "
+            "a depth limit can omit nodes even when the page cursor is null."
+        )
+    )
 
 
 class LeavesRequest(PublicSchema):
@@ -545,8 +561,8 @@ class RolloverCycleRequest(StartCycleRequest):
 
 class StartedCycleResponse(PublicSchema):
     cycle: CycleSummaryResponse
-    activity_cursor: str
-    idempotent_replay: bool = False
+    activity_cursor: str = Field(description=ACTIVITY_CURSOR_DESCRIPTION)
+    idempotent_replay: bool = Field(default=False, description=REPLAY_DESCRIPTION)
 
 
 class AgentIdentityResponse(PublicSchema):
@@ -633,7 +649,7 @@ class BeaconWithdrawRequest(PublicSchema):
 
 
 class BeaconResponse(PublicSchema):
-    id: UUID
+    id: UUID = Field(description="Pass to beacon-withdraw as beacon_id with the tunnel address.")
     tunnel_id: UUID
     cycle_id: UUID
     publisher: AgentIdentityResponse
@@ -648,12 +664,12 @@ class BeaconResponse(PublicSchema):
 
 
 class BeaconBoardItem(BeaconResponse):
-    address: str
+    address: str = Field(description="Pass to enter as address to read the selected tunnel.")
 
 
 class BeaconWriteResponse(PublicSchema):
     beacon: BeaconResponse
-    idempotent_replay: bool
+    idempotent_replay: bool = Field(description=REPLAY_DESCRIPTION)
 
 
 class BeaconBoardRequest(PublicSchema):
@@ -662,7 +678,9 @@ class BeaconBoardRequest(PublicSchema):
 
 
 class BeaconBoardResponse(PublicSchema):
-    board_cursor: str
+    board_cursor: str = Field(
+        description="Pass to beacon-wait as after_cursor. This is not a page or activity cursor."
+    )
     items: list[BeaconBoardItem]
     snapshot_position: int
     next_page_cursor: str | None = Field(
@@ -677,5 +695,9 @@ class BeaconWaitRequest(PublicSchema):
 
 
 class BeaconWaitResponse(PublicSchema):
-    refresh_required: bool
-    board_cursor: str
+    refresh_required: bool = Field(
+        description="When true, read a fresh beacon-board and replace the stored board pages."
+    )
+    board_cursor: str = Field(
+        description="Echo of after_cursor. Obtain the next board cursor from a fresh beacon-board."
+    )

@@ -114,6 +114,12 @@ GATES = [
         "Run `pdm run openapi`, inspect the diff, and update docs/api.md.",
     ),
     Gate(
+        "CLI response contract",
+        (sys.executable, "scripts/generate_client_contract.py", "--check"),
+        "cli/README.md",
+        "Run `pdm run openapi`, then inspect the API and CLI contract changes.",
+    ),
+    Gate(
         "Examples",
         (sys.executable, "scripts/check_examples.py"),
         "examples/README.md",
