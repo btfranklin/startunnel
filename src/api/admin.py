@@ -29,6 +29,7 @@ from accounts.admin_commands import (
     TunnelRetire,
     TunnelRollover,
     TunnelRotate,
+    TunnelsRetireForCredential,
     TunnelStart,
 )
 from accounts.admin_data import OperationReference, admin_resource, beacon_resource, tunnel_resource
@@ -188,8 +189,20 @@ class OperationReceipt(Schema):
     audit_event_id: UUID
 
 
+class TunnelRetirementResult(Schema):
+    credential_id: UUID
+    retired_tunnel_ids: list[UUID]
+
+
 class SafeAdminResult(Schema):
-    resource: AccountResource | KeyResource | AgentResource | TunnelResource | BeaconResponse
+    resource: (
+        AccountResource
+        | KeyResource
+        | AgentResource
+        | TunnelResource
+        | BeaconResponse
+        | TunnelRetirementResult
+    )
     operation: OperationReceipt
 
 
@@ -239,7 +252,14 @@ class InstanceStatus(Schema):
     runtime: dict[str, bool] | None = None
 
 
-ResourceResponse = AccountResource | KeyResource | AgentResource | TunnelResource | BeaconResponse
+ResourceResponse = (
+    AccountResource
+    | KeyResource
+    | AgentResource
+    | TunnelResource
+    | BeaconResponse
+    | TunnelRetirementResult
+)
 RESOURCE_RESPONSE: TypeAdapter[ResourceResponse] = TypeAdapter(ResourceResponse)
 
 
@@ -395,11 +415,17 @@ def tunnels(
     limit: int = DEFAULT_LIMITS.default_list_page,
     cursor: str | None = None,
     state: str | None = None,
+    creator_id: UUID | None = None,
 ) -> TunnelPage:
     """List instance tunnels, including their current addresses."""
 
     page = list_admin_resources(
-        "tunnels", actor=request.auth.owner, limit=limit, cursor=cursor, state=state
+        "tunnels",
+        actor=request.auth.owner,
+        limit=limit,
+        cursor=cursor,
+        state=state,
+        creator_id=creator_id,
     )
     return TunnelPage(
         items=[TunnelResource.model_validate(item) for item in page["items"]],
@@ -619,6 +645,17 @@ def retire_tunnel(
     idempotency_key: IdempotencyKey,
 ) -> AdminResult:
     """Retire a tunnel, stop address access, and prevent future cycles."""
+
+    return _execute(request, data, idempotency_key)
+
+
+@router.post("/tunnels/retire-for-credential", response={200: AdminResult, **ADMIN_ERRORS})
+def retire_tunnels_for_credential(
+    request: AdminRequest,
+    data: TunnelsRetireForCredential,
+    idempotency_key: IdempotencyKey,
+) -> AdminResult:
+    """Retire selected tunnels from a revoked credential and stop shared address access."""
 
     return _execute(request, data, idempotency_key)
 

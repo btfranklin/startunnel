@@ -29,10 +29,15 @@ def _command(
     arguments: list[str],
     body: dict[str, Any] | None = None,
     tutorial_keys: tuple[str, str] | None = None,
+    admin_key_file: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
     environment["STARTUNNEL_BASE_URL"] = base_url
+    environment.pop("STARTUNNEL_ADMIN_KEY", None)
+    environment.pop("STARTUNNEL_ADMIN_KEY_FILE", None)
+    if admin_key_file is not None:
+        environment["STARTUNNEL_ADMIN_KEY_FILE"] = str(admin_key_file)
     if key is None:
         environment.pop("STARTUNNEL_AGENT_KEY", None)
     else:
@@ -288,6 +293,182 @@ def _prove_tunnel_commands(
     return address, cycle_id, reply_id
 
 
+def _prove_admin_tunnel_recovery(
+    cli_path: Path, *, base_url: str, receiver_key: str, tmp_path: Path
+) -> None:
+    username = "cli_recovery_" + uuid4().hex[:20]
+    admin_file = tmp_path / "recovery-admin.key"
+    agent_file = tmp_path / "recovery-agent.key"
+    environment = os.environ.copy()
+    environment["DJANGO_SETTINGS_MODULE"] = "startunnel.settings.development"
+
+    def manage(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "manage.py", *arguments],
+            cwd=Path(__file__).resolve().parents[2],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+
+    def admin(*arguments: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        return _successful_json(
+            _command(
+                cli_path,
+                base_url=base_url,
+                key=None,
+                arguments=["admin", *arguments],
+                body=body,
+                admin_key_file=admin_file,
+            )
+        )
+
+    try:
+        bootstrap = manage("create_instance_admin", username, "--key-file", str(admin_file))
+        assert bootstrap.returncode == 0, bootstrap.stderr
+        assert admin_file.stat().st_mode & 0o777 == 0o600
+        issued = admin(
+            "agents",
+            "create",
+            "--idempotency-key",
+            uuid4().hex,
+            "--secret-output",
+            str(agent_file),
+            body={"name": "CLI recovery worker"},
+        )
+        assert agent_file.stat().st_mode & 0o777 == 0o600
+        credential_id = issued["resource"]["id"]
+        agent_key = agent_file.read_text().strip()
+        created = [
+            _run_action(
+                cli_path,
+                base_url=base_url,
+                key=agent_key,
+                action="create",
+                idempotency_key=uuid4().hex,
+                body={
+                    "label": f"Recovery tunnel {index}",
+                    "cycle": {
+                        "label": "Retained recovery cycle",
+                        "root": {"content": {"type": "text", "text": "Retain recovery history."}},
+                    },
+                },
+            )
+            for index in range(3)
+        ]
+        admin(
+            "agents",
+            "revoke",
+            "--idempotency-key",
+            uuid4().hex,
+            body={"credential_id": credential_id},
+        )
+        page = admin("tunnels", "list", "--creator-id", credential_id, "--limit", "2")
+        listed = page["items"]
+        assert len(listed) == 2
+        assert page["next_cursor"]
+        page = admin(
+            "tunnels",
+            "list",
+            "--creator-id",
+            credential_id,
+            "--cursor",
+            page["next_cursor"],
+            "--limit",
+            "2",
+        )
+        assert len(page["items"]) == 1
+        assert page["next_cursor"] is None
+        listed.extend(page["items"])
+        assert {item["id"] for item in listed} == {item["tunnel"]["id"] for item in created}
+        selected_ids = {row["tunnel"]["id"] for row in created[:2]}
+        body = {
+            "credential_id": credential_id,
+            "tunnels": [
+                {
+                    "tunnel_id": item["id"],
+                    "expected_address_generation": item["address_generation"],
+                    "confirmation": item["retirement_confirmation"],
+                }
+                for item in listed
+                if item["id"] in selected_ids
+            ],
+        }
+        retry_key = uuid4().hex
+        result = admin(
+            "tunnels", "retire-for-credential", "--idempotency-key", retry_key, body=body
+        )
+        assert result["resource"] == {
+            "credential_id": credential_id,
+            "retired_tunnel_ids": sorted(selected_ids),
+        }
+        assert (
+            admin("tunnels", "retire-for-credential", "--idempotency-key", retry_key, body=body)
+            == result
+        )
+        receipt = admin("operations", "get", result["operation"]["id"])
+        assert receipt["result"]["resource"] == result["resource"]
+        for created_tunnel in created[:2]:
+            tunnel_id = created_tunnel["tunnel"]["id"]
+            assert admin("tunnels", "get", tunnel_id)["state"] == "retired"
+            cycles = admin("tunnels", "cycles", tunnel_id)["items"]
+            assert cycles[0]["state"] == "closed"
+            assert cycles[0]["label"] == "Retained recovery cycle"
+        denied = _command(
+            cli_path,
+            base_url=base_url,
+            key=receiver_key,
+            arguments=["read-tree"],
+            body={"address": created[0]["tunnel"]["address"]},
+        )
+        assert denied.returncode == 1
+        assert json.loads(denied.stderr)["error"]["code"] == "tunnel_unavailable"
+        unselected = created[2]
+        assert admin("tunnels", "get", unselected["tunnel"]["id"])["state"] == "active"
+        readable = _run_action(
+            cli_path,
+            base_url=base_url,
+            key=receiver_key,
+            action="read-tree",
+            body={"address": unselected["tunnel"]["address"]},
+        )
+        assert readable["nodes"][0]["id"] == unselected["cycle"]["root"]["id"]
+        roots = [row["cycle"]["root"]["id"] for row in created]
+        retained = manage(
+            "shell",
+            "-c",
+            "from tunnels.models import Message; "
+            f"assert Message.objects.filter(pk__in={roots!r}, "
+            "text_payload='Retain recovery history.').count() == 3",
+        )
+        assert retained.returncode == 0, retained.stderr
+    finally:
+        try:
+            cleanup = manage(
+                "shell",
+                "-c",
+                "from accounts.models import User, AdminCredential; "
+                "from agents.models import AgentCredential; "
+                "from tunnels.admin_actions import retire_tunnels_for_credentials; "
+                "from django.utils import timezone; "
+                f"users=User.objects.filter(username={username!r}); "
+                "ids=list(AgentCredential.objects.filter(created_by__in=users)"
+                ".values_list('id',flat=True)); "
+                "retire_tunnels_for_credentials(credential_ids=ids,reason='cli_test_cleanup'); "
+                "AgentCredential.objects.filter(pk__in=ids,revoked_at__isnull=True)"
+                ".update(revoked_at=timezone.now()); "
+                "AdminCredential.objects.filter(owner__in=users,revoked_at__isnull=True)"
+                ".update(revoked_at=timezone.now()); users.update(is_active=False)",
+            )
+        finally:
+            admin_file.unlink(missing_ok=True)
+            agent_file.unlink(missing_ok=True)
+        assert cleanup.returncode == 0, cleanup.stderr
+
+
 def test_downloaded_agent_cli_runs_without_repository_imports(
     tmp_path: Path, executable_dir: Path
 ) -> None:
@@ -345,4 +526,7 @@ def test_downloaded_agent_cli_runs_without_repository_imports(
         base_url=base_url,
         sender_key=sender_key,
         receiver_key=receiver_key,
+    )
+    _prove_admin_tunnel_recovery(
+        cli_path, base_url=base_url, receiver_key=receiver_key, tmp_path=tmp_path
     )

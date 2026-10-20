@@ -18,10 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents.models import AgentCredential
 from agents.services import create_credential, revoke_credential
 from core.errors import InvalidRequest
-from core.limits import MAX_SESSION_CHARACTERS
+from core.limits import MAX_SESSION_CHARACTERS, MAX_TUNNEL_RETIREMENTS
 from tunnels.admin_actions import (
+    TunnelRetirement,
     close_cycle_as_admin,
     retire_tunnel_as_admin,
+    retire_tunnels_for_revoked_credential_as_admin,
     rollover_cycle_as_admin,
     rotate_address_as_admin,
     start_cycle_as_admin,
@@ -308,6 +310,39 @@ class TunnelRetire(TunnelRotate):
         return self.resource()
 
 
+class TunnelsRetireForCredential(AdminCommand):
+    operation = "tunnels.retire-for-credential"
+    target_type = "agent_credential"
+    credential_id: UUID
+    tunnels: list[TunnelRetire] = Field(min_length=1, max_length=MAX_TUNNEL_RETIREMENTS)
+
+    @property
+    def target_id(self) -> UUID:
+        return self.credential_id
+
+    def perform(self, actor: User, receipt: AdminReceipt) -> tuple[dict[str, Any], str, UUID]:
+        retired = retire_tunnels_for_revoked_credential_as_admin(
+            actor=actor,
+            credential_id=self.credential_id,
+            selections=[
+                TunnelRetirement(
+                    tunnel_id=item.tunnel_id,
+                    expected_address_generation=item.expected_address_generation,
+                    confirmation=item.confirmation,
+                )
+                for item in self.tunnels
+            ],
+        )
+        return (
+            {
+                "credential_id": str(self.credential_id),
+                "retired_tunnel_ids": [str(item) for item in retired],
+            },
+            self.target_type,
+            self.credential_id,
+        )
+
+
 ADMIN_OPERATIONS = (
     AccountCreate.operation,
     AccountState.operation,
@@ -321,5 +356,6 @@ ADMIN_OPERATIONS = (
     TunnelRollover.operation,
     TunnelRotate.operation,
     TunnelRetire.operation,
+    TunnelsRetireForCredential.operation,
     BeaconWithdraw.operation,
 )

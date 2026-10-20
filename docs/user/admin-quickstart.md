@@ -153,7 +153,9 @@ Use stable IDs from inspection. All commands below start with
 Lists return `items` and `next_cursor`. Use `--limit` to bound a page. Continue
 with `--cursor` while `next_cursor` is present, and keep the same filters.
 Account filters use `active` or `inactive`. Key filters use `available` or
-`revoked`. Tunnel filters use `active`, `dormant`, or `retired`. Audit filters
+`revoked`. Tunnel state filters use `active`, `dormant`, or `retired`. Use
+`tunnels list --creator-id CREDENTIAL_ID` to select tunnels created by one
+agent credential. Audit filters
 include action, actor, target, and credential IDs. See each command's help.
 
 ## Account and key controls
@@ -226,6 +228,45 @@ an address stops the old address from resolving and withdraws its Beacon.
 A new Beacon needs a new cycle. Rotation retains the tunnel history; sharing the
 new address also shares earlier readable cycles.
 Tunnels should not be treated as confidential.
+
+## Recover tunnel capacity after key revocation
+
+Revocation alone keeps tunnels and their shared addresses available. Inspect
+the revoked credential and list its tunnels:
+
+```shell
+startunnel admin tunnels list --creator-id CREDENTIAL_ID --limit 500
+```
+
+Follow `next_cursor` if another page is available. Select the tunnels to retire.
+Each selected tunnel needs its current `address_generation` and exact
+`retirement_confirmation` from inspection. Review the selection before the
+write. Retirement stops address access for every agent and prevents new cycles.
+It keeps cycle content under the normal retention policy.
+
+Send this JSON shape to `startunnel admin tunnels retire-for-credential
+--idempotency-key NEW_KEY` through standard input:
+
+```json
+{
+  "credential_id": "00000000-0000-0000-0000-000000000001",
+  "tunnels": [
+    {
+      "tunnel_id": "00000000-0000-0000-0000-000000000002",
+      "expected_address_generation": 1,
+      "confirmation": "Inspected tunnel label or ID"
+    }
+  ]
+}
+```
+
+The command requires a revoked credential and 1 to 500 distinct selected
+tunnels created by that credential. It does not select additional tunnels.
+Every selection must pass the normal retirement checks. If any check fails,
+the command retires no tunnels. Inspect again before a changed request.
+The result gives `credential_id` and `retired_tunnel_ids`. Verify their states,
+the operation receipt, and audit events. An exact retry with the same input and
+idempotency key returns the stored result after retirement.
 
 ## Retry and recover
 

@@ -383,6 +383,9 @@
               },
               {
                 "$ref": "#/components/schemas/BeaconResponse"
+              },
+              {
+                "$ref": "#/components/schemas/TunnelRetirementResult"
               }
             ],
             "title": "Resource"
@@ -3533,6 +3536,9 @@
               },
               {
                 "$ref": "#/components/schemas/BeaconResponse"
+              },
+              {
+                "$ref": "#/components/schemas/TunnelRetirementResult"
               }
             ],
             "title": "Resource"
@@ -4333,6 +4339,29 @@
         "title": "TunnelRetire",
         "type": "object"
       },
+      "TunnelRetirementResult": {
+        "properties": {
+          "credential_id": {
+            "format": "uuid",
+            "title": "Credential Id",
+            "type": "string"
+          },
+          "retired_tunnel_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Retired Tunnel Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "credential_id",
+          "retired_tunnel_ids"
+        ],
+        "title": "TunnelRetirementResult",
+        "type": "object"
+      },
       "TunnelRollover": {
         "additionalProperties": false,
         "properties": {
@@ -4585,6 +4614,31 @@
           "current_cycle"
         ],
         "title": "TunnelStatusResponse",
+        "type": "object"
+      },
+      "TunnelsRetireForCredential": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_id": {
+            "format": "uuid",
+            "title": "Credential Id",
+            "type": "string"
+          },
+          "tunnels": {
+            "items": {
+              "$ref": "#/components/schemas/TunnelRetire"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Tunnels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "credential_id",
+          "tunnels"
+        ],
+        "title": "TunnelsRetireForCredential",
         "type": "object"
       },
       "UsageResponse": {
@@ -9310,6 +9364,23 @@
             }
           },
           {
+            "in": "query",
+            "name": "creator_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Creator Id"
+            }
+          },
+          {
             "description": "Required for the official CLI. Use its release label. Source builds send unreleased and remain unverified. Other API clients can omit this header.",
             "in": "header",
             "name": "X-StarTunnel-Client-Version",
@@ -9934,6 +10005,225 @@
           }
         ],
         "summary": "Retire Tunnel",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
+    "/api/v1/admin/tunnels/retire-for-credential": {
+      "post": {
+        "description": "Retire selected tunnels from a revoked credential and stop shared address access.",
+        "operationId": "api_admin_retire_tunnels_for_credential",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[\\x20-\\x7e]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required for the official CLI. Use its release label. Source builds send unreleased and remain unverified. Other API clients can omit this header.",
+            "in": "header",
+            "name": "X-StarTunnel-Client-Version",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunnelsRetireForCredential"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable",
+            "headers": {
+              "X-StarTunnel-Client-Compatibility": {
+                "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+              },
+              "X-StarTunnel-Minimum-Client-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+              },
+              "X-StarTunnel-Server-Version": {
+                "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ],
+        "summary": "Retire Tunnels For Credential",
         "tags": [
           "Administration"
         ]

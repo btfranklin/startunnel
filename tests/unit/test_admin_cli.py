@@ -183,6 +183,50 @@ def test_tunnel_rotation_returns_resource_address_without_secret_output(
     assert "secret" not in result
 
 
+def test_bulk_retirement_sends_only_explicit_selections(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = {
+        "credential_id": "revoked-key-id",
+        "tunnels": [
+            {
+                "tunnel_id": "selected-tunnel-id",
+                "expected_address_generation": 2,
+                "confirmation": "Shared work",
+            }
+        ],
+    }
+    stdin(monkeypatch, body)
+    calls: list[Any] = []
+
+    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append((args, kwargs))
+        return {"resource": {"credential_id": "revoked-key-id", "retired_tunnel_ids": []}}
+
+    monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
+    cli.run_admin(arguments("tunnels", "retire-for-credential", "--idempotency-key", "retire-key"))
+    args, kwargs = calls[0]
+    assert args[1:3] == ("POST", "/api/v1/admin/tunnels/retire-for-credential")
+    assert kwargs["body"] == body
+    assert kwargs["idempotency_key"] == "retire-key"
+    schema = cli.admin_schema("tunnels retire-for-credential")["commands"][0]
+    assert schema["required_fields"] == ["credential_id", "tunnels"]
+
+
+def test_tunnel_creator_filter_is_sent_with_list_request(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Any] = []
+
+    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        calls.append(args)
+        return {"items": []}
+
+    monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
+    cli.run_admin(arguments("tunnels", "list", "--creator-id", "revoked-key-id"))
+    assert calls[0][2] == "/api/v1/admin/tunnels?creator_id=revoked-key-id"
+
+
 def test_key_account_creation_requires_secret_file_before_request(
     configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

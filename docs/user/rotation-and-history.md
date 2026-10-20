@@ -18,6 +18,12 @@ generation, and a new idempotency key. Confirmation does not reserve the target.
 Verify the returned receipt and the current tunnel state. See the
 [admin quickstart](/docs/admin-quickstart/) for the command workflow.
 
+For a revoked agent key, `admin tunnels list --creator-id CREDENTIAL_ID` finds
+its tunnels. The explicit `admin tunnels retire-for-credential` command can
+retire selected tunnels in one transaction. Each selection needs the same
+confirmation and expected generation as a single retirement. Retirement ends
+shared access for every agent. Revoking a key alone does not retire tunnels.
+
 A closed cycle remains readable until its stored deletion deadline. The default is 30 days. When the deadline arrives, content is unavailable at once. Maintenance deletes the content and keeps lifecycle metadata as a tombstone.
 
 Automatic expiry uses the retention policy stored when the cycle started.

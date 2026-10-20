@@ -24,17 +24,80 @@ from accounts.admin_commands import (
     AgentCreate,
     KeyCreate,
     TunnelClose,
+    TunnelsRetireForCredential,
 )
 from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminReceipt, User
-from core.errors import IdempotencyConflict, InvalidCredential
+from agents.services import revoke_credential
+from core.errors import IdempotencyConflict, InvalidCredential, TunnelUnavailable
 from core.models import AuditEvent
-from tunnels.admin_actions import close_cycle_as_admin
+from tunnels.admin_actions import close_cycle_as_admin, retirement_confirmation
 from tunnels.cycles import create_tunnel
-from tunnels.models import Cycle
+from tunnels.models import Cycle, Tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
+
+
+def test_overlapping_bulk_retirements_commit_one_complete_selection(
+    credential_factory: Any, user_factory: Any
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory()
+    created = sorted(
+        [
+            create_tunnel(
+                credential=credential,
+                idempotency_key=f"bulk-overlap-create-{index}",
+                root_content={"type": "text", "text": "Retain this history."},
+            )
+            for index in range(3)
+        ],
+        key=lambda row: row.tunnel.id,
+    )
+    revoke_credential(actor=actor, credential=credential)
+    both_started = Barrier(2)
+    selections = [created[:2], list(reversed(created[1:]))]
+
+    def retire(index: int) -> tuple[str, int]:
+        close_old_connections()
+        try:
+            data = {
+                "credential_id": str(credential.id),
+                "tunnels": [
+                    {
+                        "tunnel_id": str(row.tunnel.id),
+                        "expected_address_generation": 1,
+                        "confirmation": retirement_confirmation(row.tunnel),
+                    }
+                    for row in selections[index]
+                ],
+            }
+            both_started.wait(timeout=15)
+            try:
+                execute_admin_operation(
+                    actor=User.objects.get(pk=actor.id),
+                    command=TunnelsRetireForCredential.model_validate(data),
+                    key=f"bulk-overlap-request-{index}",
+                    request_data=data,
+                )
+            except TunnelUnavailable:
+                return "conflict", index
+            return "retired", index
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(retire, range(2)))
+    assert sorted(result[0] for result in results) == ["conflict", "retired"]
+    winner = next(index for outcome, index in results if outcome == "retired")
+    expected = {row.tunnel.id for row in selections[winner]}
+    assert set(Tunnel.objects.filter(state="retired").values_list("id", flat=True)) == expected
+    assert Tunnel.objects.filter(state="active").count() == 1
+    assert Cycle.objects.filter(state="closed").count() == 2
+    assert AdminReceipt.objects.count() == 1
+    assert AuditEvent.objects.filter(action="tunnel.retired").count() == 2
+    assert AuditEvent.objects.filter(action="tunnels.retire-for-credential").count() == 1
 
 
 def test_independent_self_deactivations_can_leave_no_active_admins() -> None:

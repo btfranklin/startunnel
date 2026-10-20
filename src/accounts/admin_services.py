@@ -90,6 +90,7 @@ def list_admin_resources(
     target_type: str | None = None,
     target_id: UUID | None = None,
     credential_id: UUID | None = None,
+    creator_id: UUID | None = None,
 ) -> AdminPageData:
     from core.cursors import decode_cursor, encode_cursor
 
@@ -137,6 +138,9 @@ def list_admin_resources(
         "target_id": str(target_id) if target_id else None,
         "credential_id": str(credential_id) if credential_id else None,
     }
+    if creator_id is not None and kind == "tunnels":
+        filters["creator_id"] = str(creator_id)
+        queryset = queryset.filter(creator_id=creator_id)
     if state:
         if kind == "accounts":
             if state not in {"active", "inactive"}:

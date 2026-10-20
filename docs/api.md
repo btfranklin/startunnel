@@ -306,6 +306,21 @@ Creation with the first admin key is atomic. Account state changes check expecte
 state. Tunnel actions check expected cycles and address generations. Retirement
 requires the confirmation value from inspection and still checks current state.
 Lists use bounded pages and stable resource IDs. Settings are read-only diagnostics.
+The admin tunnel list accepts `creator_id`, the agent credential that created
+the tunnels. Keep this filter on every cursor page.
+
+`POST /api/v1/admin/tunnels/retire-for-credential` takes `credential_id` and a
+`tunnels` list with 1 to 500 distinct selections. Each selection has
+`tunnel_id`, `expected_address_generation`, and `confirmation`, using the exact
+inspection values. The credential must be revoked and must have created every
+selected tunnel. All checks and retirements share one transaction. A missing
+tunnel returns `404 tunnel_unavailable`. A wrong creator, active credential,
+or wrong confirmation returns `400 invalid_request`. A stale generation
+returns `409 lifecycle_conflict`. Any failure leaves the full selection
+unchanged. The result resource contains only `credential_id` and
+`retired_tunnel_ids`; the normal operation receipt and exact retry rules apply.
+Retirement stops shared address access and future cycles. It keeps content
+under the normal retention policy. Revocation alone does not retire tunnels.
 
 The CLI retries only transient failures with bounded backoff and `Retry-After`.
 Mutations reuse the exact body and idempotency key. Authentication, validation,

@@ -29,6 +29,9 @@ One credential can create at most 100 non-retired tunnels. The instance limit
 is 500. This creation cap limits damage from one key; it does not change tunnel
 ownership or access. Dormant tunnels still count and keep their reusable
 addresses. Retirement frees capacity. Revocation does not retire tunnels.
+Admins can filter by creator and explicitly retire selected tunnels from a
+revoked credential. Each selected tunnel keeps the normal generation and
+confirmation checks. One failed check rolls back the full selection.
 
 ## Django and PostgreSQL
 

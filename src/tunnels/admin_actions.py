@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import User
+from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.audit import record_event
 from core.errors import (
@@ -17,6 +19,7 @@ from core.errors import (
     LifecycleConflict,
     TunnelUnavailable,
 )
+from core.limits import MAX_TUNNEL_RETIREMENTS
 from core.logging import current_request_id
 
 from .cycles import (
@@ -317,3 +320,43 @@ def retire_tunnels_for_credentials(*, credential_ids: list[UUID], reason: str) -
     for tunnel in tunnels:
         _retire_locked_tunnel(tunnel=tunnel, reason=reason)
     return len(tunnels)
+
+
+@dataclass(frozen=True, slots=True)
+class TunnelRetirement:
+    tunnel_id: UUID
+    expected_address_generation: int
+    confirmation: str
+
+
+@transaction.atomic
+def retire_tunnels_for_revoked_credential_as_admin(
+    *, actor: User, credential_id: UUID, selections: list[TunnelRetirement]
+) -> list[UUID]:
+    """Retire explicitly selected tunnels with the normal confirmation checks."""
+
+    if not User.objects.filter(pk=actor.pk, is_active=True).exists():
+        raise TunnelUnavailable()
+    if not 1 <= len(selections) <= MAX_TUNNEL_RETIREMENTS:
+        raise InvalidRequest(f"Select from 1 through {MAX_TUNNEL_RETIREMENTS} tunnels.")
+    selected = {item.tunnel_id: item for item in selections}
+    if len(selected) != len(selections):
+        raise InvalidRequest("Select each tunnel only once.")
+    if not AgentCredential.objects.filter(pk=credential_id, revoked_at__isnull=False).exists():
+        raise InvalidRequest("Select a revoked agent credential.")
+    tunnels = list(
+        Tunnel.objects.select_for_update(of=("self",)).filter(pk__in=selected).order_by("id")
+    )
+    if len(tunnels) != len(selected):
+        raise TunnelUnavailable()
+    if any(tunnel.creator_id != credential_id for tunnel in tunnels):
+        raise InvalidRequest("Each selected tunnel must have the selected credential as creator.")
+    for tunnel in tunnels:
+        selection = selected[tunnel.pk]
+        _retire_as_admin_locked(
+            tunnel=tunnel,
+            actor=actor,
+            expected_address_generation=selection.expected_address_generation,
+            confirmation=selection.confirmation,
+        )
+    return [tunnel.id for tunnel in tunnels]
