@@ -57,25 +57,6 @@ SAFE_ERROR_MESSAGES = {
     "invalid_response": "The service returned an unexpected response.",
     "usage_error": "The command arguments are not valid. Run --help for usage.",
 }
-PUBLIC_ERROR_CODES = {
-    "checkpoint_regression",
-    "context_budget_too_small",
-    "entry_budget_too_small",
-    "cycle_closed",
-    "cycle_unavailable",
-    "dependency_unavailable",
-    "idempotency_conflict",
-    "internal_error",
-    "invalid_address",
-    "invalid_credential",
-    "invalid_cursor",
-    "invalid_request",
-    "lifecycle_conflict",
-    "payload_too_large",
-    "quota_exceeded",
-    "rate_limited",
-    "tunnel_unavailable",
-}
 
 
 @dataclass
@@ -3077,7 +3058,8 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
               "context_budget_too_small",
               "entry_budget_too_small",
               "rate_limited",
-              "dependency_unavailable"
+              "dependency_unavailable",
+              "internal_error"
             ],
             "examples": [
               "tunnel_unavailable"
@@ -12960,6 +12942,12 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
 """  # noqa: E501
 )
 # END GENERATED RESPONSE CONTRACT
+
+PUBLIC_ERROR_CODES = frozenset(
+    CLIENT_RESPONSE_CONTRACT["components"]["schemas"]["ErrorBodyResponse"]["properties"]["code"][
+        "enum"
+    ]
+)
 
 
 if __name__ == "__main__":

@@ -2156,7 +2156,8 @@
               "context_budget_too_small",
               "entry_budget_too_small",
               "rate_limited",
-              "dependency_unavailable"
+              "dependency_unavailable",
+              "internal_error"
             ],
             "examples": [
               "tunnel_unavailable"

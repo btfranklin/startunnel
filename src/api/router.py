@@ -16,7 +16,13 @@ from ninja.errors import ValidationError as NinjaValidationError
 from agents.models import AgentCredential
 from core import cursors
 from core import limits as instance_limits
-from core.errors import DomainError, InvalidCursor, InvalidRequest, TunnelUnavailable
+from core.errors import (
+    DomainError,
+    InvalidCursor,
+    InvalidRequest,
+    PublicErrorCode,
+    TunnelUnavailable,
+)
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.beacons import publish_beacon, read_board, wait_for_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
@@ -150,7 +156,7 @@ def _request_id(request: HttpRequest) -> str:
 def _error_response(
     request: HttpRequest,
     *,
-    code: str,
+    code: PublicErrorCode,
     message: str,
     status: int,
     field_errors: list[dict[str, str]] | None = None,

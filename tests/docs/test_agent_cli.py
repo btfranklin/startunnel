@@ -349,27 +349,40 @@ def test_cli_accepts_http_origins_for_private_networks(base_url: str) -> None:
     assert _load_cli_module().validate_base_url(base_url) == base_url
 
 
-def test_api_error_keeps_authored_message_and_discards_unknown_fields() -> None:
+@pytest.mark.parametrize(
+    ("status", "code", "message"),
+    [
+        (
+            404,
+            "tunnel_unavailable",
+            "This tunnel is not available. Check the address or create a new tunnel.",
+        ),
+        (500, "internal_error", "An unexpected server error occurred."),
+    ],
+)
+def test_api_error_keeps_authored_message_and_discards_unknown_fields(
+    status: int, code: str, message: str
+) -> None:
     request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
     response = {
         "error": {
-            "code": "tunnel_unavailable",
-            "message": "This tunnel is not available. Check the address or create a new tunnel.",
+            "code": code,
+            "message": message,
             "request_id": request_id,
             "field_errors": [],
             "unexpected": "unknown-field-visible-marker",
         }
     }
-    with serve(Response(404, response)) as (base_url, _scenario):
+    with serve(Response(status, response)) as (base_url, _scenario):
         result = run_cli(base_url, "checkpoint", body={"address": "private-glyphs", "cursor": "c"})
 
     assert result.returncode == 1
     assert result.stdout == ""
     error = json.loads(result.stderr)["error"]
     assert error == {
-        "code": "tunnel_unavailable",
-        "message": "This tunnel is not available. Check the address or create a new tunnel.",
-        "status": 404,
+        "code": code,
+        "message": message,
+        "status": status,
         "request_id": request_id,
         "field_errors": [],
     }

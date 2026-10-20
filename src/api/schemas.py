@@ -9,6 +9,7 @@ from uuid import UUID
 from ninja import Field, HeaderEx, P, Schema
 from pydantic import ConfigDict
 
+from core.errors import PublicErrorCode
 from core.limits import (
     DEFAULT_BOARD_LIMIT,
     DEFAULT_LIMITS,
@@ -603,24 +604,7 @@ class FieldErrorResponse(PublicSchema):
 
 
 class ErrorBodyResponse(PublicSchema):
-    code: Literal[
-        "invalid_request",
-        "invalid_cursor",
-        "invalid_credential",
-        "invalid_address",
-        "tunnel_unavailable",
-        "cycle_unavailable",
-        "payload_too_large",
-        "quota_exceeded",
-        "idempotency_conflict",
-        "cycle_closed",
-        "lifecycle_conflict",
-        "checkpoint_regression",
-        "context_budget_too_small",
-        "entry_budget_too_small",
-        "rate_limited",
-        "dependency_unavailable",
-    ] = Field(
+    code: PublicErrorCode = Field(
         description="Stable error code for program decisions.", examples=["tunnel_unavailable"]
     )
     message: str = Field(

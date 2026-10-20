@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from agents.models import AgentCredential
 from agents.services import authenticate_key
+from api.schemas import ErrorResponse
 from tunnels.codec import encode_token
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress
 
@@ -796,7 +797,8 @@ def test_integrity_failure_is_not_reported_as_dependency_outage(
         {"address": created["tunnel"]["address"]},
         key=key,
     )
-    _assert_safe_error(response, status=500, code="internal_error")
+    body = _assert_safe_error(response, status=500, code="internal_error")
+    assert ErrorResponse.model_validate(body).error.code == "internal_error"
 
 
 def test_expired_cycle_rejects_reply_without_mutation(

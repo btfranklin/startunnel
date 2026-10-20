@@ -2,9 +2,31 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
+PublicErrorCode = Literal[
+    "invalid_request",
+    "invalid_cursor",
+    "invalid_credential",
+    "invalid_address",
+    "tunnel_unavailable",
+    "cycle_unavailable",
+    "payload_too_large",
+    "quota_exceeded",
+    "idempotency_conflict",
+    "cycle_closed",
+    "lifecycle_conflict",
+    "checkpoint_regression",
+    "context_budget_too_small",
+    "entry_budget_too_small",
+    "rate_limited",
+    "dependency_unavailable",
+    "internal_error",
+]
+
 
 class DomainError(Exception):
-    code = "invalid_request"
+    code: PublicErrorCode = "invalid_request"
     status = 400
     message = "The request is not valid. Correct it and try again."
 

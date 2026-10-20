@@ -9,6 +9,8 @@ from typing import Any, cast
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
+from core.errors import PublicErrorCode
+
 from .client_compatibility import (
     add_compatibility_headers,
     compatibility,
@@ -16,7 +18,7 @@ from .client_compatibility import (
     update_error,
 )
 
-ERRORS: dict[int, tuple[str, str]] = {
+ERRORS: dict[int, tuple[PublicErrorCode, str]] = {
     400: ("invalid_request", "The request is not valid. Correct it and try again."),
     401: ("invalid_credential", "The agent credential is not valid."),
     403: ("invalid_credential", "The agent credential is not valid."),
