@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import pytest
 from scripts import generate_client_contract
+
+
+@pytest.fixture
+def cli(monkeypatch: pytest.MonkeyPatch) -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "contract_test_cli", generate_client_contract.CLIENT
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _response_help(cli: Any, path: str) -> dict[str, Any]:
+    commands = [{"command": "example", "method": "GET", "path": path, "stdin_json": False}]
+    metadata = cli.response_help(commands)
+    return {**metadata, "commands": commands}
 
 
 def test_build_contract_keeps_public_responses_and_transitive_component_closure() -> None:
@@ -54,9 +74,11 @@ def test_build_contract_keeps_public_responses_and_transitive_component_closure(
     contract = generate_client_contract.build_contract(document)
 
     assert contract["operations"] == {
-        "GET /api/v1/items": responses,
+        "GET /api/v1/items": {"200": responses["200"], "400": "400"},
         "POST /api/v1/items": {"204": {"description": "empty"}},
     }
+    assert contract["common_headers"] == {}
+    assert contract["error_responses"] == {"400": responses["400"]}
     assert contract["components"] == {
         "schemas": {
             "Envelope": document["components"]["schemas"]["Envelope"],
@@ -99,6 +121,8 @@ def test_build_contract_follows_header_schema_and_escaped_component_references()
 
     contract = generate_client_contract.build_contract(document)
 
+    assert contract["common_headers"] == {"X-Result": {"$ref": "#/components/headers/Result"}}
+    assert contract["operations"]["GET /api/v1/items"]["200"] == {}
     assert contract["components"] == {
         "schemas": {"Result/Metadata": schema},
         "headers": {
@@ -126,7 +150,7 @@ def test_build_contract_rejects_invalid_response_references(reference: str, mess
         generate_client_contract.build_contract(document)
 
 
-def test_render_contract_uses_readable_sorted_json() -> None:
+def test_render_contract_uses_compact_sorted_json() -> None:
     document: dict[str, Any] = {
         "paths": {"/api/v1/z": {"get": {"responses": {"200": {"description": "é"}}}}},
         "components": {"schemas": {}},
@@ -134,10 +158,16 @@ def test_render_contract_uses_readable_sorted_json() -> None:
 
     rendered = generate_client_contract.render_contract(document)
 
-    assert rendered.startswith('CLIENT_RESPONSE_CONTRACT = json.loads(\n    r"""\n{\n')
-    assert '"description": "é"' in rendered
+    assert rendered.startswith('CLIENT_RESPONSE_CONTRACT = json.loads(\n    r"""\n{')
+    assert '"description":"é"' in rendered
     assert rendered.endswith('"""  # noqa: E501\n)\n')
-    assert json.loads(rendered.split('r"""', 1)[1].split('"""', 1)[0]) == {
+    encoded = rendered.split('r"""\n', 1)[1].split('\n"""', 1)[0]
+    assert encoded == json.dumps(
+        json.loads(encoded), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+    assert json.loads(encoded) == {
+        "common_headers": {},
+        "error_responses": {},
         "operations": {"GET /api/v1/z": {"200": {"description": "é"}}},
         "components": {"schemas": {}, "headers": {}},
     }
@@ -156,6 +186,123 @@ def test_resource_parameter_names_match_cli_templates() -> None:
     document["paths"]["/api/v1/admin/tunnels/{other_id}/cycles"] = {"get": {"responses": response}}
     with pytest.raises(ValueError, match="paths overlap"):
         generate_client_contract.build_contract(document)
+
+
+def test_factored_responses_restore_headers_errors_statuses_and_refs(
+    cli: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = {"X-Shared": {"$ref": "#/components/headers/Shared"}}
+    content = {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
+    shared_error = {"description": "Unavailable", "headers": common, "content": content}
+    first_error = {
+        "description": "Invalid input",
+        "headers": {**common, "X-Detail": {"description": "First detail"}},
+        "content": content,
+    }
+    definitions = {
+        "/api/v1/a": {
+            "200": {"description": "Result", "headers": common, "content": content},
+            "400": first_error,
+            "401": {"description": "No access", "headers": common},
+            "503": shared_error,
+        },
+        "/api/v1/b": {
+            "204": {"description": "Empty", "headers": common},
+            "302": {
+                "description": "Redirect",
+                "headers": {**common, "Location": {"schema": {"type": "string"}}},
+            },
+            "400": {**first_error, "description": "Different error"},
+            "503": shared_error,
+            "default": {"description": "Other status", "headers": common},
+        },
+        "/api/v1/c": {
+            "200": {"description": "Result", "headers": common, "content": content},
+            "400": {
+                **first_error,
+                "headers": {**common, "X-Detail": {"description": "Different detail"}},
+            },
+            "503": shared_error,
+        },
+    }
+    document = {
+        "paths": {
+            path: {"get": {"responses": responses}} for path, responses in definitions.items()
+        },
+        "components": {
+            "schemas": {
+                "Problem": {"type": "object", "properties": {"message": {"type": "string"}}},
+                "Header/Metadata": {"type": "string"},
+            },
+            "headers": {"Shared": {"schema": {"$ref": "#/components/schemas/Header~1Metadata"}}},
+        },
+    }
+    original = deepcopy(document)
+    contract = generate_client_contract.build_contract(document)
+    assert document == original
+    assert contract["common_headers"] == common
+    assert set(contract["error_responses"]) == {"400", "401", "503"}
+    assert contract["operations"]["GET /api/v1/a"]["400"] == "400"
+    assert isinstance(contract["operations"]["GET /api/v1/b"]["400"], dict)
+    assert isinstance(contract["operations"]["GET /api/v1/c"]["400"], dict)
+    assert contract["operations"]["GET /api/v1/b"]["503"] == "503"
+    assert "401" not in contract["operations"]["GET /api/v1/b"]
+    assert contract["components"] == document["components"]
+
+    monkeypatch.setattr(cli, "CLIENT_RESPONSE_CONTRACT", contract)
+    before = deepcopy(contract)
+    for path, responses in definitions.items():
+        output = _response_help(cli, path)
+        assert output["commands"][0]["responses"] == responses
+        fresh = deepcopy(output)
+        output["commands"][0]["responses"]["503"]["description"] = "Changed"
+        output["commands"][0]["responses"]["503"]["headers"]["X-Shared"]["$ref"] = "Changed"
+        output["components"]["schemas"]["Problem"]["properties"]["message"]["type"] = "Changed"
+        assert contract == before
+        assert _response_help(cli, path) == fresh
+
+
+def test_missing_empty_and_different_headers_remain_distinct(
+    cli: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    definitions = {
+        "/api/v1/absent": {"200": {"description": "No headers"}},
+        "/api/v1/empty": {"200": {"description": "Empty headers", "headers": {}}},
+        "/api/v1/first": {
+            "200": {"description": "First", "headers": {"X-Value": {"description": "First"}}}
+        },
+        "/api/v1/second": {
+            "200": {"description": "Second", "headers": {"X-Value": {"description": "Second"}}}
+        },
+    }
+    document = {
+        "paths": {
+            path: {"get": {"responses": responses}} for path, responses in definitions.items()
+        }
+    }
+    contract = generate_client_contract.build_contract(document)
+    assert contract["common_headers"] == {}
+    monkeypatch.setattr(cli, "CLIENT_RESPONSE_CONTRACT", contract)
+    for path, responses in definitions.items():
+        assert _response_help(cli, path)["commands"][0]["responses"] == responses
+
+
+def test_factoring_does_not_depend_on_path_or_status_order() -> None:
+    responses = {
+        "503": {"description": "Unavailable", "headers": {"X-Value": {"description": "Shared"}}},
+        "400": {"description": "Invalid", "headers": {"X-Value": {"description": "Shared"}}},
+    }
+    paths: dict[str, Any] = {
+        "/api/v1/b": {"get": {"responses": responses}},
+        "/api/v1/a": {"get": {"responses": {**responses, "400": {"description": "Other"}}}},
+    }
+    reordered = {
+        path: {"get": {"responses": dict(reversed(operation["get"]["responses"].items()))}}
+        for path, operation in reversed(paths.items())
+    }
+    assert generate_client_contract.render_contract({"paths": paths}) == (
+        generate_client_contract.render_contract({"paths": reordered})
+    )
 
 
 def test_generation_replaces_only_marked_block(

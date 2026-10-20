@@ -53,8 +53,45 @@ def _references(value: Any) -> list[str]:
     return found
 
 
+def _factor_responses(operations: dict[str, Any]) -> dict[str, Any]:
+    """Share identical response headers and error definitions."""
+
+    responses = [response for operation in operations.values() for response in operation.values()]
+    common_headers = dict(responses[0].get("headers", {})) if responses else {}
+    for response in responses[1:]:
+        headers = response.get("headers", {})
+        common_headers = {
+            name: value
+            for name, value in common_headers.items()
+            if name in headers and headers[name] == value
+        }
+
+    errors: dict[str, Any] = {}
+    compact: dict[str, Any] = {}
+    for operation, definitions in sorted(operations.items()):
+        compact[operation] = {}
+        for status, response in sorted(definitions.items()):
+            reduced = dict(response)
+            if common_headers:
+                headers = {
+                    name: value
+                    for name, value in response["headers"].items()
+                    if name not in common_headers
+                }
+                if headers:
+                    reduced["headers"] = headers
+                else:
+                    reduced.pop("headers")
+            if status.startswith(("4", "5")):
+                shared = errors.setdefault(status, reduced)
+                compact[operation][status] = status if reduced == shared else reduced
+            else:
+                compact[operation][status] = reduced
+    return {"common_headers": common_headers, "error_responses": errors, "operations": compact}
+
+
 def build_contract(document: dict[str, Any]) -> dict[str, Any]:
-    """Build public responses and the referenced schemas and headers."""
+    """Factor public responses and keep their referenced schemas and headers."""
     paths = document.get("paths")
     components = document.get("components", {})
     if not isinstance(components, dict):
@@ -105,7 +142,7 @@ def build_contract(document: dict[str, Any]) -> dict[str, Any]:
             _component_reference(child_reference) for child_reference in _references(definition)
         )
 
-    return {"operations": operations, "components": selected_components}
+    return {**_factor_responses(operations), "components": selected_components}
 
 
 def render_contract(document: dict[str, Any]) -> str:
@@ -113,7 +150,7 @@ def render_contract(document: dict[str, Any]) -> str:
     rendered_json = json.dumps(
         build_contract(document),
         ensure_ascii=False,
-        indent=2,
+        separators=(",", ":"),
         sort_keys=True,
     )
     return (

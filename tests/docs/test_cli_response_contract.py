@@ -131,7 +131,13 @@ def test_schema_outputs_match_openapi_and_only_include_reachable_types() -> None
     cli = load_cli()
     document = json.loads(OPENAPI.read_text(encoding="utf-8"))
 
-    for schema_output in (cli.agent_schema(), cli.admin_schema()):
+    outputs = [
+        cli.agent_schema(),
+        cli.admin_schema(),
+        *(cli.agent_schema(command) for command in ("me", *cli.ROUTES)),
+        *(cli.admin_schema(command) for command in cli.ADMIN_COMMANDS),
+    ]
+    for schema_output in outputs:
         commands = schema_output["commands"]
         for command in commands:
             operation = operation_for(document, command["method"], command["path"])
