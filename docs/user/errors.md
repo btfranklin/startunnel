@@ -16,7 +16,7 @@ Use `error.code` for program decisions. Messages can change.
 
 | Code | Status | Action |
 |---|---:|---|
-| `invalid_request` | 400 | Correct input; update the CLI when `X-StarTunnel-Client-Version` is named; an admin receipt can also be unavailable |
+| `invalid_request` | 400, 404 | Correct input for `400`; update the CLI when `X-StarTunnel-Client-Version` is named. A missing admin resource returns `404`. An existing admin receipt with an unavailable result returns `400`. |
 | `invalid_address` | 400 | Correct the glyph address and checksum |
 | `invalid_cursor` | 400 | Read current state and use a matching cursor |
 | `invalid_credential` | 401 | Supply an active key of the required type |

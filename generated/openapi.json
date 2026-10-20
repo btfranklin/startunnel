@@ -8914,7 +8914,7 @@
     },
     "/api/v1/admin/operations/{operation_id}": {
       "get": {
-        "description": "Read a retained operation result without issued secrets. Unavailable results return 400.",
+        "description": "Read a safe operation result. Missing receipts return 404; unavailable results return 400.",
         "operationId": "api_admin_operation",
         "parameters": [
           {

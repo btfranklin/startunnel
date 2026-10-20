@@ -17,6 +17,7 @@ from core.errors import (
     CycleClosed,
     InvalidRequest,
     LifecycleConflict,
+    ResourceUnavailable,
     TunnelUnavailable,
 )
 from core.limits import MAX_TUNNEL_RETIREMENTS
@@ -342,7 +343,10 @@ def retire_tunnels_for_revoked_credential_as_admin(
     selected = {item.tunnel_id: item for item in selections}
     if len(selected) != len(selections):
         raise InvalidRequest("Select each tunnel only once.")
-    if not AgentCredential.objects.filter(pk=credential_id, revoked_at__isnull=False).exists():
+    credential = AgentCredential.objects.filter(pk=credential_id).first()
+    if credential is None:
+        raise ResourceUnavailable("This agent credential is not available.")
+    if credential.revoked_at is None:
         raise InvalidRequest("Select a revoked agent credential.")
     tunnels = list(
         Tunnel.objects.select_for_update(of=("self",)).filter(pk__in=selected).order_by("id")

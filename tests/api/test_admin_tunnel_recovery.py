@@ -153,7 +153,7 @@ def test_bulk_retirement_keeps_history_and_replays_safe_result(
     ("fault", "status"),
     [
         ("active_credential", 400),
-        ("missing_credential", 400),
+        ("missing_credential", 404),
         ("wrong_creator", 400),
         ("missing_tunnel", 404),
         ("duplicate", 400),
@@ -197,12 +197,23 @@ def test_bulk_retirement_failure_rolls_back_every_target(
     retired_audits = AuditEvent.objects.filter(action="tunnel.retired").count()
     response = _retire(client, secret, body, "recovery-rollback")
     assert response.status_code == status, response.content
+    code = {
+        "missing_tunnel": "tunnel_unavailable",
+        "retired": "tunnel_unavailable",
+        "generation": "lifecycle_conflict",
+    }.get(fault, "invalid_request")
+    assert response.json()["error"]["code"] == code
     assert (
         list(Tunnel.objects.order_by("id").values("id", "state", "next_event_position")) == before
     )
     assert not AdminReceipt.objects.exists()
     assert AuditEvent.objects.filter(action="tunnel.retired").count() == retired_audits
-    assert AuditEvent.objects.filter(action="admin.operation_failed").count() == 1
+    event = AuditEvent.objects.get(action="admin.operation_failed")
+    assert event.metadata == {
+        "outcome": "failure",
+        "code": code,
+        "operation": "tunnels.retire-for-credential",
+    }
 
 
 @pytest.mark.parametrize("count", [0, 501])

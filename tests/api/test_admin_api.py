@@ -16,7 +16,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from accounts.admin_access import issue_admin_key
-from accounts.models import AdminReceipt, User
+from accounts.models import AdminCredential, AdminReceipt, User
 from agents.models import AgentCredential
 from core.maintenance import cleanup_once
 from core.models import AuditEvent
@@ -317,10 +317,15 @@ def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory
     with time_machine.travel(receipt.expires_at - timedelta(microseconds=1), tick=False):
         assert client.get(path, **headers).status_code == 200
     with time_machine.travel(receipt.expires_at, tick=False):
-        assert client.get(path, **headers).status_code == 400
+        expired = client.get(path, **headers)
+        assert expired.status_code == 400
+        assert expired.json()["error"]["code"] == "invalid_request"
         assert AdminReceipt.objects.filter(pk=receipt.pk).exists()
         assert cleanup_once()["admin_operations_purged"] == 1
         assert not AdminReceipt.objects.filter(pk=receipt.pk).exists()
+        missing = client.get(path, **headers)
+        assert missing.status_code == 404
+        assert missing.json()["error"]["code"] == "invalid_request"
         assert AuditEvent.objects.filter(pk=result["operation"]["audit_event_id"]).exists()
         assert client.get("/api/v1/admin/me", **headers).status_code == 200
 
@@ -343,14 +348,124 @@ def test_admin_api_rejects_agent_keys_and_missing_idempotency(
         HTTP_AUTHORIZATION="Bearer " + secret,
     )
     assert response.status_code == 400
-    response = client.post(
-        "/api/v1/admin/keys/create",
-        data=json.dumps({"admin_id": str(uuid4()), "name": "missing"}),
-        content_type="application/json",
-        HTTP_AUTHORIZATION="Bearer " + secret,
-        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "accounts/{id}",
+        "tunnels/{id}",
+        "tunnels/{id}/cycles",
+        "operations/{id}",
+        "beacons/{id}",
+    ],
+)
+def test_missing_admin_resources_return_404_without_operation_writes(
+    client: Any, user_factory: Any, path: str
+) -> None:
+    actor = user_factory()
+    _, key = issue_admin_key(owner=actor, name="Resource reader")
+    response = client.get(
+        "/api/v1/admin/" + path.format(id=uuid4()),
+        HTTP_AUTHORIZATION="Bearer " + key,
     )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert not AdminReceipt.objects.exists()
+    assert not AuditEvent.objects.exists()
+    assert User.objects.count() == 1
+    assert AdminCredential.objects.count() == 1
+    assert not AgentCredential.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("path", "field"),
+    [
+        ("keys", "admin_id"),
+        ("tunnels", "creator_id"),
+        ("beacons", "tunnel_id"),
+        ("audit", "target_id"),
+    ],
+)
+def test_admin_list_filters_with_missing_ids_keep_empty_pages(
+    client: Any, user_factory: Any, path: str, field: str
+) -> None:
+    _, key = issue_admin_key(owner=user_factory(), name="Filtered reader")
+    response = client.get(
+        "/api/v1/admin/" + path,
+        {field: str(uuid4())},
+        HTTP_AUTHORIZATION="Bearer " + key,
+    )
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "next_cursor": None}
+
+
+@pytest.mark.parametrize(
+    ("query", "code"),
+    [({"limit": 0}, "invalid_request"), ({"cursor": "invalid-cursor"}, "invalid_cursor")],
+)
+def test_existing_tunnel_cycle_list_keeps_validation_and_cursor_errors(
+    client: Any, user_factory: Any, credential_factory: Any, query: dict[str, Any], code: str
+) -> None:
+    from tunnels.models import Tunnel
+
+    credential, _ = credential_factory()
+    tunnel = Tunnel.objects.create(creator=credential)
+    _, key = issue_admin_key(owner=user_factory(), name="Cycle reader")
+    path = f"/api/v1/admin/tunnels/{tunnel.id}/cycles"
+    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
+    empty = client.get(path, **headers)
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+    response = client.get(path, query, **headers)
     assert response.status_code == 400
+    assert response.json()["error"]["code"] == code
+    assert not AdminReceipt.objects.exists()
+    assert not AuditEvent.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("operation", "target_field", "data"),
+    [
+        ("accounts.state", "admin_id", {"active": False, "expected_active": True}),
+        ("accounts.password", "admin_id", {"password": None}),
+        ("keys.create", "admin_id", {"name": "Missing owner"}),
+        ("keys.revoke", "key_id", {}),
+        ("agents.revoke", "credential_id", {}),
+    ],
+)
+def test_missing_admin_mutation_targets_return_404_and_failure_audit(
+    client: Any,
+    user_factory: Any,
+    operation: str,
+    target_field: str,
+    data: dict[str, Any],
+) -> None:
+    actor = user_factory()
+    credential, key = issue_admin_key(owner=actor, name="Resource writer")
+    target_id = uuid4()
+    before = list(User.objects.values("id", "is_active", "password"))
+    response = client.post(
+        "/api/v1/admin/" + operation.replace(".", "/"),
+        data=json.dumps({**data, target_field: str(target_id)}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION="Bearer " + key,
+        HTTP_IDEMPOTENCY_KEY="missing-" + operation,
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert list(User.objects.values("id", "is_active", "password")) == before
+    assert list(AdminCredential.objects.values_list("id", "revoked_at")) == [(credential.id, None)]
+    assert not AgentCredential.objects.exists()
+    assert not AdminReceipt.objects.exists()
+    event = AuditEvent.objects.get(action="admin.operation_failed")
+    assert event.actor_admin_credential == credential
+    assert event.target_id == target_id
+    assert event.metadata == {
+        "outcome": "failure",
+        "code": "invalid_request",
+        "operation": operation,
+    }
 
 
 def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
@@ -384,14 +499,49 @@ def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
     assert AdminReceipt.objects.count() == 1
 
 
-def test_missing_tunnel_admin_mutation_returns_domain_404(client: Any, user_factory: Any) -> None:
-    _, key = issue_admin_key(owner=user_factory(), name="Missing tunnel")
+@pytest.mark.parametrize(
+    ("operation", "target_field", "data"),
+    [
+        (
+            "tunnels/start",
+            "tunnel_id",
+            {"expected_address_generation": 1, "root_content": {"type": "text", "text": "Root"}},
+        ),
+        ("tunnels/close", "tunnel_id", {"expected_cycle_id": str(uuid4())}),
+        (
+            "tunnels/rollover",
+            "tunnel_id",
+            {
+                "expected_cycle_id": str(uuid4()),
+                "expected_address_generation": 1,
+                "root_content": {"type": "text", "text": "Root"},
+            },
+        ),
+        ("tunnels/rotate", "tunnel_id", {"expected_address_generation": 1}),
+        (
+            "tunnels/retire",
+            "tunnel_id",
+            {"expected_address_generation": 1, "confirmation": "Missing tunnel"},
+        ),
+        ("beacons/withdraw", "beacon_id", {}),
+    ],
+)
+def test_missing_tunnel_and_beacon_admin_mutations_keep_domain_404(
+    client: Any, user_factory: Any, operation: str, target_field: str, data: dict[str, Any]
+) -> None:
+    credential, key = issue_admin_key(owner=user_factory(), name="Missing tunnel")
+    target_id = uuid4()
     response = client.post(
-        "/api/v1/admin/tunnels/close",
-        data=json.dumps({"tunnel_id": str(uuid4()), "expected_cycle_id": str(uuid4())}),
+        "/api/v1/admin/" + operation,
+        data=json.dumps({**data, target_field: str(target_id)}),
         content_type="application/json",
         HTTP_AUTHORIZATION="Bearer " + key,
         HTTP_IDEMPOTENCY_KEY="missing-admin-tunnel",
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "tunnel_unavailable"
+    assert not AdminReceipt.objects.exists()
+    event = AuditEvent.objects.get(action="admin.operation_failed")
+    assert event.actor_admin_credential == credential
+    assert event.target_id == target_id
+    assert event.metadata["code"] == "tunnel_unavailable"

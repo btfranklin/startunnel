@@ -292,6 +292,13 @@ admin can inspect safe operation receipts and continue list cursors with the
 same filters. The exact retry window is 24 hours for the original admin account.
 Operation receipts are available for 24 hours. Maintenance deletes expired
 receipts; audit events remain for 30 days.
+Missing admin resources return `404 invalid_request` on reads and account, key,
+and agent mutations. The nested cycle list also returns `404 invalid_request`
+when its tunnel does not exist. Tunnel and Beacon lifecycle writes keep
+`404 tunnel_unavailable`. An existing receipt returns `400 invalid_request` if
+it has expired or its result is cleared or past the content retention deadline.
+After maintenance deletes the receipt, its ID returns `404 invalid_request`.
+List filters with no matching records return an empty page.
 Changed input with the same key conflicts. After the window, inspect state before
 issuing a new operation. Exact retries can recover derived keys and the stored
 current rotated address. Replays check current authority and resource
@@ -314,7 +321,8 @@ the tunnels. Keep this filter on every cursor page.
 `tunnel_id`, `expected_address_generation`, and `confirmation`, using the exact
 inspection values. The credential must be revoked and must have created every
 selected tunnel. All checks and retirements share one transaction. A missing
-tunnel returns `404 tunnel_unavailable`. A wrong creator, active credential,
+tunnel returns `404 tunnel_unavailable`. A missing credential returns
+`404 invalid_request`. A wrong creator, active credential,
 or wrong confirmation returns `400 invalid_request`. A stale generation
 returns `409 lifecycle_conflict`. Any failure leaves the full selection
 unchanged. The result resource contains only `credential_id` and

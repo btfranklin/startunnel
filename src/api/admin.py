@@ -41,7 +41,7 @@ from accounts.admin_services import (
 )
 from accounts.models import AdminCredential, AdminReceipt, User
 from core import limits as instance_limits
-from core.errors import InvalidCredential, InvalidRequest
+from core.errors import InvalidCredential, InvalidRequest, ResourceUnavailable
 from core.limits import DEFAULT_LIMITS
 from core.rate_limits import consume_admin_auth_attempt
 from core.security import client_ip
@@ -363,7 +363,7 @@ def account(request: AdminRequest, admin_id: UUID) -> AccountResource:
 
     row = User.objects.filter(pk=admin_id).first()
     if row is None:
-        raise InvalidRequest("This administrator is not available.")
+        raise ResourceUnavailable("This administrator is not available.")
     return AccountResource.model_validate(admin_resource(row))
 
 
@@ -439,7 +439,7 @@ def tunnel(request: AdminRequest, tunnel_id: UUID) -> TunnelResource:
 
     row = Tunnel.objects.filter(pk=tunnel_id).first()
     if row is None:
-        raise InvalidRequest("This tunnel is not available.")
+        raise ResourceUnavailable("This tunnel is not available.")
     return TunnelResource.model_validate(tunnel_resource(row))
 
 
@@ -499,10 +499,12 @@ def audit(
 
 @router.get("/operations/{uuid:operation_id}", response={200: OperationRecord, **ADMIN_ERRORS})
 def operation(request: AdminRequest, operation_id: UUID) -> OperationRecord:
-    """Read a retained operation result without issued secrets. Unavailable results return 400."""
+    """Read a safe operation result. Missing receipts return 404; unavailable results return 400."""
 
-    row = AdminReceipt.objects.filter(pk=operation_id, expires_at__gt=timezone.now()).first()
+    row = AdminReceipt.objects.filter(pk=operation_id).first()
     if row is None:
+        raise ResourceUnavailable("This operation is not available.")
+    if row.expires_at <= timezone.now():
         raise InvalidRequest("This operation is not available.")
     response = receipt_response(row)
     return OperationRecord(
@@ -688,7 +690,7 @@ def beacon(request: AdminRequest, beacon_id: UUID) -> BeaconResponse:
 
     row = beacon_queryset().filter(pk=beacon_id).first()
     if row is None:
-        raise InvalidRequest("This beacon is not available.")
+        raise ResourceUnavailable("This beacon is not available.")
     return BeaconResponse.model_validate(beacon_resource(row))
 
 

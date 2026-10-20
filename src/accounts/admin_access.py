@@ -12,7 +12,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from core.errors import InvalidCredential, InvalidRequest, LifecycleConflict
+from core.errors import InvalidCredential, InvalidRequest, LifecycleConflict, ResourceUnavailable
 from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
 
 from .models import AdminCredential, User
@@ -94,7 +94,7 @@ def change_admin_state(
     validate_actor(actor)
     target = User.objects.select_for_update(no_key=True).filter(pk=admin_id).first()
     if target is None:
-        raise InvalidRequest("This admin account is not available.")
+        raise ResourceUnavailable("This admin account is not available.")
     if expected_active is not None and target.is_active != expected_active:
         raise LifecycleConflict("The admin state changed. Inspect it and try again.")
     target.is_active = active

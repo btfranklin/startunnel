@@ -39,6 +39,10 @@ class InvalidRequest(DomainError):
     pass
 
 
+class ResourceUnavailable(InvalidRequest):
+    status = 404
+
+
 class InvalidCursor(InvalidRequest):
     code = "invalid_cursor"
     message = "The cursor is not valid. Read the current state and try again."

@@ -21,7 +21,13 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from core import limits as instance_limits
 from core.audit import admin_audit_context, record_event
-from core.errors import DomainError, IdempotencyConflict, InvalidRequest, LifecycleConflict
+from core.errors import (
+    DomainError,
+    IdempotencyConflict,
+    InvalidRequest,
+    LifecycleConflict,
+    ResourceUnavailable,
+)
 from core.idempotency import validate_idempotency_key
 from core.limits import DEFAULT_LIMITS
 from core.maintenance_status import read_maintenance_status
@@ -159,6 +165,8 @@ def list_admin_resources(
     if admin_id and kind == "keys":
         queryset = queryset.filter(owner_id=admin_id)
     if tunnel_id and kind == "cycles":
+        if not Tunnel.objects.filter(pk=tunnel_id).exists():
+            raise ResourceUnavailable("This tunnel is not available.")
         queryset = queryset.filter(tunnel_id=tunnel_id)
     elif tunnel_id and kind == "beacons":
         queryset = queryset.filter(cycle__tunnel_id=tunnel_id)
@@ -364,7 +372,7 @@ def _execute_admin_operation(
         try:
             resource, target_type, target_id = command.perform(actor, receipt)
         except ObjectDoesNotExist as error:
-            raise InvalidRequest("The requested admin resource is not available.") from error
+            raise ResourceUnavailable("The requested admin resource is not available.") from error
     event = record_event(
         actor_user=actor,
         actor_admin_credential=credential,
