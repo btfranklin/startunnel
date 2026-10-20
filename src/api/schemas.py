@@ -572,6 +572,8 @@ class AgentIdentityResponse(PublicSchema):
 
 
 class LimitsResponse(PublicSchema):
+    non_retired_tunnels: int
+    non_retired_tunnels_per_credential: int
     message_bytes: int
     messages_per_cycle: int
     content_bytes_per_cycle: int
@@ -590,6 +592,7 @@ class LimitsResponse(PublicSchema):
 
 class UsageResponse(PublicSchema):
     tunnels: int
+    created_tunnels: int
 
 
 class MeResponse(PublicSchema):

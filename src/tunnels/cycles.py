@@ -11,7 +11,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from accounts.models import User
@@ -83,6 +83,7 @@ class CreatedTunnel:
 @dataclass(frozen=True, slots=True)
 class AgentTunnelStatus:
     tunnels: int
+    created_tunnels: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,12 +163,21 @@ def _cycle_lifetime(expires_in_seconds: int | None) -> int:
     return value
 
 
+def _tunnel_usage(*, credential: AgentCredential) -> AgentTunnelStatus:
+    counts = Tunnel.objects.exclude(state=Tunnel.State.RETIRED).aggregate(
+        tunnels=Count("id"),
+        created_tunnels=Count("id", filter=Q(creator_id=credential.pk)),
+    )
+    return AgentTunnelStatus(
+        tunnels=counts["tunnels"],
+        created_tunnels=counts["created_tunnels"],
+    )
+
+
 def agent_tunnel_status(*, credential: AgentCredential) -> AgentTunnelStatus:
     if not credential_is_active(credential):
         raise InvalidCredential()
-    return AgentTunnelStatus(
-        tunnels=Tunnel.objects.exclude(state=Tunnel.State.RETIRED).count(),
-    )
+    return _tunnel_usage(credential=credential)
 
 
 def _validate_label(value: str, *, field: str) -> str:
@@ -273,10 +283,11 @@ def create_tunnel(
             replay=True,
         )
     _lock_instance_tunnel_quota()
-    owned = Tunnel.objects.exclude(state=Tunnel.State.RETIRED)
-    maximum = limits.non_retired_tunnels
-    if owned.count() >= maximum:
-        raise QuotaExceeded()
+    usage = _tunnel_usage(credential=credential)
+    if usage.tunnels >= limits.non_retired_tunnels:
+        raise QuotaExceeded("This instance has reached its non-retired tunnel limit.")
+    if usage.created_tunnels >= limits.non_retired_tunnels_per_credential:
+        raise QuotaExceeded("This credential has reached its non-retired tunnel creation limit.")
     mentions = _resolve_mentions(
         mention_ids=mention_ids,
         maximum=limits.mentions_per_message,

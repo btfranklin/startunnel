@@ -196,6 +196,31 @@ def test_instance_tunnel_quota_cannot_be_exceeded_concurrently(
     assert Tunnel.objects.exclude(state=Tunnel.State.RETIRED).count() == 1
 
 
+def test_one_credential_cannot_exceed_its_tunnel_creation_cap_concurrently(
+    credential_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential, _ = credential_factory()
+    limits = replace(Limits(), non_retired_tunnels_per_credential=1)
+    monkeypatch.setattr("tunnels.cycles.instance_limits.effective_limits", lambda: limits)
+    barrier = threading.Barrier(4)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(
+            executor.map(
+                lambda position: _create_tunnel_in_thread(
+                    credential_id=credential.id,
+                    barrier=barrier,
+                    position=position,
+                ),
+                range(4),
+            )
+        )
+
+    assert results.count("created") == 1
+    assert results.count("limited") == 3
+    assert Tunnel.objects.filter(creator=credential).count() == 1
+
+
 def test_notifications_follow_commit_and_rollback() -> None:
     with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
         listener.execute(f"LISTEN {ACTIVITY_CHANNEL}")

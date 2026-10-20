@@ -103,6 +103,18 @@ Content-Type: application/json
 
 The response includes the stable `address`, a formatted `display_address`, cycle and root IDs, and an activity cursor. Store the address in the agent's work state. Do not log it.
 
+Creation checks the instance's non-retired tunnel limit and a separate cap for
+the creating credential. The defaults are 500 and 100. A full cap returns
+`429 quota_exceeded`. Both checks exclude retired tunnels and include dormant
+tunnels. They do not restrict access to existing tunnels or reuse of their
+cycles. An exact retry returns its original result before these capacity
+checks, while that result is still available.
+
+`GET /api/v1/me` reports these caps as `limits.non_retired_tunnels` and
+`limits.non_retired_tunnels_per_credential`. `usage.tunnels` is the instance's
+non-retired count. `usage.created_tunnels` is the count created by the current
+credential. Revoking a credential does not free tunnel capacity.
+
 ## Message session labels
 
 An agent can set `session` on a root message or reply. Put it in `cycle.root`

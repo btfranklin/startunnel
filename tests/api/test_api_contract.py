@@ -16,6 +16,7 @@ from django.utils import timezone
 from agents.models import AgentCredential
 from agents.services import authenticate_key
 from api.schemas import ErrorResponse
+from core.limits import Limits
 from tunnels.codec import encode_token
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress
 
@@ -132,10 +133,60 @@ def test_me_returns_tree_limits_usage_and_security_headers(
     assert body["limits"]["maximum_tree_depth"] == 128
     assert body["limits"]["maximum_search_results"] == 100
     assert body["limits"]["maximum_search_query_characters"] == 512
-    assert body["usage"] == {"tunnels": 0}
+    assert body["limits"]["non_retired_tunnels"] == 500
+    assert body["limits"]["non_retired_tunnels_per_credential"] == 100
+    assert body["usage"] == {"tunnels": 0, "created_tunnels": 0}
     assert response["Cache-Control"] == "no-store"
     assert response["X-Content-Type-Options"] == "nosniff"
     assert "default-src 'self'" in response["Content-Security-Policy"]
+
+
+def test_creation_cap_returns_safe_error_and_reports_creator_usage(
+    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    limits = replace(Limits(), non_retired_tunnels=3, non_retired_tunnels_per_credential=1)
+    monkeypatch.setattr("core.limits.effective_limits", lambda: limits)
+    _, key = credential_factory()
+    _, other_key = credential_factory()
+    created = _create_global(client, key, "quota-api-create")
+    replay = _create_global(client, key, "quota-api-create")
+    assert replay["tunnel"]["id"] == created["tunnel"]["id"]
+    response = _post(
+        client,
+        "/api/v1/tunnels",
+        _create_request(),
+        key=key,
+        idempotency_key="quota-api-blocked",
+    )
+    body = _assert_safe_error(response, status=429, code="quota_exceeded")
+    assert body["error"]["message"] == (
+        "This credential has reached its non-retired tunnel creation limit."
+    )
+    assert key not in response.content.decode()
+    assert created["tunnel"]["address"] not in response.content.decode()
+    _create_global(client, other_key, "quota-other-create")
+    status = client.get("/api/v1/me", headers=_auth(key)).json()
+    assert status["usage"] == {"tunnels": 2, "created_tunnels": 1}
+    assert status["limits"]["non_retired_tunnels"] == 3
+    assert status["limits"]["non_retired_tunnels_per_credential"] == 1
+
+
+def test_instance_creation_cap_returns_safe_error(
+    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "core.limits.effective_limits", lambda: replace(Limits(), non_retired_tunnels=0)
+    )
+    _, key = credential_factory()
+    response = _post(
+        client,
+        "/api/v1/tunnels",
+        _create_request(),
+        key=key,
+        idempotency_key="quota-instance-blocked",
+    )
+    body = _assert_safe_error(response, status=429, code="quota_exceeded")
+    assert body["error"]["message"] == ("This instance has reached its non-retired tunnel limit.")
 
 
 def test_missing_malformed_and_unavailable_credentials_use_safe_errors(

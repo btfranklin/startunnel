@@ -2637,9 +2637,19 @@
           "messages_per_cycle": {
             "title": "Messages Per Cycle",
             "type": "integer"
+          },
+          "non_retired_tunnels": {
+            "title": "Non Retired Tunnels",
+            "type": "integer"
+          },
+          "non_retired_tunnels_per_credential": {
+            "title": "Non Retired Tunnels Per Credential",
+            "type": "integer"
           }
         },
         "required": [
+          "non_retired_tunnels",
+          "non_retired_tunnels_per_credential",
           "message_bytes",
           "messages_per_cycle",
           "content_bytes_per_cycle",
@@ -4580,13 +4590,18 @@
       "UsageResponse": {
         "additionalProperties": false,
         "properties": {
+          "created_tunnels": {
+            "title": "Created Tunnels",
+            "type": "integer"
+          },
           "tunnels": {
             "title": "Tunnels",
             "type": "integer"
           }
         },
         "required": [
-          "tunnels"
+          "tunnels",
+          "created_tunnels"
         ],
         "title": "UsageResponse",
         "type": "object"

@@ -25,6 +25,7 @@ MAX_BOARD_LIMIT = 100
 class Limits:
     active_credentials: int = 50
     non_retired_tunnels: int = 500
+    non_retired_tunnels_per_credential: int = 100
     messages_per_cycle: int = 10_000
     bytes_per_message: int = 65_536
     content_bytes_per_cycle: int = 67_108_864

@@ -9,6 +9,7 @@ def test_instance_limit_values_match_the_product_contract() -> None:
     limits = Limits()
     assert limits.active_credentials == 50
     assert limits.non_retired_tunnels == 500
+    assert limits.non_retired_tunnels_per_credential == 100
     assert limits.messages_per_cycle == 10_000
     assert limits.bytes_per_message == 65_536
     assert limits.content_bytes_per_cycle == 67_108_864

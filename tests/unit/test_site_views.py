@@ -93,10 +93,11 @@ def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
 
     created_at = timezone.now()
     created_tunnels = []
+    creators = [credential, *(credential_factory(user=actor)[0] for _ in range(2))]
     for index in range(201):
         created_tunnels.append(
             create_tunnel(
-                credential=credential,
+                credential=creators[index % len(creators)],
                 idempotency_key=f"site-query-many-{index}",
                 root_content={"type": "text", "text": f"Root {index}"},
                 label=f"Tunnel page {index}",

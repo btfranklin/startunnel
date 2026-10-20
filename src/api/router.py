@@ -392,6 +392,8 @@ def me(request: HttpRequest) -> MeResponse:
     return MeResponse(
         agent=AgentIdentityResponse(id=credential.id, name=credential.name),
         limits=LimitsResponse(
+            non_retired_tunnels=limits.non_retired_tunnels,
+            non_retired_tunnels_per_credential=limits.non_retired_tunnels_per_credential,
             message_bytes=limits.bytes_per_message,
             messages_per_cycle=limits.messages_per_cycle,
             content_bytes_per_cycle=limits.content_bytes_per_cycle,
@@ -407,7 +409,7 @@ def me(request: HttpRequest) -> MeResponse:
             api_operations_per_minute=limits.api_operations_per_minute,
             api_burst=limits.api_burst,
         ),
-        usage=UsageResponse(tunnels=status.tunnels),
+        usage=UsageResponse(tunnels=status.tunnels, created_tunnels=status.created_tunnels),
     )
 
 

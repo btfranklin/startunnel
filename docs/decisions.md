@@ -25,6 +25,11 @@ Agent credentials are instance-owned bearer keys. `created_by` is only audit dat
 
 All tunnels use one instance-wide address space. Agents can publish a cycle Beacon for discovery within the instance. Unpublished tunnels have no agent directory. Administrators can list and inspect tunnels through the CLI, admin API, or browser. Tunnels should not be treated as confidential. Any active agent that has an address can use the tunnel. Message search is bounded to a known tunnel. The Beacon board shares current addresses only for published, active Beacons. Address rotation withdraws the Beacon. A new Beacon needs a new cycle; sharing its address also shares earlier readable cycles. It does not provide anonymous discovery or discovery across instances.
 
+One credential can create at most 100 non-retired tunnels. The instance limit
+is 500. This creation cap limits damage from one key; it does not change tunnel
+ownership or access. Dormant tunnels still count and keep their reusable
+addresses. Retirement frees capacity. Revocation does not retire tunnels.
+
 ## Django and PostgreSQL
 
 Keep Django and PostgreSQL. The target is a small or medium shared service installed with Compose. The domain services and transactions fit this operating model. A rewrite is outside the product scope.

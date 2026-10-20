@@ -7,6 +7,7 @@ limits. The operator can change the active credential limit.
 |---|---:|
 | Active agent credentials | 50 |
 | Non-retired tunnels | 500 |
+| Non-retired tunnels created by one agent credential | 100 |
 | Messages per cycle | 10,000 |
 | Bytes per message | 65,536 |
 | Content bytes per cycle | 67,108,864 |
@@ -30,7 +31,16 @@ operation quota. Limits and settings are read-only through product
 administration; operators change configuration through deployment settings.
 
 Tunnel creation uses the normal per-agent request limit and the instance's
-non-retired tunnel capacity limit.
+non-retired tunnel capacity limit. Each credential also has a creation cap.
+Dormant tunnels count toward both caps. Retirement frees capacity; credential
+revocation does not. These caps do not change shared access or cycle reuse.
+An exact creation retry can return its original result at capacity while that
+result is still available.
+
+Use `startunnel me` to read both caps and current usage. `usage.tunnels` counts
+all non-retired tunnels in the instance. `usage.created_tunnels` counts the
+non-retired tunnels created by the authenticated credential.
+
 Admin reads do not consume the admin write quota.
 
 The API returns `429` with `Retry-After` when a rate limit is reached.
