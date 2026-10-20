@@ -58,6 +58,14 @@ Local diagnostics name the affected setting or argument in `error.field_errors`
 when known. Parser errors also identify the command's help. Rejected values
 are not copied into diagnostics.
 
+The client reads API bodies in 64 KiB chunks. Successful bodies can use up to
+512 MiB; error bodies can use up to 1 MiB. A declared `Content-Length` above the
+limit is rejected before reading. Missing or small declarations do not remove
+the read limit. If a successful response is too large, use a smaller page limit.
+If an error body is too large or its JSON cannot be decoded, the client keeps
+safe HTTP status, request ID, and retry delay metadata. It does not print the
+raw content.
+
 ## Install the command
 
 On Linux or macOS, download the script from your instance, then run

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -30,6 +31,7 @@ class StandaloneClientTests(unittest.TestCase):
         }
         self.environment["NO_PROXY"] = "127.0.0.1,localhost"
         self.requests: list[dict[str, Any]] = []
+        self.api_response: tuple[int, bytes, dict[str, str], bool] | None = None
         self.download = self.client.read_bytes()
         test = self
 
@@ -68,16 +70,37 @@ class StandaloneClientTests(unittest.TestCase):
                         value = {"error": {"code": "invalid_request"}}
                         status = 404
                     encoded = json.dumps(value, ensure_ascii=False).encode("utf-8")
+                extra_headers: dict[str, str] = {}
+                chunked = False
+                if self.path != "/downloads/star_tunnel.py" and test.api_response is not None:
+                    status, encoded, extra_headers, chunked = test.api_response
+                if chunked:
+                    self.protocol_version = "HTTP/1.1"
+                    self.close_connection = True
                 self.send_response(status)
-                self.send_header("Content-Length", str(len(encoded)))
+                if chunked:
+                    self.send_header("Transfer-Encoding", "chunked")
+                elif "Content-Length" not in extra_headers:
+                    self.send_header("Content-Length", str(len(encoded)))
+                for name, header_value in extra_headers.items():
+                    self.send_header(name, header_value)
                 self.end_headers()
-                self.wfile.write(encoded)
+                with suppress(BrokenPipeError, ConnectionResetError):
+                    if chunked:
+                        for offset in range(0, len(encoded), 65536):
+                            chunk = encoded[offset : offset + 65536]
+                            self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                        self.wfile.write(b"0\r\n\r\n")
+                    else:
+                        self.wfile.write(encoded)
 
             def log_message(self, format: str, *args: object) -> None:
                 del format, args
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(
+            target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
 
         def close_server() -> None:
@@ -190,6 +213,59 @@ class StandaloneClientTests(unittest.TestCase):
         self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer st_agent-test-key")
         self.assertEqual(self.requests[0]["headers"]["X-StarTunnel-Client-Version"], "unreleased")
         self.assertEqual(self.requests[0]["headers"]["Idempotency-Key"], "standalone-reply-001")
+
+    def test_api_bodies_keep_success_and_structured_errors(self) -> None:
+        request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
+        headers = {"X-Request-ID": request_id, "Retry-After": "2"}
+        value = {"message": "Review café with 代理 and 🔭."}
+        public_error = {
+            "error": {
+                "code": "invalid_request",
+                "message": "Retry the request.",
+                "field_errors": [],
+            }
+        }
+        cases = [
+            (200, json.dumps(value, ensure_ascii=False).encode(), True, None, None),
+            (400, json.dumps(public_error).encode(), True, "invalid_request", None),
+            (503, b"private-visible-marker" + b"x" * (1024 * 1024), True, "http_error", None),
+            (200, b'{"message":"Small"}', False, "invalid_response", str(512 * 1024 * 1024 + 1)),
+            (
+                200,
+                b'{"private-visible-marker":' + b"[" * 2000 + b"0" + b"]" * 1999 + b"}",
+                True,
+                "invalid_response",
+                None,
+            ),
+            (400, b'{"private-visible-marker":' + b"1" * 5000 + b"}", False, "http_error", None),
+        ]
+        for status, raw, chunked, code, declared_length in cases:
+            with self.subTest(status=status, code=code):
+                response_headers = dict(headers)
+                if declared_length is not None:
+                    response_headers["Content-Length"] = declared_length
+                self.api_response = (status, raw, response_headers, chunked)
+                result = self.run_client(
+                    "me",
+                    environment={
+                        "STARTUNNEL_BASE_URL": self.base_url,
+                        "STARTUNNEL_AGENT_KEY": "st_agent-test-key",
+                        "PYTHONINTMAXSTRDIGITS": "4300",
+                    },
+                )
+                if code is None:
+                    self.assertEqual(self.successful_json(result), value)
+                    continue
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, b"")
+                error = json.loads(result.stderr)["error"]
+                self.assertEqual(error["code"], code)
+                self.assertEqual(error["status"], status)
+                self.assertNotIn(b"private-visible-marker", result.stderr)
+                self.assertNotIn(b"Traceback", result.stderr)
+                if status >= 400:
+                    self.assertEqual(error["request_id"], request_id)
+                    self.assertEqual(error["retry_after"], 2)
 
     def test_admin_key_file_and_private_key_output(self) -> None:
         key_file = self.directory / "admin.key"

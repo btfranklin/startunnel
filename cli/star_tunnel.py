@@ -34,6 +34,9 @@ from urllib.parse import SplitResult, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 MAX_INPUT_BYTES = 2 * 1024 * 1024
+MAX_RESPONSE_BYTES = 512 * 1024 * 1024
+MAX_ERROR_BYTES = 1024 * 1024
+RESPONSE_CHUNK_BYTES = 64 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
 CLIENT_BUILD = {"version": "unreleased", "source_revision": None}
@@ -381,13 +384,33 @@ def _retry_after_seconds(value: str | None) -> float | None:
     return max(0.0, delay) if math.isfinite(delay) else None
 
 
+def _read_response_bytes(response: Any, *, limit: int) -> bytes:
+    """Read bounded chunks without trusting a small declared body length."""
+
+    try:
+        declared_length = int(response.headers.get("Content-Length", ""))
+    except ValueError:
+        declared_length = None
+    message = "The response is too large. Request fewer items with a smaller page limit."
+    if declared_length is not None and declared_length > limit:
+        raise CliError("invalid_response", status=response.status, message=message)
+    content = bytearray()
+    while len(content) <= limit:
+        chunk = response.read(min(RESPONSE_CHUNK_BYTES, limit + 1 - len(content)))
+        if not chunk:
+            return bytes(content)
+        content.extend(chunk)
+    raise CliError("invalid_response", status=response.status, message=message)
+
+
 def _safe_server_error(error: HTTPError) -> CliError:
     code = "http_error"
     request_id = error.headers.get("X-Request-ID")
     message = None
     field_errors = None
     try:
-        raw = error.read()
+        with error:
+            raw = _read_response_bytes(error, limit=MAX_ERROR_BYTES)
         value = json.loads(raw.decode("utf-8"))
         envelope = value.get("error") if isinstance(value, dict) else None
         if isinstance(envelope, dict):
@@ -411,7 +434,7 @@ def _safe_server_error(error: HTTPError) -> CliError:
                     ]
             if isinstance(candidate_request_id, str):
                 request_id = candidate_request_id
-    except (OSError, HTTPException, UnicodeDecodeError, json.JSONDecodeError):
+    except (OSError, HTTPException, ValueError, RecursionError, CliError):
         pass
     if isinstance(request_id, str):
         try:
@@ -524,7 +547,7 @@ class StarTunnelTransport:
                     raise CliError("http_error", status=response.status)
                 if response.status == 204:
                     return {}
-                raw = response.read()
+                raw = _read_response_bytes(response, limit=MAX_RESPONSE_BYTES)
         except HTTPError as error:
             raise _safe_server_error(error) from error
         except (URLError, OSError, TimeoutError, HTTPException) as error:
@@ -533,7 +556,7 @@ class StarTunnelTransport:
             raise CliError("configuration_error") from error
         try:
             value = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (ValueError, RecursionError) as error:
             raise CliError("invalid_response", status=response.status) from error
         if not isinstance(value, dict):
             raise CliError("invalid_response", status=response.status)

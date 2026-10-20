@@ -4,6 +4,7 @@ import ast
 import errno
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -11,12 +12,14 @@ import sys
 import threading
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
+from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -35,6 +38,7 @@ class Response:
     raw: bytes | None = None
     declared_content_length: str | None = None
     omit_content_length: bool = False
+    chunked: bool = False
 
 
 @dataclass
@@ -75,9 +79,14 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
                     else b""
                 )
             )
+            if response.chunked:
+                self.protocol_version = "HTTP/1.1"
+                self.close_connection = True
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
-            if not response.omit_content_length:
+            if response.chunked:
+                self.send_header("Transfer-Encoding", "chunked")
+            elif not response.omit_content_length:
                 self.send_header(
                     "Content-Length",
                     response.declared_content_length or str(len(encoded)),
@@ -85,14 +94,22 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
             for name, value in response.headers.items():
                 self.send_header(name, value)
             self.end_headers()
-            if encoded:
-                self.wfile.write(encoded)
+            with suppress(BrokenPipeError, ConnectionResetError):
+                if response.chunked:
+                    for offset in range(0, len(encoded), 17):
+                        chunk = encoded[offset : offset + 17]
+                        self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                    self.wfile.write(b"0\r\n\r\n")
+                elif encoded:
+                    self.wfile.write(encoded)
 
         def log_message(self, format: str, *args: object) -> None:
             del format, args
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+    )
     thread.start()
     try:
         host, port = cast(tuple[str, int], server.server_address)
@@ -786,6 +803,175 @@ def test_cli_reads_a_large_tree_page() -> None:
         )
 
     assert result == response
+
+
+class TrackedBody(io.BytesIO):
+    def __init__(self, content: bytes) -> None:
+        super().__init__(content)
+        self.read_sizes: list[int | None] = []
+        self.bytes_read = 0
+
+    def read(self, size: int | None = -1) -> bytes:
+        self.read_sizes.append(size)
+        content = super().read(size)
+        self.bytes_read += len(content)
+        return content
+
+
+@pytest.mark.parametrize("declared", [None, "invalid", "-1", "1"])
+@pytest.mark.parametrize("overflow", [False, True])
+def test_response_reader_bounds_each_read_and_total_bytes(
+    declared: str | None, overflow: bool
+) -> None:
+    cli = _load_cli_module()
+    limit = 64 * 1024 + 5
+    stream = TrackedBody(b"x" * (limit + int(overflow)))
+    headers = {} if declared is None else {"Content-Length": declared}
+    response = SimpleNamespace(headers=headers, status=200, read=stream.read)
+    if overflow:
+        with pytest.raises(cli.CliError) as failure:
+            cli._read_response_bytes(response, limit=limit)
+        assert failure.value.code == "invalid_response"
+        assert failure.value.status == 200
+    else:
+        assert cli._read_response_bytes(response, limit=limit) == b"x" * limit
+        assert stream.read_sizes[-1] == 1
+    assert stream.bytes_read == limit + int(overflow)
+    assert all(size is not None and 0 < size <= 64 * 1024 for size in stream.read_sizes)
+
+
+def test_response_reader_rejects_a_large_declared_length_without_reading() -> None:
+    cli = _load_cli_module()
+    stream = TrackedBody(b"private-visible-marker")
+    response = SimpleNamespace(headers={"Content-Length": "33"}, status=200, read=stream.read)
+    with pytest.raises(cli.CliError) as failure:
+        cli._read_response_bytes(response, limit=32)
+    assert failure.value.code == "invalid_response"
+    assert failure.value.status == 200
+    assert stream.read_sizes == []
+
+
+@pytest.mark.parametrize("fault", ["valid", "oversize", "invalid_json", "read_error"])
+def test_server_error_closes_its_body_and_keeps_safe_metadata(
+    fault: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli = _load_cli_module()
+    valid = {
+        "error": {"code": "dependency_unavailable", "message": "Try again.", "field_errors": []}
+    }
+    raw = json.dumps(valid).encode() if fault == "valid" else b"private-visible-marker" * 4
+    stream = TrackedBody(raw)
+    headers = HTTPMessage()
+    request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
+    headers["X-Request-ID"] = request_id
+    headers["Retry-After"] = "2"
+    monkeypatch.setattr(cli, "MAX_ERROR_BYTES", 512 if fault in {"valid", "invalid_json"} else 32)
+    if fault == "read_error":
+
+        def fail_read(size: int) -> bytes:
+            raise OSError("private-visible-marker")
+
+        monkeypatch.setattr(stream, "read", fail_read)
+    error = HTTPError("http://example.test/api/v1/me", 503, "Unavailable", headers, stream)
+    result = cli._safe_server_error(error)
+    assert stream.closed
+    assert result.code == ("dependency_unavailable" if fault == "valid" else "http_error")
+    assert result.status == 503
+    assert result.request_id == request_id
+    assert result.retry_after == 2
+    assert stream.bytes_read <= cli.MAX_ERROR_BYTES + 1
+    cli.print_error(result)
+    assert "private-visible-marker" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "framing", ["length", "missing", "chunked", "small", "invalid", "negative"]
+)
+@pytest.mark.parametrize("status", [200, 503])
+def test_http_response_limits_keep_structured_errors_and_safe_metadata(
+    framing: str, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = _load_cli_module()
+    monkeypatch.setattr(cli, "MAX_RESPONSE_BYTES", 64)
+    monkeypatch.setattr(cli, "MAX_ERROR_BYTES", 64)
+    request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
+    response = Response(
+        status,
+        raw=b'{"private-visible-marker":"' + b"x" * 100 + b'"}',
+        headers={"X-Request-ID": request_id, "Retry-After": "2"},
+        omit_content_length=framing == "missing",
+        chunked=framing == "chunked",
+        declared_content_length={"small": "1", "invalid": "invalid", "negative": "-1"}.get(framing),
+    )
+    with serve(response) as (base_url, _scenario):
+        transport = cli.StarTunnelTransport(base_url, "st_test-agent-key")
+        with pytest.raises(cli.CliError) as failure:
+            transport.request("GET", "/api/v1/me", expected={200})
+    result = failure.value
+    assert result.code == ("invalid_response" if status == 200 else "http_error")
+    assert result.status == status
+    assert "private-visible-marker" not in (result.message or "")
+    if status == 503:
+        assert result.request_id == request_id
+        assert result.retry_after == 2
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_http_success_without_content_length_preserves_json(chunked: bool) -> None:
+    cli = _load_cli_module()
+    value = {"items": ["Review café with 代理 and 🔭."]}
+    with serve(Response(200, value, omit_content_length=True, chunked=chunked)) as (
+        base_url,
+        _scenario,
+    ):
+        transport = cli.StarTunnelTransport(base_url, "st_test-agent-key")
+        assert transport.request("GET", "/api/v1/me", expected={200}) == value
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"private-visible-marker":"\xff"}',
+        b'{"private-visible-marker":' + b"1" * 5000 + b"}",
+        b'{"private-visible-marker":' + b"[" * 2000 + b"0" + b"]" * 1999 + b"}",
+    ],
+    ids=["invalid_utf8", "large_integer", "deep_nesting"],
+)
+@pytest.mark.parametrize("status", [200, 400])
+def test_malformed_response_json_stays_a_structured_cli_error(raw: bytes, status: int) -> None:
+    request_id = "064c1aab-8f0f-42d3-b2db-f132ba86363c"
+    response = Response(status, raw=raw, headers={"X-Request-ID": request_id, "Retry-After": "2"})
+    with serve(response) as (base_url, _scenario):
+        result = run_cli(base_url, "me", extra_env={"PYTHONINTMAXSTRDIGITS": "4300"})
+    assert result.returncode == 1
+    assert result.stdout == ""
+    error = json.loads(result.stderr)["error"]
+    assert error["code"] == ("invalid_response" if status == 200 else "http_error")
+    assert error["status"] == status
+    assert "private-visible-marker" not in result.stderr
+    assert "Traceback" not in result.stderr
+    if status == 400:
+        assert error["request_id"] == request_id
+        assert error["retry_after"] == 2
+
+
+@pytest.mark.parametrize("status", [200, 400])
+def test_response_decoder_recursion_errors_stay_structured(
+    status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = _load_cli_module()
+
+    def fail_decode(value: str) -> Any:
+        raise RecursionError("private-visible-marker")
+
+    monkeypatch.setattr(cli.json, "loads", fail_decode)
+    with serve(Response(status, raw=b'{"message":"Example"}')) as (base_url, _scenario):
+        transport = cli.StarTunnelTransport(base_url, "st_test-agent-key")
+        with pytest.raises(cli.CliError) as failure:
+            transport.request("GET", "/api/v1/me", expected={200})
+    assert failure.value.code == ("invalid_response" if status == 200 else "http_error")
+    assert failure.value.status == status
+    assert "private-visible-marker" not in (failure.value.message or "")
 
 
 def test_tutorial_runs_the_complete_exchange_with_separate_credentials() -> None:
