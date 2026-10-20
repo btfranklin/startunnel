@@ -253,6 +253,7 @@ due cycle through maintenance, and recovers a private admin key. Pass
 an immutable candidate image. The isolated runner removes its containers and
 volumes. This proves an upgrade from the published v0.2.0 fixture; it does not
 prove a specific production backup.
+Source CI on `main` runs this proof after the published v0.1.0 proof.
 
 ## Required focused evidence
 

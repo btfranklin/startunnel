@@ -128,6 +128,14 @@ jobs:
           git fetch --depth=1 origin refs/tags/v0.1.0:refs/tags/v0.1.0
           gh release download v0.1.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.1.0"
           pdm run python scripts/prove_admin_upgrade.py --baseline-record "$RUNNER_TEMP/startunnel-v0.1.0/release.json"
+      - name: Prove upgrade and recovery from published v0.2.0
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --depth=1 origin refs/tags/v0.2.0:refs/tags/v0.2.0
+          gh release download v0.2.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.2.0"
+          pdm run python scripts/prove_v020_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.2.0/release.json"
 
   external-proofs:
     name: ${{ matrix.lane }} proof

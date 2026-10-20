@@ -1259,6 +1259,35 @@ def test_source_scan_failure_blocks_service_builds() -> None:
         assert jobs[job]["needs"] == "canonical"
 
 
+@pytest.mark.parametrize(
+    ("version", "script", "option"),
+    [
+        ("v0.1.0", "prove_admin_upgrade.py", "--baseline-record"),
+        ("v0.2.0", "prove_v020_upgrade.py", "--release-record"),
+    ],
+)
+def test_ci_checks_each_published_upgrade_with_its_own_record(
+    version: str, script: str, option: str
+) -> None:
+    job = load_workflow("ci.yml")["jobs"]["postgres"]
+    steps = [
+        step for step in job["steps"] if script in step.get("run", "") and option in step["run"]
+    ]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["if"] == "github.event_name != 'pull_request'"
+    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert "GH_TOKEN" not in job.get("env", {})
+    assert not step.get("continue-on-error")
+    directory = f'"$RUNNER_TEMP/startunnel-{version}"'
+    record = f'"$RUNNER_TEMP/startunnel-{version}/release.json"'
+    assert step["run"].splitlines() == [
+        f"git fetch --depth=1 origin refs/tags/{version}:refs/tags/{version}",
+        f"gh release download {version} --pattern release.json --dir {directory}",
+        f"pdm run python scripts/{script} {option} {record}",
+    ]
+
+
 def test_website_publication_is_separate_and_opt_in() -> None:
     workflow = load_workflow("website.yml")
     build = workflow["jobs"]["build"]
