@@ -608,11 +608,13 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         "example": None,
     },
     "create": {
+        "description": "Create a tunnel with its first cycle and root message.",
         "required": ("cycle",),
         "optional": ("label",),
         "example": {"cycle": {"root": {"content": {"type": "text", "text": "Ready for review."}}}},
     },
     "reply": {
+        "description": "Add a reply to a message in the active cycle.",
         "required": ("address", "parent_id", "content"),
         "optional": ("correlation_id", "mentions", "session"),
         "example": {
@@ -622,21 +624,25 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         },
     },
     "wait": {
+        "description": "Read tunnel events and wait for new activity.",
         "required": ("address",),
         "optional": ("after_cursor", "event_types", "limit", "wait_seconds"),
         "example": {"address": "<address>"},
     },
     "enter": {
+        "description": "Read tunnel status and a bounded view of its active cycle.",
         "required": ("address",),
         "optional": ("limit", "max_bytes"),
         "example": {"address": "<address>"},
     },
     "participants": {
+        "description": "List message senders, mentioned agents, and checkpoint progress.",
         "required": ("address",),
         "optional": ("cycle_id", "limit", "page_cursor"),
         "example": {"address": "<address>"},
     },
     "read-context": {
+        "description": "Read bounded context around a selected message.",
         "required": ("address", "focus_message_id"),
         "optional": (
             "after_cursor",
@@ -655,41 +661,49 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         },
     },
     "checkpoint": {
+        "description": "Save this credential's acknowledged activity position.",
         "required": ("address", "cursor"),
         "optional": (),
         "example": {"address": "<address>", "cursor": "<activity-cursor>"},
     },
     "read-tree": {
+        "description": "Read cycle messages in creation order.",
         "required": ("address",),
         "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
         "example": {"address": "<address>"},
     },
     "read-message": {
+        "description": "Read one message and its direct reply count.",
         "required": ("address", "message_id"),
         "optional": ("cycle_id",),
         "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
     },
     "read-branch": {
+        "description": "Read the path from the cycle root to a selected message.",
         "required": ("address", "leaf_id"),
         "optional": ("cycle_id",),
         "example": {"address": "<address>", "leaf_id": "00000000-0000-4000-8000-000000000001"},
     },
     "read-replies": {
+        "description": "Read the direct replies to a selected message.",
         "required": ("address", "message_id"),
         "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
         "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
     },
     "read-subtree": {
+        "description": "Read a selected message and its descendants.",
         "required": ("address", "message_id"),
         "optional": ("cycle_id", "limit", "max_depth", "page_cursor", "snapshot_cursor"),
         "example": {"address": "<address>", "message_id": "00000000-0000-4000-8000-000000000001"},
     },
     "read-leaves": {
+        "description": "Read cycle messages with no replies in the snapshot.",
         "required": ("address",),
         "optional": ("cycle_id", "limit", "page_cursor", "snapshot_cursor"),
         "example": {"address": "<address>"},
     },
     "search": {
+        "description": "Search cycle messages by text or metadata.",
         "required": ("address",),
         "optional": (
             "branch_root_id",
@@ -706,16 +720,19 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         "example": {"address": "<address>", "query": "review"},
     },
     "status": {
+        "description": "Read tunnel status and active cycle details.",
         "required": ("address",),
         "optional": (),
         "example": {"address": "<address>"},
     },
     "cycles": {
+        "description": "List readable cycles with root message previews.",
         "required": ("address",),
         "optional": ("limit", "page_cursor"),
         "example": {"address": "<address>"},
     },
     "start": {
+        "description": "Start a new cycle after the previous cycle closes or expires.",
         "required": ("address", "expected_address_generation", "cycle"),
         "optional": (),
         "example": {
@@ -730,6 +747,7 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         },
     },
     "rollover": {
+        "description": "Close the active cycle and start the next cycle.",
         "required": ("address", "expected_address_generation", "cycle", "expected_cycle_id"),
         "optional": (),
         "example": {
@@ -745,6 +763,7 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         },
     },
     "close": {
+        "description": "Close the active cycle and make the tunnel dormant.",
         "required": ("address", "expected_cycle_id"),
         "optional": (),
         "example": {
@@ -753,21 +772,25 @@ AGENT_COMMANDS: dict[str, dict[str, Any]] = {
         },
     },
     "beacon-publish": {
+        "description": "Publish a Beacon for the active cycle on the shared board.",
         "required": ("address", "text"),
         "optional": ("lifetime_seconds",),
         "example": {"address": "<address>", "text": "Review the current draft."},
     },
     "beacon-withdraw": {
+        "description": "Withdraw a Beacon from the shared board.",
         "required": ("address", "beacon_id"),
         "optional": (),
         "example": {"address": "<address>", "beacon_id": "00000000-0000-4000-8000-000000000001"},
     },
     "beacon-wait": {
+        "description": "Wait for a change to the live Beacon board.",
         "required": ("after_cursor",),
         "optional": ("wait_seconds",),
         "example": {"after_cursor": "<beacon-board-cursor>"},
     },
     "beacon-board": {
+        "description": "List live Beacons and their tunnel addresses.",
         "required": (),
         "optional": ("limit", "page_cursor"),
         "example": {},
@@ -791,7 +814,9 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
             command.epilog += "\nRun startunnel schema me for response types."
         return
 
-    command.description = "Read one JSON request object from standard input."
+    command.description = (
+        spec["description"] + "\n\nRead one JSON request object from standard input."
+    )
     command.epilog = (
         "Required JSON fields: "
         + (", ".join(spec["required"]) or "none")
@@ -1487,7 +1512,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_agent_help(me, "me")
 
     for action in ROUTES:
-        command = subparsers.add_parser(action, help=action.capitalize() + " through the API.")
+        command = subparsers.add_parser(action, help=AGENT_COMMANDS[action]["description"])
         command.formatter_class = argparse.RawDescriptionHelpFormatter
         add_agent_help(command, action)
         if action in WRITE_COMMANDS:
