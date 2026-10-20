@@ -102,7 +102,7 @@ def main() -> int:
         "STARTUNNEL_ALLOWED_HOSTS": current.get("STARTUNNEL_ALLOWED_HOSTS", "localhost,127.0.0.1"),
         "STARTUNNEL_BASE_URL": current.get("STARTUNNEL_BASE_URL", "http://localhost:8000"),
         "STARTUNNEL_TRUSTED_PROXY_CIDRS": current.get(
-            "STARTUNNEL_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,172.16.0.0/12"
+            "STARTUNNEL_TRUSTED_PROXY_CIDRS", "127.0.0.0/8"
         ),
         "STARTUNNEL_MAX_REQUEST_BODY_BYTES": current.get(
             "STARTUNNEL_MAX_REQUEST_BODY_BYTES", "131072"

@@ -257,9 +257,28 @@ request host against `ALLOWED_HOSTS`.
 requests work without an extra entry. Add origins in Django's format only when
 the browser uses a different origin; Django checks those origins.
 
-`STARTUNNEL_TRUSTED_PROXY_CIDRS` lists proxy networks whose forwarded client
-address the application trusts for login rate limits. Set only networks that
-contain your proxy. The direct peer address is used for other requests.
+`STARTUNNEL_TRUSTED_PROXY_CIDRS` selects the direct peers whose forwarding
+headers the application accepts. It controls `Forwarded`, `X-Forwarded-For`,
+`X-Forwarded-Host`, `X-Forwarded-Port`, and `X-Forwarded-Proto`. The protocol
+header controls HTTPS detection. The client address controls product login,
+Django admin login, and failed admin-key authentication limits. Other peers
+lose these headers, and the limits use their direct address.
+
+The base and development defaults trust only `127.0.0.0/8`. Production adds
+the bundled Caddy address as one `/32` peer to the configured list. Caddy
+replaces incoming client-address and protocol headers before forwarding.
+For an external proxy, add only its direct address or required network. That
+proxy must replace incoming forwarding claims. Existing explicit values are
+preserved. Replace the former `127.0.0.0/8,172.16.0.0/12` default in an existing
+environment file; keeping it still trusts the full private range.
+
+`STARTUNNEL_PROXY_IPV4_PREFIX` selects three private IPv4 octets. Its default
+is `172.30.254`. The dedicated proxy network uses `.0/24`, its dynamic pool
+uses `.0/25`, and Caddy uses the reserved `.254` address. Only web and Caddy
+join that network. PostgreSQL uses the separate application network. Select
+an unused private prefix if the default conflicts with another host network.
+The [shared Caddy service](../compose.caddy.yaml) owns the edge configuration
+used by production and the isolated proxy proof.
 
 StarTunnel does not set HSTS. The operator can set the
 `Strict-Transport-Security` header at the reverse proxy for an HTTPS origin.

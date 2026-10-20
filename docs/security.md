@@ -41,6 +41,9 @@ credential row does not store the raw key.
 
 Product and Django admin login attempts use the same PostgreSQL-backed rate limit.
 Behind a trusted proxy, this limit uses the validated client address. Passwords use Django's configured password hashers. Session expiry remains a normal Django maintenance deadline.
+The same proxy boundary controls forwarded headers, HTTPS detection, and
+failed admin-key authentication limits. See [proxy configuration](operations.md)
+for the exact bundled peer, development defaults, and external proxy rules.
 
 Django admin provides read-only inspection of stored addresses, message
 payloads, and event metadata. It does not expose credential digests. Use the

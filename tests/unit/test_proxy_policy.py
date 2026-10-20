@@ -93,3 +93,65 @@ def test_invalid_forwarded_address_uses_the_direct_peer(forwarded: str) -> None:
     middleware = TrustedProxyMiddleware(lambda request: HttpResponse())
     middleware(request)
     assert client_ip(request) == "10.4.3.2"
+
+
+@pytest.mark.parametrize("peer", ["172.18.0.1", "172.30.254.2", "172.30.254.253"])
+@override_settings(
+    STARTUNNEL_TRUSTED_PROXY_CIDRS=["127.0.0.0/8", "172.30.254.254/32"],
+    SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+)
+def test_bridge_gateway_and_neighbor_cannot_spoof_forwarded_claims(peer: str) -> None:
+    for source in ("198.51.100.10", "198.51.100.11"):
+        request = RequestFactory().post(
+            "/accounts/login/",
+            REMOTE_ADDR=peer,
+            HTTP_X_FORWARDED_FOR=source,
+            HTTP_X_FORWARDED_PROTO="https",
+            HTTP_X_FORWARDED_HOST="attacker.invalid",
+            HTTP_X_FORWARDED_PORT="443",
+            HTTP_FORWARDED="for=198.51.100.10;proto=https",
+        )
+        TrustedProxyMiddleware(lambda request: HttpResponse())(request)
+        assert client_ip(request) == peer
+        assert not request.is_secure()
+        assert all(field not in request.META for field in TrustedProxyMiddleware.forwarded_fields)
+
+
+@override_settings(
+    STARTUNNEL_TRUSTED_PROXY_CIDRS=["127.0.0.0/8", "172.30.254.254/32"],
+    SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+)
+def test_exact_proxy_peer_preserves_https_and_client_identity() -> None:
+    request = RequestFactory().get(
+        "/accounts/login/",
+        REMOTE_ADDR="172.30.254.254",
+        HTTP_X_FORWARDED_FOR="198.51.100.10",
+        HTTP_X_FORWARDED_PROTO="https",
+    )
+    TrustedProxyMiddleware(lambda request: HttpResponse())(request)
+    assert client_ip(request) == "198.51.100.10"
+    assert request.is_secure()
+
+
+@override_settings(STARTUNNEL_TRUSTED_PROXY_CIDRS=["127.0.0.0/8"])
+def test_direct_development_login_keeps_one_limit_source(monkeypatch: Any) -> None:
+    from accounts.forms import ThrottledAuthenticationForm
+
+    sources: list[str] = []
+    monkeypatch.setattr(
+        "core.rate_limits.consume_login_attempt",
+        lambda **kwargs: sources.append(kwargs["source_ip"]),
+    )
+    monkeypatch.setattr("django.contrib.auth.forms.authenticate", lambda *args, **kwargs: None)
+    for forwarded in ("198.51.100.10", "198.51.100.11"):
+        request = RequestFactory().post(
+            "/accounts/login/",
+            REMOTE_ADDR="172.18.0.1",
+            HTTP_X_FORWARDED_FOR=forwarded,
+        )
+        TrustedProxyMiddleware(lambda request: HttpResponse())(request)
+        form = ThrottledAuthenticationForm(
+            request, data={"username": "operator", "password": "bad"}
+        )
+        assert not form.is_valid()
+    assert sources == ["172.18.0.1", "172.18.0.1"]

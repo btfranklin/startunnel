@@ -18,6 +18,7 @@ For another release, use the guides at its Git tag.
 | [Generated OpenAPI](../generated/openapi.json) | Authoritative request and response schema |
 | [Security](security.md) | Trust model, threat boundaries, secrets, retention, and instance rules |
 | [Operations](operations.md) | Docker, configuration, health, deployment, backup, and recovery |
+| [Shared Caddy service](../compose.caddy.yaml) | The production and test TLS edge service, with the unchanged production Caddyfile |
 | [Release policy](releases.md) | Versioned images, publication, compatibility, and upgrades |
 | [Team setup index](setup/README.md) | Configuration selection and complete EC2, Lightsail, DigitalOcean, and existing-server setup paths |
 | [Repository tools](../scripts/README.md) | Validation, development, deployment, and proof script owners |

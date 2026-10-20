@@ -12,6 +12,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from ipaddress import IPv4Network, ip_network
 from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Any, Literal
@@ -175,6 +176,35 @@ def required_output(
     return result.stdout.strip()
 
 
+def available_proxy_prefix(environment: Mapping[str, str]) -> str:
+    """Select a private proof subnet that does not overlap a Docker network."""
+
+    identifiers = required_output(
+        ["docker", "network", "ls", "--quiet"],
+        environment=environment,
+        label="existing network identifiers",
+    ).splitlines()
+    occupied = []
+    if identifiers:
+        networks = json.loads(
+            required_output(
+                ["docker", "network", "inspect", *identifiers],
+                environment=environment,
+                label="existing network subnets",
+            )
+        )
+        for network in networks:
+            for configuration in network.get("IPAM", {}).get("Config") or []:
+                if subnet := configuration.get("Subnet"):
+                    occupied.append(ip_network(subnet, strict=False))
+    for second in range(16, 32):
+        for third in range(1, 255):
+            candidate = IPv4Network(f"172.{second}.{third}.0/24")
+            if not any(candidate.overlaps(network) for network in occupied if network.version == 4):
+                return f"172.{second}.{third}"
+    raise IsolationError("No unused private proxy subnet is available for this proof.")
+
+
 def assert_local_docker(environment: Mapping[str, str]) -> str:
     """Reject SSH and non-loopback TCP Docker endpoints."""
 
@@ -335,6 +365,10 @@ class IsolatedComposeProject:
         self.environment.update(
             STARTUNNEL_CONTAINER_UID=str(helper_uid), STARTUNNEL_CONTAINER_GID=str(helper_gid)
         )
+        if "proxy-proof" in self.profiles:
+            self.environment["STARTUNNEL_PROXY_IPV4_PREFIX"] = available_proxy_prefix(
+                self.environment
+            )
         artifacts = ROOT / "artifacts"
         artifacts.mkdir(mode=0o700, exist_ok=True)
         if os.getuid() == 0:
@@ -342,7 +376,7 @@ class IsolatedComposeProject:
         if self.candidate_image:
             self._candidate_overlay = Path(self._temporary.name) / "candidate.yaml"
             overlay = "services:\n"
-            for service in ("web", "migrate", "maintenance"):
+            for service in ("web", "migrate", "maintenance", "proxy-web"):
                 overlay += (
                     f"  {service}:\n    build: !reset null\n    image: {self.candidate_image}\n"
                 )
@@ -484,7 +518,7 @@ class IsolatedComposeProject:
             environment=self.environment,
             label="the candidate image ID",
         )
-        for service in ("web", "migrate", "maintenance"):
+        for service in ("web", "migrate", "maintenance", "proxy-web"):
             images = self.capture(
                 "candidate service image", "images", "--quiet", service
             ).splitlines()

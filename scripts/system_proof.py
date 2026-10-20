@@ -51,6 +51,9 @@ SYSTEM_SERVICES = (
     "maintenance",
     "example-tests",
     "agent-e2e",
+    "proxy-web",
+    "proxy-caddy",
+    "proxy-tests",
 )
 
 
@@ -596,6 +599,7 @@ def run_system_proof(
                 "build",
                 "example-tests",
                 "agent-e2e",
+                "proxy-tests",
                 timeout_seconds=3_600,
             ),
         )
@@ -620,6 +624,7 @@ def run_system_proof(
             "create",
             "example-tests",
             "agent-e2e",
+            "proxy-tests",
             timeout_seconds=300,
         ),
     )
@@ -663,6 +668,16 @@ def run_system_proof(
             "--no-deps",
             "agent-e2e",
             timeout_seconds=2_400,
+        ),
+    )
+    step(
+        "Caddy HTTPS and browser CSRF",
+        lambda: stack.run(
+            "Verify Caddy HTTPS and browser CSRF",
+            "run",
+            "--rm",
+            "proxy-tests",
+            timeout_seconds=1_200,
         ),
     )
     step(

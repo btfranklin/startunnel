@@ -68,6 +68,11 @@ LANES = {
         ("run", "--build", "--rm", "browser-tests"),
         4_800,
     ),
+    "proxy": LaneSpec(
+        ("proxy-proof",),
+        ("run", "--build", "--rm", "proxy-tests"),
+        2_400,
+    ),
     "live-agents": LaneSpec(
         ("live-agents",),
         ("run", "--build", "--rm", "live-agent-e2e"),
@@ -129,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
 
     system_report: dict[str, Any] | None = None
     try:
-        profiles: tuple[str, ...] = ("examples", "agents") if arguments.lane == "system" else ()
+        profiles: tuple[str, ...] = (
+            ("examples", "agents", "proxy-proof") if arguments.lane == "system" else ()
+        )
         if arguments.lane in LANES:
             profiles = LANES[arguments.lane].profiles
         with (

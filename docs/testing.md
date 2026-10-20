@@ -73,6 +73,7 @@ Run `pdm run check` for each change, then add the applicable proof:
 | Agent exchange | Isolated `agents` lane |
 | Templates, forms, or browser behavior | Isolated `browser` lane |
 | Deployment, backup, restore, or database grants | Isolated `system` lane |
+| Trusted proxies, forwarded headers, or the TLS edge | Isolated `proxy` lane and `system` lane |
 | Markdown only | `pdm run docs-structure`, included in the aggregate |
 | Script behavior | Focused tests in `tests/tools/` |
 
@@ -123,9 +124,18 @@ pdm run python scripts/run_isolated_test_lane.py postgres
 pdm run python scripts/run_isolated_test_lane.py examples
 pdm run python scripts/run_isolated_test_lane.py agents
 pdm run python scripts/run_isolated_test_lane.py browser
+pdm run python scripts/run_isolated_test_lane.py proxy
 ```
 
 The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions.
+The `proxy` lane uses production Django settings, the shared Caddy service,
+and the unchanged production Caddyfile. Its browser checks HTTPS login, secure
+cookies, replaced forwarding headers, a valid password change, and rejection of
+a cross-origin CSRF request. Caddy issues a disposable local certificate for
+`proxy-proof.internal`; the test browser accepts that issuer only for this
+proof. This does not prove a public certificate. The runner selects a private
+subnet without an existing Docker network overlap. It changes no operator
+environment file and publishes no proxy proof ports.
 The privilege test executes the production grant SQL with `psql` and compares
 its permissions with the migration. Both use the same history-table list.
 System and restore proofs run one shared role check. It verifies normal writes
@@ -324,10 +334,12 @@ Docker cache; changed source files still cause their copy layers to rebuild.
 Browser and example suites run once in source CI. The system proof checks
 health, runtime image contents, an active reader across a web restart, a
 post-restart agent exchange, database privileges, backup, restore, and database
-loss and recovery. It builds only the two client helpers it uses.
+loss and recovery, plus the Caddy HTTPS and browser CSRF proof. It builds the
+client and browser helpers that it uses.
 Image scanning, system proof, and load testing run in parallel. All three must
 pass for promotion. The system proof tests the exact runtime image in an
-isolated development configuration; it does not prove a particular public
+isolated development configuration and a separate production-settings proxy
+service; it does not prove a particular public
 server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
 

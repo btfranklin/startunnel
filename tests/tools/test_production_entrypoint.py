@@ -17,10 +17,24 @@ from scripts.start_production import (
     rendered_images,
     validate_image_reference,
     validate_production_secret_files,
+    validate_proxy_prefix,
     validate_rendered_images,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("prefix", ["10.25.12", "172.30.254", "192.168.241"])
+def test_proxy_prefix_accepts_three_private_octets(prefix: str) -> None:
+    assert validate_proxy_prefix(prefix) == prefix
+
+
+@pytest.mark.parametrize(
+    "prefix", ["", "172.30", "172.30.254.0/24", "127.0.0", "8.8.8", "10.0.999"]
+)
+def test_proxy_prefix_rejects_invalid_or_public_networks(prefix: str) -> None:
+    with pytest.raises(ValueError, match="STARTUNNEL_PROXY_IPV4_PREFIX"):
+        validate_proxy_prefix(prefix)
 
 
 def test_production_image_requires_a_sha256_digest() -> None:

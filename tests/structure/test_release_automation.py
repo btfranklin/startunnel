@@ -120,13 +120,15 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     assert report["status"] == "passed"
     assert stack.runtime_contents_checked
     assert stack.availability_checked
-    assert stack.proof_service_creations == [("create", "example-tests", "agent-e2e")]
+    assert stack.proof_service_creations == [
+        ("create", "example-tests", "agent-e2e", "proxy-tests")
+    ]
     if candidate_image:
-        assert stack.builds == [("build", "example-tests", "agent-e2e")]
+        assert stack.builds == [("build", "example-tests", "agent-e2e", "proxy-tests")]
     elif build_images:
         assert stack.builds == [
             ("build", "--no-cache", "web", "maintenance"),
-            ("build", "example-tests", "agent-e2e"),
+            ("build", "example-tests", "agent-e2e", "proxy-tests"),
         ]
     else:
         assert stack.builds == []
@@ -810,7 +812,7 @@ def test_system_report_is_written_only_after_volume_cleanup(
             include_openai: bool,
         ) -> None:
             del project_name, include_openai
-            assert tuple(profiles) == ("examples", "agents")
+            assert tuple(profiles) == ("examples", "agents", "proxy-proof")
             events.append("init")
 
         def __enter__(self) -> FakeStack:
@@ -1222,6 +1224,9 @@ def test_system_report_records_every_used_service_image(
         "maintenance",
         "example-tests",
         "agent-e2e",
+        "proxy-web",
+        "proxy-caddy",
+        "proxy-tests",
     }
     assert services == list(image_ids)
 

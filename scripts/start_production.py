@@ -7,6 +7,7 @@ import os
 import re
 import stat
 import subprocess
+from ipaddress import IPv4Network
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,22 @@ PRODUCTION_SECRET_NAMES = (
     "postgres_runtime_password",
 )
 MAX_SECRET_FILE_BYTES = 8_192
+
+
+def validate_proxy_prefix(value: str) -> str:
+    """Require three IPv4 octets for the dedicated proxy network."""
+
+    try:
+        network = IPv4Network(f"{value}.0/24", strict=True)
+    except ValueError as error:
+        raise ValueError("STARTUNNEL_PROXY_IPV4_PREFIX must contain three IPv4 octets.") from error
+    private = any(
+        network.subnet_of(IPv4Network(cidr))
+        for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    )
+    if str(network.network_address).rsplit(".", 1)[0] != value or not private:
+        raise ValueError("STARTUNNEL_PROXY_IPV4_PREFIX must select a private IPv4 network.")
+    return value
 
 
 def validate_image_reference(value: str, *, name: str = "STARTUNNEL_APP_IMAGE") -> str:
@@ -120,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     command = compose_command(edge=args.edge)
     try:
+        validate_proxy_prefix(os.environ.get("STARTUNNEL_PROXY_IPV4_PREFIX", "172.30.254"))
         validate_production_secret_files(production_secret_directory())
         validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
         subprocess.run([*command, "config", "--quiet"], cwd=ROOT, check=True)

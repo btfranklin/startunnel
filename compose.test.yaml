@@ -246,3 +246,66 @@ services:
           --concurrent-activity-readers "$${STARTUNNEL_LOAD_ACTIVITY_READERS}" \
           --drain-seconds "$${STARTUNNEL_LOAD_DRAIN_SECONDS}" \
           --credentials "$${STARTUNNEL_LOAD_CREDENTIALS}"
+
+  proxy-web:
+    extends:
+      file: compose.yaml
+      service: web
+    profiles: [proxy-proof]
+    ports: !reset []
+    image: startunnel-test-web:local
+    build:
+      target: test-runtime
+      labels: *test-build-labels
+    environment:
+      <<: *test-environment
+      DJANGO_SETTINGS_MODULE: startunnel.settings.production
+      STARTUNNEL_ENV: production
+      STARTUNNEL_BASE_URL: https://proxy-proof.internal
+      STARTUNNEL_ALLOWED_HOSTS: proxy-proof.internal
+      STARTUNNEL_METRICS_TOKEN: proxy-proof-metrics-token-0000000000000000000
+      STARTUNNEL_TRUSTED_PROXY_CIDRS: 127.0.0.0/8,${STARTUNNEL_PROXY_IPV4_PREFIX:-172.30.254}.254/32
+    networks:
+      startunnel: {}
+      proxy:
+        aliases: [web]
+
+  proxy-caddy:
+    extends:
+      file: compose.caddy.yaml
+      service: caddy
+    profiles: !override [proxy-proof]
+    environment:
+      STARTUNNEL_DOMAIN: proxy-proof.internal
+    ports: !reset []
+    networks:
+      proxy:
+        aliases: [proxy-proof.internal]
+    depends_on: !override
+      proxy-web:
+        condition: service_healthy
+
+  proxy-tests:
+    extends:
+      service: browser-tests
+    profiles: !override [proxy-proof]
+    environment:
+      STARTUNNEL_PROXY_TESTS: "1"
+    networks:
+      startunnel: {}
+      proxy: {}
+    depends_on: !override
+      proxy-caddy:
+        condition: service_started
+    command: [pdm, run, pytest, -q, tests/browser/test_proxy_https.py]
+
+networks:
+  proxy:
+    ipam:
+      config:
+        - subnet: ${STARTUNNEL_PROXY_IPV4_PREFIX:-172.30.254}.0/24
+          ip_range: ${STARTUNNEL_PROXY_IPV4_PREFIX:-172.30.254}.0/25
+
+volumes:
+  caddy_data:
+  caddy_config:

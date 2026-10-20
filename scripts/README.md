@@ -48,7 +48,7 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 
 | Tool | Purpose |
 |---|---|
-| [run_isolated_test_lane.py](run_isolated_test_lane.py) | Run canonical, PostgreSQL, example, agent, browser, system, or resource lanes |
+| [run_isolated_test_lane.py](run_isolated_test_lane.py) | Run canonical, PostgreSQL, example, agent, browser, proxy, system, or resource lanes |
 | [compose_isolation.py](compose_isolation.py) | Own disposable Compose resources and cleanup |
 | [system_proof.py](system_proof.py) | Coordinate clean-stack exchange, restart, backup, and restore checks |
 | [prove_admin_upgrade.py](prove_admin_upgrade.py) | Verify forward migrations and published-image backup recovery |
