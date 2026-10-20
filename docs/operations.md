@@ -185,7 +185,8 @@ The worker holds a PostgreSQL advisory lock. A second worker waits without doing
 Inspect safe state with:
 
 ```shell
-docker compose exec web /app/.venv/bin/python manage.py inspect_runtime
+docker compose exec web env -u PROMETHEUS_MULTIPROC_DIR \
+  /usr/local/bin/startunnel-entrypoint /app/.venv/bin/python manage.py inspect_runtime
 ```
 
 ## Back up and restore

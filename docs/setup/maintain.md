@@ -26,11 +26,16 @@ development settings or another stack.
 
 ```shell
 docker compose ps --all
-docker compose exec web /app/.venv/bin/python manage.py inspect_runtime
+docker compose exec web env -u PROMETHEUS_MULTIPROC_DIR \
+  /usr/local/bin/startunnel-entrypoint /app/.venv/bin/python manage.py inspect_runtime
 df -h /srv/startunnel
 docker stats --no-stream
 curl --fail --silent --show-error "https://$STARTUNNEL_DOMAIN/health/ready"
 ```
+
+The command loads the mounted production secrets through the container start
+script. Removing the web metrics setting from this command process preserves
+the running worker's metrics files.
 
 Inspect runtime counters without printing credentials, messages, or addresses.
 Check free disk space and backup age daily. Keep enough space for at least one
@@ -65,7 +70,8 @@ Use another available admin key or password account first. If remote access is
 lost, run the recovery command from the configured server shell:
 
 ```shell
-docker compose exec -T web /app/.venv/bin/python manage.py recover_instance_admin team-admin --key-file /tmp/startunnel-recovery.key
+docker compose exec -T web env -u PROMETHEUS_MULTIPROC_DIR \
+  /usr/local/bin/startunnel-entrypoint /app/.venv/bin/python manage.py recover_instance_admin team-admin --key-file /tmp/startunnel-recovery.key
 ```
 
 Select an existing account and a new private container file. Recovery activates

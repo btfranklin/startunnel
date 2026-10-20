@@ -236,11 +236,16 @@ local images do not need the registry token to restart.
 
 ## 8. Create the first administrator
 
+These commands load the mounted production secrets through the container start
+script. They remove the web metrics setting from the command process so they
+do not clear the running worker's metrics files.
+
 Replace `team-admin` with the selected username. For unattended administration,
 create the account and its first non-expiring key in one operation:
 
 ```shell
-docker compose exec -T web /app/.venv/bin/python manage.py create_instance_admin team-admin --key-file /tmp/startunnel-admin.key
+docker compose exec -T web env -u PROMETHEUS_MULTIPROC_DIR \
+  /usr/local/bin/startunnel-entrypoint /app/.venv/bin/python manage.py create_instance_admin team-admin --key-file /tmp/startunnel-admin.key
 ```
 
 This writes a new mode `0600` file inside the `web` container and refuses an
@@ -253,7 +258,8 @@ with the downloaded CLI and verify `admin me` and `admin doctor`.
 If the first administrator needs browser access instead, use this alternative:
 
 ```shell
-docker compose exec web /app/.venv/bin/python manage.py create_instance_admin team-admin
+docker compose exec web env -u PROMETHEUS_MULTIPROC_DIR \
+  /usr/local/bin/startunnel-entrypoint /app/.venv/bin/python manage.py create_instance_admin team-admin
 ```
 
 The command reads and confirms a password without showing it. Store the password
