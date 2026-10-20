@@ -311,7 +311,7 @@ def test_admin_pages_and_key_controls_work_without_javascript(
         expect(page.get_by_role("heading", name="Instance overview", exact=True)).to_be_visible()
         page.goto(base_url + "/app/account/")
         page.get_by_text("Manage access for " + username, exact=True).click()
-        key_name = "No JavaScript admin key"
+        key_name = "No JavaScript admin key " + uuid4().hex[:12]
         page.get_by_label("Admin key name", exact=True).fill(key_name)
         downloaded = _download_key(
             page, button="Download new admin key", endpoint="/app/admins/access/"
@@ -358,7 +358,8 @@ def test_admin_pages_and_key_controls_work_without_javascript(
     finally:
         context.close()
         _database_shell(
-            f"from accounts.models import User; User.objects.filter(username={username!r}).delete()"
+            "from accounts.models import User; "
+            f"User.objects.filter(username={username!r}).update(is_active=False)"
         )
 
 
@@ -380,11 +381,14 @@ from agents.services import create_credential
 from tunnels.models import Tunnel
 from tunnels.cycles import create_tunnel
 actor = User.objects.create_user(username={username!r}, password={password!r})
-credential = create_credential(actor=actor, name={credential_name!r}).credential
+credentials = [
+    create_credential(actor=actor, name={credential_name!r} + "-" + str(index)).credential
+    for index in range(3)
+]
 created_at = timezone.now()
 for index in range(201):
     result = create_tunnel(
-        credential=credential,
+        credential=credentials[index % len(credentials)],
         idempotency_key={credential_name!r} + "-" + str(index),
         root_content={{"type": "text", "text": "Pagination proof"}},
         label={label_prefix!r} + str(index),
@@ -415,10 +419,13 @@ for index in range(201):
             f"""
 from agents.models import AgentCredential
 from tunnels.admin_actions import retire_tunnels_for_credentials
-credential = AgentCredential.objects.filter(name={credential_name!r}).first()
-if credential:
+credential_ids = list(
+    AgentCredential.objects.filter(name__startswith={credential_name!r})
+    .values_list("id", flat=True)
+)
+if credential_ids:
     retire_tunnels_for_credentials(
-        credential_ids=[credential.id], reason="browser_test_cleanup"
+        credential_ids=credential_ids, reason="browser_test_cleanup"
     )
 """
         )

@@ -118,8 +118,10 @@ def account(browser: Browser, base_url: str) -> Iterator[BrowserAccount]:
     try:
         yield result
     finally:
+        # Keep protected history until the isolated lane removes its database.
         _database_shell(
-            f"from accounts.models import User; User.objects.filter(username={username!r}).delete()"
+            "from accounts.models import User; "
+            f"User.objects.filter(username={username!r}).update(is_active=False)"
         )
 
 
@@ -235,7 +237,7 @@ def test_local_login_admin_and_password_change(
         context.close()
         _database_shell(
             "from accounts.models import User; "
-            f"User.objects.filter(username={second_username!r}).delete()"
+            f"User.objects.filter(username={second_username!r}).update(is_active=False)"
         )
 
 
@@ -341,7 +343,8 @@ def test_no_javascript_admin_forms_work(
         page.close()
         context.close()
         _database_shell(
-            f"from accounts.models import User; User.objects.filter(username={username!r}).delete()"
+            "from accounts.models import User; "
+            f"User.objects.filter(username={username!r}).update(is_active=False)"
         )
 
 
