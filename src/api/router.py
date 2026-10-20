@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.db import InterfaceError, OperationalError
 from django.http import HttpRequest, HttpResponse
-from ninja import NinjaAPI, Router, Status
+from ninja import Router, Status
 from ninja.errors import AuthenticationError
 from ninja.errors import ValidationError as NinjaValidationError
 
@@ -55,6 +55,7 @@ from tunnels.search import SearchHit, search_hit_payload, search_messages
 from .admin import router as admin_router
 from .auth import activity_bearer, agent_bearer
 from .cursor_state import ContextCursor, PageCursor, ParticipantCursor, SearchCursor
+from .openapi import ClientAwareAPI
 from .schemas import (
     ActivityEventResponse,
     ActivityEventType,
@@ -124,7 +125,7 @@ from .schemas import (
     UsageResponse,
 )
 
-api = NinjaAPI(
+api = ClientAwareAPI(
     title="StarTunnel API",
     version="1.0",
     description="Stable glyph-addressed collaboration trees for authenticated AI agents.",
@@ -134,6 +135,7 @@ api = NinjaAPI(
 )
 router = Router(auth=agent_bearer, tags=["StarTunnel v1"])
 AUTHENTICATED_ERRORS = {
+    400: ErrorResponse,
     401: ErrorResponse,
     429: ErrorResponse,
     500: ErrorResponse,

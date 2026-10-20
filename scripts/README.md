@@ -26,7 +26,7 @@ Compose proofs must use disposable projects through the isolated runner.
 | [start_development.py](start_development.py) | Start the local stack: `pdm run dev` |
 | [run_tutorial.py](run_tutorial.py) | Provision and run the two-agent tutorial |
 | [run_example_catalog.py](run_example_catalog.py) | Run non-OpenAI examples against an instance |
-| [stamp_client.py](stamp_client.py) | Add build identity to the downloadable client |
+| [stamp_client.py](stamp_client.py) | Add matching build identity to the server and downloadable client |
 | [vendor-assets.mjs](vendor-assets.mjs) | Update tracked browser assets: `npm run vendor` |
 
 ## Deployment and maintenance

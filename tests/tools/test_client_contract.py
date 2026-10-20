@@ -11,7 +11,7 @@ import pytest
 from scripts import generate_client_contract
 
 
-def test_build_contract_keeps_public_responses_and_transitive_schema_closure() -> None:
+def test_build_contract_keeps_public_responses_and_transitive_component_closure() -> None:
     responses = {
         "200": {
             "description": "ok",
@@ -57,19 +57,63 @@ def test_build_contract_keeps_public_responses_and_transitive_schema_closure() -
         "GET /api/v1/items": responses,
         "POST /api/v1/items": {"204": {"description": "empty"}},
     }
-    assert contract["schemas"] == {
-        "Envelope": document["components"]["schemas"]["Envelope"],
-        "Item": document["components"]["schemas"]["Item"],
+    assert contract["components"] == {
+        "schemas": {
+            "Envelope": document["components"]["schemas"]["Envelope"],
+            "Item": document["components"]["schemas"]["Item"],
+        },
+        "headers": {},
     }
     assert contract["operations"]["GET /api/v1/items"]["200"] == responses["200"]
-    assert contract["schemas"]["Envelope"]["properties"]["item"]["nullable"] is True
+    assert contract["components"]["schemas"]["Envelope"]["properties"]["item"]["nullable"] is True
+
+
+def test_build_contract_follows_header_schema_and_escaped_component_references() -> None:
+    header = {
+        "description": "Result metadata",
+        "schema": {"$ref": "#/components/schemas/Result~1Metadata"},
+    }
+    schema = {
+        "type": "object",
+        "properties": {"related": {"$ref": "#/components/headers/Related~0Header"}},
+    }
+    document: dict[str, Any] = {
+        "paths": {
+            "/api/v1/items": {
+                "get": {
+                    "responses": {
+                        "200": {"headers": {"X-Result": {"$ref": "#/components/headers/Result"}}}
+                    }
+                }
+            }
+        },
+        "components": {
+            "schemas": {"Result/Metadata": schema, "Unused": {"type": "string"}},
+            "headers": {
+                "Result": header,
+                "Related~Header": {"description": "Related"},
+                "Unused": {"description": "Unused"},
+            },
+        },
+    }
+
+    contract = generate_client_contract.build_contract(document)
+
+    assert contract["components"] == {
+        "schemas": {"Result/Metadata": schema},
+        "headers": {
+            "Result": header,
+            "Related~Header": document["components"]["headers"]["Related~Header"],
+        },
+    }
 
 
 @pytest.mark.parametrize(
     ("reference", "message"),
     [
         ("#/components/schemas/Missing", "does not exist"),
-        ("#/components/responses/Bad", "outside #/components/schemas/"),
+        ("#/components/responses/Bad", "outside supported component groups"),
+        ("#/components/headers/Missing", "does not exist"),
     ],
 )
 def test_build_contract_rejects_invalid_response_references(reference: str, message: str) -> None:
@@ -95,7 +139,7 @@ def test_render_contract_uses_readable_sorted_json() -> None:
     assert rendered.endswith('"""  # noqa: E501\n)\n')
     assert json.loads(rendered.split('r"""', 1)[1].split('"""', 1)[0]) == {
         "operations": {"GET /api/v1/z": {"200": {"description": "é"}}},
-        "schemas": {},
+        "components": {"schemas": {}, "headers": {}},
     }
 
 

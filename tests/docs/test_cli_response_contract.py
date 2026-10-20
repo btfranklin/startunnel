@@ -47,16 +47,17 @@ def operation_for(document: dict[str, Any], method: str, path: str) -> dict[str,
 
 
 def schema_closure(document: dict[str, Any], commands: list[dict[str, Any]]) -> dict[str, Any]:
-    schemas = document["components"]["schemas"]
-    pending: list[str] = []
+    components = document["components"]
+    pending: list[tuple[str, str]] = []
 
     def collect(value: Any) -> None:
         if isinstance(value, dict):
             reference = value.get("$ref")
             if reference is not None:
-                prefix = "#/components/schemas/"
+                prefix = "#/components/"
                 assert reference.startswith(prefix), reference
-                pending.append(reference.removeprefix(prefix).replace("~1", "/").replace("~0", "~"))
+                group, name = reference.removeprefix(prefix).split("/", 1)
+                pending.append((group, name.replace("~1", "/").replace("~0", "~")))
             for child in value.values():
                 collect(child)
         elif isinstance(value, list):
@@ -67,14 +68,15 @@ def schema_closure(document: dict[str, Any], commands: list[dict[str, Any]]) -> 
         collect(command["responses"])
         collect(command["stdout_schemas"])
 
-    selected: dict[str, Any] = {}
+    selected: dict[str, dict[str, Any]] = {}
     while pending:
-        name = pending.pop()
-        if name in selected:
+        group, name = pending.pop()
+        definitions = selected.setdefault(group, {})
+        if name in definitions:
             continue
-        assert name in schemas, name
-        selected[name] = schemas[name]
-        collect(schemas[name])
+        assert name in components[group], name
+        definitions[name] = components[group][name]
+        collect(definitions[name])
     return selected
 
 
@@ -134,7 +136,7 @@ def test_schema_outputs_match_openapi_and_only_include_reachable_types() -> None
         for command in commands:
             operation = operation_for(document, command["method"], command["path"])
             assert command["responses"] == operation["responses"]
-        assert schema_output["components"]["schemas"] == schema_closure(document, commands)
+        assert schema_output["components"] == schema_closure(document, commands)
 
 
 def test_admin_doctor_alias_publishes_status_operation_responses() -> None:

@@ -114,6 +114,32 @@ upgrade that includes these changes, follow [Install the command](#install-the-c
 once. Later client updates use `startunnel update`. On other platforms, download
 the script again and run it with Python.
 
+## Client compatibility
+
+API requests from a released CLI include `X-StarTunnel-Client-Version` with
+the client release label. The current server source requires official CLI
+v0.3.0 or later. Older official clients that do not send a version also receive
+an update error. The server rejects these requests before authentication,
+input parsing, or domain writes. It returns HTTP `400`, code `invalid_request`,
+and an update instruction that existing v0.2.0 clients can display.
+
+Run `startunnel update` from the selected instance, then repeat `version` and
+`me` or `admin me`. The download stays available to older clients and needs no
+key. A v0.1.0 script without `update` must download and install the client as
+described in [Install the command](#install-the-command).
+
+Source and custom builds report `unreleased` when no stable release label is
+available. The server permits them but reports their compatibility as
+`unverified`. This does not prove release compatibility. Version headers are
+self-reported; they do not grant authority or replace credential checks.
+
+The server returns `X-StarTunnel-Server-Version`,
+`X-StarTunnel-Minimum-Client-Version`, and
+`X-StarTunnel-Client-Compatibility` on API responses. A newer server can keep
+support for an older version by retaining its minimum. Ordinary commands send
+this request metadata with their existing API call. They do not make an extra
+update check or download a client. Offline commands remain offline.
+
 ## Client release information
 
 ```shell
@@ -201,9 +227,10 @@ startunnel schema reply
 This offline command returns JSON for all agent API commands or one selected
 command. It lists API paths, request fields, examples, idempotency requirements,
 and response definitions. `responses` contains the API responses by HTTP status.
-`stdout_schemas` describes successful CLI output by status. Both use JSON Schema
-references into the result's `components.schemas`, which includes the referenced
-types. These definitions preserve required fields, nullable values, arrays,
+`stdout_schemas` describes successful CLI output by status. Body schemas use
+JSON Schema references into `components.schemas`. Response headers reference
+their definitions in `components.headers`. Only referenced definitions are
+included. These definitions preserve required fields, nullable values, arrays,
 defaults, and field descriptions. An empty array is a valid empty result when
 the schema permits it. A required nullable field can be null; it is not an
 optional field. Follow `required` to determine which fields can be absent.

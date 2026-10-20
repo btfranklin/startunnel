@@ -13,6 +13,39 @@ definitions describe the client build; they do not verify a remote server.
 See [CLI response help](../cli/README.md#agent-command-help) for stdout changes
 and the CLI error envelope.
 
+## CLI compatibility
+
+Official CLI requests include `X-StarTunnel-Client-Version`, using a stable
+`vMAJOR.MINOR.PATCH` release label. The current minimum is v0.3.0. The server
+compares numeric version components. It rejects older or malformed versions
+before an API view runs. The official `startunnel-agent-cli` user agent without
+a version is also rejected. The error uses HTTP `400`, code `invalid_request`,
+and a field error for `X-StarTunnel-Client-Version`. Its message directs the
+user to run `startunnel update`. This known code lets existing v0.2.0 clients
+display the update instruction. Unsupported writes do not create receipts or
+change domain state.
+
+Source and custom clients can send `unreleased`. Their compatibility remains
+`unverified`; the server permits their requests without claiming a release
+match. Other API clients that omit the version header keep their existing
+behavior and have status `not_checked`. These values are self-reported metadata,
+not an authentication or security boundary. Authenticated API operations still
+need the correct credentials and domain permissions.
+
+API responses contain these headers:
+
+| Header | Meaning |
+|---|---|
+| `X-StarTunnel-Server-Version` | Server image release label, or `unreleased` |
+| `X-StarTunnel-Minimum-Client-Version` | Minimum supported official CLI release |
+| `X-StarTunnel-Client-Compatibility` | `supported`, `update_required`, `unverified`, or `not_checked` |
+
+The image build stamps the server and downloaded client with the same version
+and source revision. Custom source builds retain the `unreleased` marker.
+The OpenAPI definition includes the request header and response headers.
+Update downloads, health endpoints, and browser routes are outside this check.
+The client never updates itself during an API command.
+
 ## Routes
 
 | Method and path | Purpose |

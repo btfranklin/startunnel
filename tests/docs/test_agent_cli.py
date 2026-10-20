@@ -250,6 +250,7 @@ def test_commands_preserve_public_request_bodies_and_map_scope(
         expected_body["wait_seconds"] = 20
     assert request["body"] == expected_body
     assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
+    assert request["headers"]["X-Startunnel-Client-Version"] == "unreleased"
     if action in {"create", "reply", "close", "beacon-publish", "beacon-withdraw"}:
         assert request["headers"]["Idempotency-Key"] == arguments[1]
     else:
@@ -271,6 +272,7 @@ def test_me_uses_get_and_returns_the_native_response() -> None:
             "body": None,
         }
     ]
+    assert scenario.requests[0]["headers"]["X-Startunnel-Client-Version"] == "unreleased"
 
 
 @pytest.mark.parametrize(
@@ -397,6 +399,40 @@ def test_missing_field_diagnostic_survives_transport_and_client() -> None:
         "status": 400,
         "request_id": "064c1aab-8f0f-42d3-b2db-f132ba86363c",
         "field_errors": [{"field": "body.focus_message_id", "message": "Field required"}],
+    }
+
+
+def test_update_required_invalid_request_message_and_field_error_are_preserved() -> None:
+    message = "Update the StarTunnel CLI to version 0.3.0 or later."
+    response = {
+        "error": {
+            "code": "invalid_request",
+            "message": message,
+            "field_errors": [
+                {
+                    "field": "X-StarTunnel-Client-Version",
+                    "message": "This client version is no longer supported.",
+                }
+            ],
+        }
+    }
+    with serve(Response(400, response)) as (base_url, scenario):
+        result = run_cli(base_url, "me")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert len(scenario.requests) == 1
+    assert scenario.requests[0]["headers"]["X-Startunnel-Client-Version"] == "unreleased"
+    assert json.loads(result.stderr)["error"] == {
+        "code": "invalid_request",
+        "message": message,
+        "status": 400,
+        "field_errors": [
+            {
+                "field": "X-StarTunnel-Client-Version",
+                "message": "This client version is no longer supported.",
+            }
+        ],
     }
 
 
@@ -833,6 +869,10 @@ def test_tutorial_runs_the_complete_exchange_with_separate_credentials() -> None
         "Bearer st_sender-test-key",
         "Bearer st_receiver-test-key",
     ]
+    assert all(
+        request["headers"]["X-Startunnel-Client-Version"] == "unreleased"
+        for request in scenario.requests
+    )
     write_requests = [scenario.requests[index] for index in (2, 4, 7)]
     for request in write_requests:
         uuid.UUID(request["headers"]["Idempotency-Key"])
@@ -904,6 +944,41 @@ def test_client_version_is_offline_and_describes_the_running_file() -> None:
         "command_path": str(CLI.resolve()),
         "sha256": hashlib.sha256(CLI.read_bytes()).hexdigest(),
     }
+
+
+@pytest.mark.parametrize(
+    ("version", "expected_header"),
+    [
+        ("v0.3.0", "v0.3.0"),
+        ("unreleased", "unreleased"),
+        ("custom 'quoted' release\nname", "unreleased"),
+        ("v999999999999999999999.0.0", "unreleased"),
+    ],
+)
+def test_stamped_client_sends_only_safe_version_headers(
+    tmp_path: Path, version: str, expected_header: str
+) -> None:
+    client = tmp_path / "star_tunnel.py"
+    client.write_bytes(CLI.read_bytes())
+    stamp_client(client, version, 'revision"\\value')
+    with serve(Response(200, {"id": "agent-id"})) as (base_url, scenario):
+        result = subprocess.run(
+            [sys.executable, str(client), "me"],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "STARTUNNEL_BASE_URL": base_url,
+                "STARTUNNEL_AGENT_KEY": "st_test-agent-key",
+            },
+            check=False,
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"id": "agent-id"}
+    request = scenario.requests[0]
+    assert request["headers"]["X-Startunnel-Client-Version"] == expected_header
+    assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
 
 
 @pytest.mark.parametrize("command", [None, "me", "start", "read-tree"])
@@ -1360,7 +1435,9 @@ def test_installed_command_updates_from_the_selected_instance_without_credential
     assert scenario.requests[0]["method"] == "GET"
     assert scenario.requests[0]["path"] == "/downloads/star_tunnel.py"
     assert "Authorization" not in scenario.requests[0]["headers"]
+    assert "X-StarTunnel-Client-Version" not in scenario.requests[0]["headers"]
     assert scenario.requests[1]["headers"]["User-Agent"] == "startunnel-agent-cli-updated"
+    assert scenario.requests[1]["headers"]["X-Startunnel-Client-Version"] == "v0.1.0"
     version = subprocess.run(
         [str(command), "version"], capture_output=True, text=True, env=environment, check=False
     )
@@ -1617,6 +1694,7 @@ def test_admin_cycle_commands_forward_root_session(
     assert request["path"] == f"/api/v1/admin/tunnels/{suffix}"
     assert request["body"] == body
     assert request["headers"]["Authorization"] == "Bearer sta_test-admin-key"
+    assert request["headers"]["X-Startunnel-Client-Version"] == "unreleased"
     assert request["headers"]["Idempotency-Key"] == f"start-session-{command}"
 
 

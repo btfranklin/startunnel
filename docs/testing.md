@@ -40,6 +40,8 @@ client source.
 CLI contract tests compare agent and admin operations with OpenAPI, including
 admin query fields. The CLI response contract gate compares the bundled offline
 definitions with the generated OpenAPI responses and their referenced types.
+Version checks cover sync and async requests, rejected writes without database
+work, older-client update messages, and matching server and client build labels.
 Run `pdm run openapi` to update both artifacts. Response workflow tests use
 the published definitions to connect writes, discovery, paginated reads, and
 closure. Standalone tests also check offline configuration and executable paths.

@@ -188,6 +188,7 @@ class StandaloneClientTests(unittest.TestCase):
         self.assertEqual(self.successful_json(result), {"content": content, "name": "代理"})
         self.assertEqual(self.requests[0]["body"]["content"], content)
         self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer st_agent-test-key")
+        self.assertEqual(self.requests[0]["headers"]["X-StarTunnel-Client-Version"], "unreleased")
         self.assertEqual(self.requests[0]["headers"]["Idempotency-Key"], "standalone-reply-001")
 
     def test_admin_key_file_and_private_key_output(self) -> None:
@@ -200,6 +201,7 @@ class StandaloneClientTests(unittest.TestCase):
         identity = self.successful_json(self.run_client("admin", "me", environment=environment))
         self.assertEqual(identity, {"admin": {"id": "test-admin"}})
         self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer sta_admin-test-key")
+        self.assertEqual(self.requests[0]["headers"]["X-StarTunnel-Client-Version"], "unreleased")
         output = self.directory / "agent.key"
         arguments = (
             "admin",
@@ -344,6 +346,7 @@ class StandaloneClientTests(unittest.TestCase):
             self.assertNotEqual(before["sha256"], after["sha256"])
             self.assertEqual(self.requests[0]["path"], "/downloads/star_tunnel.py")
             self.assertIsNone(self.requests[0]["headers"].get("Authorization"))
+            self.assertIsNone(self.requests[0]["headers"].get("X-StarTunnel-Client-Version"))
 
     def test_relative_and_symlink_invocations_report_and_update_the_resolved_file(self) -> None:
         artifacts = ROOT / "artifacts"

@@ -89,7 +89,8 @@ ARG STARTUNNEL_CLIENT_VERSION=unreleased
 ARG STARTUNNEL_SOURCE_REVISION=""
 RUN python /tmp/stamp_client.py /app/cli/star_tunnel.py \
     --version "${STARTUNNEL_CLIENT_VERSION}" \
-    --source-revision "${STARTUNNEL_SOURCE_REVISION}"
+    --source-revision "${STARTUNNEL_SOURCE_REVISION}" \
+    --server-build /app/src/core/build.py
 
 ENV STARTUNNEL_ENV=build
 

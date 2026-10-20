@@ -20,6 +20,9 @@ LISTEN/NOTIFY ---- maintenance deadlines
 - `api` owns the authenticated JSON transport and schemas. Agent routes construct
   typed responses from domain results. Shared message, cycle, Beacon, and entry
   payloads keep their canonical serialization for byte accounting and retries.
+  API middleware checks official CLI versions before a view runs and reports
+  server and minimum-client versions in response headers. This transport check
+  does not replace authentication or domain access rules.
 - Domain services in `accounts`, `agents`, and `tunnels` own business rules.
 - `accounts.admin_commands` owns typed admin inputs and their domain actions.
 - `accounts.admin_data` owns canonical admin resource data.

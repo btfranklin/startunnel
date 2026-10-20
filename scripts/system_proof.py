@@ -82,6 +82,7 @@ import django
 django.setup()
 from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.storage import ManifestStaticFilesStorage
+from core.build import BUILD
 
 collected = ManifestStaticFilesStorage()
 for name in (
@@ -104,6 +105,8 @@ result = subprocess.run(
 build = json.loads(result.stdout)
 assert build['version'], 'Missing client version'
 assert 'source_revision' in build, 'Missing client source metadata'
+assert build['version'] == BUILD['version'], 'Server and client versions differ'
+assert build['source_revision'] == BUILD['source_revision'], 'Server and client sources differ'
 assert build['sha256'] == hashlib.sha256(client.read_bytes()).hexdigest()
 for command in ('pip', 'pip3', 'perfect-doc', 'cargo'):
     assert shutil.which(command) is None, f'Unexpected runtime tool: {command}'

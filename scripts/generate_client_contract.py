@@ -15,20 +15,26 @@ CLIENT = ROOT / "cli" / "star_tunnel.py"
 
 BEGIN_MARKER = "# BEGIN GENERATED RESPONSE CONTRACT"
 END_MARKER = "# END GENERATED RESPONSE CONTRACT"
-SCHEMA_REF_PREFIX = "#/components/schemas/"
+COMPONENT_REF_PREFIX = "#/components/"
+SUPPORTED_COMPONENT_GROUPS = {"schemas", "headers"}
 API_PATH_PREFIX = "/api/"
 HTTP_METHODS = {"get", "post"}
 
 
-def _schema_name(reference: str) -> str:
-    if not reference.startswith(SCHEMA_REF_PREFIX):
+def _component_reference(reference: str) -> tuple[str, str]:
+    if not reference.startswith(COMPONENT_REF_PREFIX):
         raise ValueError(
-            f"response contract reference {reference!r} is outside #/components/schemas/"
+            f"response contract reference {reference!r} is outside supported component groups"
         )
-    name = reference.removeprefix(SCHEMA_REF_PREFIX).replace("~1", "/").replace("~0", "~")
+    group, separator, escaped_name = reference.removeprefix(COMPONENT_REF_PREFIX).partition("/")
+    if not separator or group not in SUPPORTED_COMPONENT_GROUPS:
+        raise ValueError(
+            f"response contract reference {reference!r} is outside supported component groups"
+        )
+    name = escaped_name.replace("~1", "/").replace("~0", "~")
     if not name:
-        raise ValueError(f"response contract reference {reference!r} has no schema name")
-    return name
+        raise ValueError(f"response contract reference {reference!r} has no component name")
+    return group, name
 
 
 def _references(value: Any) -> list[str]:
@@ -48,18 +54,21 @@ def _references(value: Any) -> list[str]:
 
 
 def build_contract(document: dict[str, Any]) -> dict[str, Any]:
-    """Build the public GET/POST response mapping and referenced schema closure."""
+    """Build public responses and the referenced schemas and headers."""
     paths = document.get("paths")
     components = document.get("components", {})
-    schemas = components.get("schemas", {}) if isinstance(components, dict) else {}
+    if not isinstance(components, dict):
+        raise ValueError("OpenAPI document components must be an object")
+    source_components = {group: components.get(group, {}) for group in SUPPORTED_COMPONENT_GROUPS}
     if not isinstance(paths, dict):
         raise ValueError("OpenAPI document must contain a paths object")
-    if not isinstance(schemas, dict):
-        raise ValueError("OpenAPI document components.schemas must be an object")
+    for group, definitions in source_components.items():
+        if not isinstance(definitions, dict):
+            raise ValueError(f"OpenAPI document components.{group} must be an object")
 
     operations: dict[str, Any] = {}
-    schema_names: set[str] = set()
-    pending: list[str] = []
+    selected_names: dict[str, set[str]] = {group: set() for group in source_components}
+    pending: list[tuple[str, str]] = []
     for path, path_item in paths.items():
         if not isinstance(path, str) or not path.startswith(API_PATH_PREFIX):
             continue
@@ -78,22 +87,25 @@ def build_contract(document: dict[str, Any]) -> dict[str, Any]:
             if key in operations:
                 raise ValueError(f"OpenAPI response paths overlap at {key}")
             operations[key] = responses
-            pending.extend(_references(responses))
+            pending.extend(_component_reference(reference) for reference in _references(responses))
 
-    response_schemas: dict[str, Any] = {}
+    selected_components: dict[str, dict[str, Any]] = {group: {} for group in source_components}
     while pending:
-        reference = pending.pop()
-        name = _schema_name(reference)
-        if name in schema_names:
+        group, name = pending.pop()
+        if name in selected_names[group]:
             continue
-        if name not in schemas:
+        definitions = source_components[group]
+        reference = f"{COMPONENT_REF_PREFIX}{group}/{name}"
+        if name not in definitions:
             raise ValueError(f"response contract reference {reference!r} does not exist")
-        schema_names.add(name)
-        schema = schemas[name]
-        response_schemas[name] = schema
-        pending.extend(_references(schema))
+        selected_names[group].add(name)
+        definition = definitions[name]
+        selected_components[group][name] = definition
+        pending.extend(
+            _component_reference(child_reference) for child_reference in _references(definition)
+        )
 
-    return {"operations": operations, "schemas": response_schemas}
+    return {"operations": operations, "components": selected_components}
 
 
 def render_contract(document: dict[str, Any]) -> str:

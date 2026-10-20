@@ -2,7 +2,7 @@
 
 | Status | Meaning | Action |
 |---:|---|---|
-| `400` | Invalid request, cursor, or unavailable admin receipt | Check the input and receipt owner |
+| `400` | Invalid request, unsupported CLI, cursor, or unavailable admin receipt | Check the field errors; update the CLI if requested |
 | `401` | Missing, invalid, expired, or revoked credential | Use an active key of the correct type: `sta_` for administration, `st_` for messages |
 | `404` | Resource is unavailable | Check the resource ID, address, and retained-history deadline |
 | `409` | State or idempotency conflict | Reread state; reuse a key only for the exact request |
@@ -16,7 +16,7 @@ Use `error.code` for program decisions. Messages can change.
 
 | Code | Status | Action |
 |---|---:|---|
-| `invalid_request` | 400 | Correct input; an admin receipt or its retained result can also be unavailable |
+| `invalid_request` | 400 | Correct input; update the CLI when `X-StarTunnel-Client-Version` is named; an admin receipt can also be unavailable |
 | `invalid_address` | 400 | Correct the glyph address and checksum |
 | `invalid_cursor` | 400 | Read current state and use a matching cursor |
 | `invalid_credential` | 401 | Supply an active key of the required type |

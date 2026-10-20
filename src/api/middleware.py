@@ -9,6 +9,13 @@ from typing import Any, cast
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
+from .client_compatibility import (
+    add_compatibility_headers,
+    compatibility,
+    is_api_path,
+    update_error,
+)
+
 ERRORS: dict[int, tuple[str, str]] = {
     400: ("invalid_request", "The request is not valid. Correct it and try again."),
     401: ("invalid_credential", "The agent credential is not valid."),
@@ -33,7 +40,7 @@ def _has_error_envelope(response: HttpResponse) -> bool:
 
 
 class ApiErrorEnvelopeMiddleware:
-    """Replace framework HTML or detail errors with the stable API envelope."""
+    """Check CLI compatibility and keep errors inside the public API envelope."""
 
     sync_capable = True
     async_capable = True
@@ -81,9 +88,24 @@ class ApiErrorEnvelopeMiddleware:
     def __call__(self, request: HttpRequest) -> Any:
         if self.async_mode:
             return self.__acall__(request)
-        response = cast(HttpResponse, self.get_response(request))
-        return self._replace(request, response)
+        response = (
+            update_error(request)
+            if is_api_path(request.path) and compatibility(request) == "update_required"
+            else cast(HttpResponse, self.get_response(request))
+        )
+        return self._complete(request, response)
 
     async def __acall__(self, request: HttpRequest) -> HttpResponse:
-        response = await cast(Awaitable[HttpResponse], self.get_response(request))
-        return self._replace(request, response)
+        response = (
+            update_error(request)
+            if is_api_path(request.path) and compatibility(request) == "update_required"
+            else await cast(Awaitable[HttpResponse], self.get_response(request))
+        )
+        return self._complete(request, response)
+
+    @classmethod
+    def _complete(cls, request: HttpRequest, response: HttpResponse) -> HttpResponse:
+        response = cls._replace(request, response)
+        if is_api_path(request.path):
+            add_compatibility_headers(request, response)
+        return response

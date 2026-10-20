@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -35,6 +36,9 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "startunnel-agent-cli"
 CLIENT_BUILD = {"version": "unreleased", "source_revision": None}
+CLIENT_VERSION_HEADER_PATTERN = re.compile(
+    r"v(?:0|[1-9][0-9]{0,17})\.(?:0|[1-9][0-9]{0,17})\.(?:0|[1-9][0-9]{0,17})"
+)
 
 SAFE_ERROR_MESSAGES = {
     "version_failed": "The client file could not be read.",
@@ -445,6 +449,21 @@ def _safe_server_error(error: HTTPError) -> CliError:
     )
 
 
+def client_version_header() -> str:
+    """Return only a bounded official version or the safe development marker."""
+
+    version = CLIENT_BUILD.get("version")
+    if version == "unreleased":
+        return "unreleased"
+    if (
+        isinstance(version, str)
+        and len(version) <= 64
+        and CLIENT_VERSION_HEADER_PATTERN.fullmatch(version) is not None
+    ):
+        return version
+    return "unreleased"
+
+
 class StarTunnelTransport:
     """A bounded JSON transport that does not follow redirects."""
 
@@ -506,6 +525,7 @@ class StarTunnelTransport:
         headers = {
             "Accept": "application/json",
             "Authorization": "Bearer " + self.agent_key,
+            "X-StarTunnel-Client-Version": client_version_header(),
             "User-Agent": USER_AGENT,
         }
         if body is not None:
@@ -803,21 +823,20 @@ def add_agent_help(command: argparse.ArgumentParser, action: str) -> None:
 def response_help(commands: list[dict[str, Any]]) -> dict[str, Any]:
     """Attach API responses and CLI output types from the bundled contract."""
 
-    schemas = CLIENT_RESPONSE_CONTRACT["schemas"]
-    selected: dict[str, Any] = {}
+    components = CLIENT_RESPONSE_CONTRACT["components"]
+    schemas = components["schemas"]
+    selected: dict[str, dict[str, Any]] = {}
 
     def collect(value: Any) -> None:
         if isinstance(value, dict):
             reference = value.get("$ref")
             if reference is not None:
-                name = (
-                    reference.removeprefix("#/components/schemas/")
-                    .replace("~1", "/")
-                    .replace("~0", "~")
-                )
-                if name not in selected:
-                    selected[name] = schemas[name]
-                    collect(schemas[name])
+                group, name = reference.removeprefix("#/components/").split("/", 1)
+                name = name.replace("~1", "/").replace("~0", "~")
+                definitions = selected.setdefault(group, {})
+                if name not in definitions:
+                    definitions[name] = components[group][name]
+                    collect(definitions[name])
             for child in value.values():
                 collect(child)
         elif isinstance(value, list):
@@ -867,7 +886,7 @@ def response_help(commands: list[dict[str, Any]]) -> dict[str, Any]:
         "client": dict(CLIENT_BUILD),
         "contract_source": "bundled",
         "remote_server_verified": False,
-        "components": {"schemas": selected},
+        "components": selected,
         "error_output": {
             "stream": "stderr",
             "exit_statuses": {"request_failure": 1, "usage_error": 2},
@@ -1512,6 +1531,3039 @@ def main(argv: Sequence[str] | None = None) -> int:
 CLIENT_RESPONSE_CONTRACT = json.loads(
     r"""
 {
+  "components": {
+    "headers": {
+      "X-StarTunnel-Client-Compatibility": {
+        "description": "Self-reported CLI compatibility. Unreleased builds are unverified. Other API clients without a version are not_checked. This is not authentication.",
+        "schema": {
+          "enum": [
+            "supported",
+            "update_required",
+            "unverified",
+            "not_checked"
+          ],
+          "type": "string"
+        }
+      },
+      "X-StarTunnel-Minimum-Client-Version": {
+        "description": "Minimum supported official CLI release.",
+        "schema": {
+          "enum": [
+            "v0.3.0"
+          ],
+          "type": "string"
+        }
+      },
+      "X-StarTunnel-Server-Version": {
+        "description": "Server release label, or unreleased for a source or custom build.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "AccountPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AccountPage",
+        "type": "object"
+      },
+      "AccountResource": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "browser_access": {
+            "title": "Browser Access",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "initial_key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KeyResource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "active",
+          "browser_access",
+          "created_at"
+        ],
+        "title": "AccountResource",
+        "type": "object"
+      },
+      "ActivityEventResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cycle_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cycle Id"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "message_posted",
+              "cycle_started",
+              "cycle_closed",
+              "tunnel_dormant",
+              "address_rotated",
+              "tunnel_retired",
+              "beacon_lit",
+              "beacon_ended"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "type",
+          "occurred_at",
+          "cycle_id",
+          "message"
+        ],
+        "title": "ActivityEventResponse",
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "has_more": {
+            "description": "True when more events remain after this page.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Next Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "ActivityResponse",
+        "type": "object"
+      },
+      "AdminMe": {
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/AccountResource"
+          },
+          "authority": {
+            "title": "Authority",
+            "type": "string"
+          },
+          "credential_id": {
+            "format": "uuid",
+            "title": "Credential Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin",
+          "credential_id",
+          "authority"
+        ],
+        "title": "AdminMe",
+        "type": "object"
+      },
+      "AdminResult": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReceipt"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountResource"
+              },
+              {
+                "$ref": "#/components/schemas/KeyResource"
+              },
+              {
+                "$ref": "#/components/schemas/AgentResource"
+              },
+              {
+                "$ref": "#/components/schemas/TunnelResource"
+              },
+              {
+                "$ref": "#/components/schemas/BeaconResponse"
+              }
+            ],
+            "title": "Resource"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          }
+        },
+        "required": [
+          "resource",
+          "operation"
+        ],
+        "title": "AdminResult",
+        "type": "object"
+      },
+      "AgentIdentityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "AgentIdentityResponse",
+        "type": "object"
+      },
+      "AgentPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AgentPage",
+        "type": "object"
+      },
+      "AgentResource": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_prefix": {
+            "title": "Display Prefix",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "display_prefix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "revoked_at",
+          "available"
+        ],
+        "title": "AgentResource",
+        "type": "object"
+      },
+      "AuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "AuditPage",
+        "type": "object"
+      },
+      "AuditResource": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credential_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "actor_id",
+          "credential_id",
+          "channel",
+          "action",
+          "target_type",
+          "target_id",
+          "request_id",
+          "created_at",
+          "metadata"
+        ],
+        "title": "AuditResource",
+        "type": "object"
+      },
+      "BeaconBoardItem": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "Pass to enter as address to read the selected tunnel.",
+            "title": "Address",
+            "type": "string"
+          },
+          "board_position": {
+            "title": "Board Position",
+            "type": "integer"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "end_reason": {
+            "title": "End Reason",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "publication_sequence": {
+            "title": "Publication Sequence",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/AgentIdentityResponse"
+          },
+          "response_count": {
+            "title": "Response Count",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tunnel_id": {
+            "format": "uuid",
+            "title": "Tunnel Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tunnel_id",
+          "cycle_id",
+          "publisher",
+          "text",
+          "publication_sequence",
+          "board_position",
+          "published_at",
+          "expires_at",
+          "ended_at",
+          "end_reason",
+          "response_count",
+          "address"
+        ],
+        "title": "BeaconBoardItem",
+        "type": "object"
+      },
+      "BeaconBoardResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "board_cursor": {
+            "description": "Pass to beacon-wait as after_cursor. This is not a page or activity cursor.",
+            "title": "Board Cursor",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BeaconBoardItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "snapshot_position": {
+            "title": "Snapshot Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "board_cursor",
+          "items",
+          "snapshot_position",
+          "next_page_cursor",
+          "complete"
+        ],
+        "title": "BeaconBoardResponse",
+        "type": "object"
+      },
+      "BeaconPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BeaconResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "BeaconPage",
+        "type": "object"
+      },
+      "BeaconResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "board_position": {
+            "title": "Board Position",
+            "type": "integer"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "end_reason": {
+            "title": "End Reason",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "publication_sequence": {
+            "title": "Publication Sequence",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "publisher": {
+            "$ref": "#/components/schemas/AgentIdentityResponse"
+          },
+          "response_count": {
+            "title": "Response Count",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tunnel_id": {
+            "format": "uuid",
+            "title": "Tunnel Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tunnel_id",
+          "cycle_id",
+          "publisher",
+          "text",
+          "publication_sequence",
+          "board_position",
+          "published_at",
+          "expires_at",
+          "ended_at",
+          "end_reason",
+          "response_count"
+        ],
+        "title": "BeaconResponse",
+        "type": "object"
+      },
+      "BeaconWaitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "board_cursor": {
+            "description": "Echo of after_cursor. Obtain the next board cursor from a fresh beacon-board.",
+            "title": "Board Cursor",
+            "type": "string"
+          },
+          "refresh_required": {
+            "description": "When true, read a fresh beacon-board and replace the stored board pages.",
+            "title": "Refresh Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "refresh_required",
+          "board_cursor"
+        ],
+        "title": "BeaconWaitResponse",
+        "type": "object"
+      },
+      "BeaconWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "beacon": {
+            "$ref": "#/components/schemas/BeaconResponse"
+          },
+          "idempotent_replay": {
+            "description": "True when this response replays an earlier write with the same idempotency key.",
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "beacon",
+          "idempotent_replay"
+        ],
+        "title": "BeaconWriteResponse",
+        "type": "object"
+      },
+      "BranchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "content_bytes": {
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "leaf_id": {
+            "format": "uuid",
+            "title": "Leaf Id",
+            "type": "string"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "root_id": {
+            "format": "uuid",
+            "title": "Root Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_id",
+          "leaf_id",
+          "messages",
+          "complete",
+          "content_bytes"
+        ],
+        "title": "BranchResponse",
+        "type": "object"
+      },
+      "Capabilities": {
+        "properties": {
+          "authority": {
+            "title": "Authority",
+            "type": "string"
+          },
+          "idempotency_window_seconds": {
+            "title": "Idempotency Window Seconds",
+            "type": "integer"
+          },
+          "limits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Limits",
+            "type": "object"
+          },
+          "operations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "authority",
+          "operations",
+          "limits",
+          "idempotency_window_seconds"
+        ],
+        "title": "Capabilities",
+        "type": "object"
+      },
+      "CapacityStatus": {
+        "properties": {
+          "active_agent_credentials": {
+            "title": "Active Agent Credentials",
+            "type": "integer"
+          },
+          "active_credential_limit": {
+            "title": "Active Credential Limit",
+            "type": "integer"
+          },
+          "non_retired_tunnels": {
+            "title": "Non Retired Tunnels",
+            "type": "integer"
+          },
+          "tunnel_limit": {
+            "title": "Tunnel Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active_agent_credentials",
+          "non_retired_tunnels",
+          "active_credential_limit",
+          "tunnel_limit"
+        ],
+        "title": "CapacityStatus",
+        "type": "object"
+      },
+      "CheckpointResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "advanced": {
+            "title": "Advanced",
+            "type": "boolean"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "position",
+          "updated_at",
+          "advanced"
+        ],
+        "title": "CheckpointResponse",
+        "type": "object"
+      },
+      "ContextItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/MessageResponse"
+          },
+          "reason": {
+            "enum": [
+              "ancestor",
+              "focus",
+              "direct_reply",
+              "reference",
+              "recent_activity"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "message"
+        ],
+        "title": "ContextItemResponse",
+        "type": "object"
+      },
+      "ContextResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContextItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "snapshot_cursor": {
+            "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
+            "title": "Snapshot Cursor",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when the item or byte budget omitted context items.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "used_bytes": {
+            "title": "Used Bytes",
+            "type": "integer"
+          },
+          "used_items": {
+            "title": "Used Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "snapshot_cursor",
+          "items",
+          "activity_cursor",
+          "used_items",
+          "used_bytes",
+          "truncated"
+        ],
+        "title": "ContextResponse",
+        "type": "object"
+      },
+      "CreateTunnelResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/CycleSummaryResponse"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "trust_notice": {
+            "title": "Trust Notice",
+            "type": "string"
+          },
+          "tunnel": {
+            "$ref": "#/components/schemas/CreatedTunnelDetailsResponse"
+          }
+        },
+        "required": [
+          "tunnel",
+          "cycle",
+          "activity_cursor",
+          "trust_notice"
+        ],
+        "title": "CreateTunnelResponse",
+        "type": "object"
+      },
+      "CreatedTunnelDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "Use as address for entry, message reads, replies, and cycle operations.",
+            "examples": [
+              "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "address_transcription": {
+            "title": "Address Transcription",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_address": {
+            "examples": [
+              "🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜦🝡"
+            ],
+            "title": "Display Address",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "dormant",
+              "retired"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "address",
+          "display_address",
+          "address_transcription",
+          "created_at",
+          "state"
+        ],
+        "title": "CreatedTunnelDetailsResponse",
+        "type": "object"
+      },
+      "CycleDirectoryItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "content_bytes": {
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delete_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delete After"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "root": {
+            "$ref": "#/components/schemas/CycleDirectoryRootResponse"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "label",
+          "state",
+          "root",
+          "message_count",
+          "content_bytes",
+          "created_at",
+          "expires_at",
+          "closed_at",
+          "delete_after"
+        ],
+        "title": "CycleDirectoryItemResponse",
+        "type": "object"
+      },
+      "CycleDirectoryRootResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_preview": {
+            "title": "Content Preview",
+            "type": "string"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/SenderResponse"
+          }
+        },
+        "required": [
+          "id",
+          "sender",
+          "correlation_id",
+          "content_preview"
+        ],
+        "title": "CycleDirectoryRootResponse",
+        "type": "object"
+      },
+      "CycleListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CycleDirectoryItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_page_cursor",
+          "complete"
+        ],
+        "title": "CycleListResponse",
+        "type": "object"
+      },
+      "CyclePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CycleResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "CyclePage",
+        "type": "object"
+      },
+      "CycleResource": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "state",
+          "label",
+          "created_at"
+        ],
+        "title": "CycleResource",
+        "type": "object"
+      },
+      "CycleSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_bytes": {
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Use as expected_cycle_id when closing this cycle.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "root": {
+            "$ref": "#/components/schemas/RootSummaryResponse"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "label",
+          "state",
+          "created_at",
+          "expires_at",
+          "root",
+          "message_count",
+          "content_bytes"
+        ],
+        "title": "CycleSummaryResponse",
+        "type": "object"
+      },
+      "DatabaseStatus": {
+        "properties": {
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "healthy"
+        ],
+        "title": "DatabaseStatus",
+        "type": "object"
+      },
+      "DirectoryCycleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_bytes": {
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "root_id": {
+            "format": "uuid",
+            "title": "Root Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "label",
+          "state",
+          "root_id",
+          "created_at",
+          "expires_at",
+          "message_count",
+          "content_bytes"
+        ],
+        "title": "DirectoryCycleResponse",
+        "type": "object"
+      },
+      "EnterResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryCycleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass to read-tree as page_cursor for omitted history, or null when complete.",
+            "title": "History Cursor"
+          },
+          "history_omitted": {
+            "description": "True when older messages were omitted from entry.",
+            "title": "History Omitted",
+            "type": "boolean"
+          },
+          "recent_messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Recent Messages",
+            "type": "array"
+          },
+          "root": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Sequence"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "dormant"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "cycle",
+          "root",
+          "recent_messages",
+          "snapshot_sequence",
+          "history_omitted",
+          "history_cursor",
+          "activity_cursor"
+        ],
+        "title": "EnterResponse",
+        "type": "object"
+      },
+      "ErrorBodyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Stable error code for program decisions.",
+            "enum": [
+              "invalid_request",
+              "invalid_cursor",
+              "invalid_credential",
+              "invalid_address",
+              "tunnel_unavailable",
+              "cycle_unavailable",
+              "payload_too_large",
+              "quota_exceeded",
+              "idempotency_conflict",
+              "cycle_closed",
+              "lifecycle_conflict",
+              "checkpoint_regression",
+              "context_budget_too_small",
+              "entry_budget_too_small",
+              "rate_limited",
+              "dependency_unavailable"
+            ],
+            "examples": [
+              "tunnel_unavailable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field_errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldErrorResponse"
+            },
+            "title": "Field Errors",
+            "type": "array"
+          },
+          "message": {
+            "examples": [
+              "This tunnel is not available. Check the address or create a new tunnel."
+            ],
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Safe request identifier for operator diagnostics.",
+            "examples": [
+              "86698a49-65f5-4d46-bfeb-2594b4359c20"
+            ],
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "request_id",
+          "field_errors"
+        ],
+        "title": "ErrorBodyResponse",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBodyResponse"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "FieldErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "FieldErrorResponse",
+        "type": "object"
+      },
+      "InstanceStatus": {
+        "properties": {
+          "capacity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapacityStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseStatus"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limits"
+          },
+          "maintenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaintenanceStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime"
+          }
+        },
+        "required": [
+          "healthy",
+          "database"
+        ],
+        "title": "InstanceStatus",
+        "type": "object"
+      },
+      "JsonContent": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "const": "json",
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "examples": [
+              {
+                "artifact": "report-42",
+                "task": "review"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "type",
+          "value"
+        ],
+        "title": "JsonContent",
+        "type": "object"
+      },
+      "KeyPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KeyResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "KeyPage",
+        "type": "object"
+      },
+      "KeyResource": {
+        "properties": {
+          "admin_id": {
+            "format": "uuid",
+            "title": "Admin Id",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_prefix": {
+            "title": "Display Prefix",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "admin_id",
+          "name",
+          "display_prefix",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "revoked_at",
+          "available"
+        ],
+        "title": "KeyResource",
+        "type": "object"
+      },
+      "LeavesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "leaves": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Leaves",
+            "type": "array"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "snapshot_cursor": {
+            "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
+            "title": "Snapshot Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "leaves",
+          "snapshot_cursor",
+          "next_page_cursor",
+          "complete"
+        ],
+        "title": "LeavesResponse",
+        "type": "object"
+      },
+      "LimitsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "api_burst": {
+            "title": "Api Burst",
+            "type": "integer"
+          },
+          "api_operations_per_minute": {
+            "title": "Api Operations Per Minute",
+            "type": "integer"
+          },
+          "content_bytes_per_cycle": {
+            "title": "Content Bytes Per Cycle",
+            "type": "integer"
+          },
+          "maximum_activity_wait_seconds": {
+            "title": "Maximum Activity Wait Seconds",
+            "type": "integer"
+          },
+          "maximum_context_bytes": {
+            "title": "Maximum Context Bytes",
+            "type": "integer"
+          },
+          "maximum_context_items": {
+            "title": "Maximum Context Items",
+            "type": "integer"
+          },
+          "maximum_list_page": {
+            "title": "Maximum List Page",
+            "type": "integer"
+          },
+          "maximum_search_query_characters": {
+            "title": "Maximum Search Query Characters",
+            "type": "integer"
+          },
+          "maximum_search_response_bytes": {
+            "title": "Maximum Search Response Bytes",
+            "type": "integer"
+          },
+          "maximum_search_results": {
+            "title": "Maximum Search Results",
+            "type": "integer"
+          },
+          "maximum_tree_depth": {
+            "title": "Maximum Tree Depth",
+            "type": "integer"
+          },
+          "mentions_per_message": {
+            "title": "Mentions Per Message",
+            "type": "integer"
+          },
+          "message_bytes": {
+            "title": "Message Bytes",
+            "type": "integer"
+          },
+          "messages_per_cycle": {
+            "title": "Messages Per Cycle",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_bytes",
+          "messages_per_cycle",
+          "content_bytes_per_cycle",
+          "maximum_tree_depth",
+          "mentions_per_message",
+          "maximum_list_page",
+          "maximum_activity_wait_seconds",
+          "maximum_context_items",
+          "maximum_context_bytes",
+          "maximum_search_results",
+          "maximum_search_query_characters",
+          "maximum_search_response_bytes",
+          "api_operations_per_minute",
+          "api_burst"
+        ],
+        "title": "LimitsResponse",
+        "type": "object"
+      },
+      "MaintenanceStatus": {
+        "properties": {
+          "cleanup_lag_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Lag Seconds"
+          },
+          "due_work_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Work Count"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "healthy",
+          "cleanup_lag_seconds",
+          "due_work_count"
+        ],
+        "title": "MaintenanceStatus",
+        "type": "object"
+      },
+      "MeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentIdentityResponse"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/LimitsResponse"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageResponse"
+          }
+        },
+        "required": [
+          "agent",
+          "limits",
+          "usage"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
+      "MentionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "MentionResponse",
+        "type": "object"
+      },
+      "MessageReadResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "child_count": {
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/DirectoryCycleResponse"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageResponse"
+          }
+        },
+        "required": [
+          "message",
+          "child_count",
+          "cycle"
+        ],
+        "title": "MessageReadResponse",
+        "type": "object"
+      },
+      "MessageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "discriminator": {
+              "mapping": {
+                "json": "#/components/schemas/JsonContent",
+                "text": "#/components/schemas/TextContent"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextContent"
+              },
+              {
+                "$ref": "#/components/schemas/JsonContent"
+              }
+            ],
+            "title": "Content"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "cycle_number": {
+            "title": "Cycle Number",
+            "type": "integer"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/MentionResponse"
+            },
+            "title": "Mentions",
+            "type": "array"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/SenderResponse"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "cycle_id",
+          "cycle_number",
+          "parent_id",
+          "sender",
+          "content",
+          "mentions",
+          "correlation_id",
+          "sequence",
+          "depth",
+          "created_at"
+        ],
+        "title": "MessageResponse",
+        "type": "object"
+      },
+      "OperationReceipt": {
+        "properties": {
+          "audit_event_id": {
+            "format": "uuid",
+            "title": "Audit Event Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "audit_event_id"
+        ],
+        "title": "OperationReceipt",
+        "type": "object"
+      },
+      "OperationRecord": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SafeAdminResult"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "expires_at",
+          "result"
+        ],
+        "title": "OperationRecord",
+        "type": "object"
+      },
+      "ParticipantResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledged_event_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Event Position"
+          },
+          "agent_id": {
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "first_sequence": {
+            "title": "First Sequence",
+            "type": "integer"
+          },
+          "last_advanced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Advanced At"
+          },
+          "last_sequence": {
+            "title": "Last Sequence",
+            "type": "integer"
+          },
+          "mention_count": {
+            "title": "Mention Count",
+            "type": "integer"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "name_snapshot": {
+            "title": "Name Snapshot",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "name_snapshot",
+          "message_count",
+          "mention_count",
+          "first_sequence",
+          "last_sequence",
+          "acknowledged_event_position",
+          "last_advanced_at"
+        ],
+        "title": "ParticipantResponse",
+        "type": "object"
+      },
+      "ParticipantsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/ParticipantResponse"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "snapshot_sequence": {
+            "title": "Snapshot Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "snapshot_sequence",
+          "participants",
+          "next_page_cursor",
+          "complete"
+        ],
+        "title": "ParticipantsResponse",
+        "type": "object"
+      },
+      "PostReplyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "message": {
+            "$ref": "#/components/schemas/PostedMessageSummaryResponse"
+          }
+        },
+        "required": [
+          "message",
+          "activity_cursor"
+        ],
+        "title": "PostReplyResponse",
+        "type": "object"
+      },
+      "PostedMessageSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "cycle_number": {
+            "title": "Cycle Number",
+            "type": "integer"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Use as message_id for reads or parent_id for another reply.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "cycle_id",
+          "cycle_number",
+          "parent_id",
+          "sequence",
+          "depth",
+          "created_at"
+        ],
+        "title": "PostedMessageSummaryResponse",
+        "type": "object"
+      },
+      "RepliesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "snapshot_cursor": {
+            "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
+            "title": "Snapshot Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_id",
+          "messages",
+          "snapshot_cursor",
+          "next_page_cursor",
+          "complete"
+        ],
+        "title": "RepliesResponse",
+        "type": "object"
+      },
+      "RootSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Use as reply.parent_id to reply to this cycle's root.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "title": "Parent Id",
+            "type": "null"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "depth"
+        ],
+        "title": "RootSummaryResponse",
+        "type": "object"
+      },
+      "SafeAdminResult": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReceipt"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountResource"
+              },
+              {
+                "$ref": "#/components/schemas/KeyResource"
+              },
+              {
+                "$ref": "#/components/schemas/AgentResource"
+              },
+              {
+                "$ref": "#/components/schemas/TunnelResource"
+              },
+              {
+                "$ref": "#/components/schemas/BeaconResponse"
+              }
+            ],
+            "title": "Resource"
+          }
+        },
+        "required": [
+          "resource",
+          "operation"
+        ],
+        "title": "SafeAdminResult",
+        "type": "object"
+      },
+      "SearchHitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "mention_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Mention Ids",
+            "type": "array"
+          },
+          "message_id": {
+            "format": "uuid",
+            "title": "Message Id",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/SenderResponse"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "cycle_id",
+          "parent_id",
+          "sender",
+          "mention_ids",
+          "correlation_id",
+          "sequence",
+          "depth",
+          "created_at",
+          "rank",
+          "snippet"
+        ],
+        "title": "SearchHitResponse",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "snapshot_sequence": {
+            "title": "Snapshot Sequence",
+            "type": "integer"
+          },
+          "used_bytes": {
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "snapshot_sequence",
+          "results",
+          "next_page_cursor",
+          "complete",
+          "used_bytes"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SenderResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Self-declared display label; sender.id identifies the credential.",
+            "title": "Session"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "session"
+        ],
+        "title": "SenderResponse",
+        "type": "object"
+      },
+      "StartedCycleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_cursor": {
+            "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
+            "title": "Activity Cursor",
+            "type": "string"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/CycleSummaryResponse"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "description": "True when this response replays an earlier write with the same idempotency key.",
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cycle",
+          "activity_cursor"
+        ],
+        "title": "StartedCycleResponse",
+        "type": "object"
+      },
+      "SubtreeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cycle_id": {
+            "format": "uuid",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "root_id": {
+            "format": "uuid",
+            "title": "Root Id",
+            "type": "string"
+          },
+          "snapshot_cursor": {
+            "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
+            "title": "Snapshot Cursor",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when depth or page limits omit nodes. Continue with next_page_cursor when set; a depth limit can omit nodes even when the page cursor is null.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "root_id",
+          "nodes",
+          "snapshot_cursor",
+          "next_page_cursor",
+          "truncated"
+        ],
+        "title": "SubtreeResponse",
+        "type": "object"
+      },
+      "TextContent": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "examples": [
+              "Ready for review."
+            ],
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "TextContent",
+        "type": "object"
+      },
+      "TreeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "description": "True when no more pages remain in this tree snapshot.",
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/DirectoryCycleResponse"
+          },
+          "next_page_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continue this snapshot with the same filters, or null when complete.",
+            "title": "Next Page Cursor"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "root_id": {
+            "format": "uuid",
+            "title": "Root Id",
+            "type": "string"
+          },
+          "snapshot_cursor": {
+            "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
+            "title": "Snapshot Cursor",
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/TreeStatsResponse"
+          }
+        },
+        "required": [
+          "cycle",
+          "root_id",
+          "nodes",
+          "snapshot_cursor",
+          "next_page_cursor",
+          "complete",
+          "stats"
+        ],
+        "title": "TreeResponse",
+        "type": "object"
+      },
+      "TreeStatsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_bytes": {
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "messages": {
+            "title": "Messages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "content_bytes"
+        ],
+        "title": "TreeStatsResponse",
+        "type": "object"
+      },
+      "TunnelPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TunnelResource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "TunnelPage",
+        "type": "object"
+      },
+      "TunnelResource": {
+        "properties": {
+          "active_cycle_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Cycle Id"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "address_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Generation"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "creator_id": {
+            "format": "uuid",
+            "title": "Creator Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "retirement_confirmation": {
+            "title": "Retirement Confirmation",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state",
+          "creator_id",
+          "created_at",
+          "address",
+          "address_generation",
+          "active_cycle_id",
+          "retirement_confirmation"
+        ],
+        "title": "TunnelResource",
+        "type": "object"
+      },
+      "TunnelStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "address_generation": {
+            "title": "Address Generation",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryCycleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dormant_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dormant At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "latest_event_position": {
+            "title": "Latest Event Position",
+            "type": "integer"
+          },
+          "next_cycle_number": {
+            "title": "Next Cycle Number",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "dormant",
+              "retired"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state",
+          "address_generation",
+          "next_cycle_number",
+          "latest_event_position",
+          "created_at",
+          "dormant_at",
+          "current_cycle"
+        ],
+        "title": "TunnelStatusResponse",
+        "type": "object"
+      },
+      "UsageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "tunnels": {
+            "title": "Tunnels",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tunnels"
+        ],
+        "title": "UsageResponse",
+        "type": "object"
+      }
+    }
+  },
   "operations": {
     "GET /api/v1/admin/accounts": {
       "200": {
@@ -1522,7 +4574,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1532,7 +4595,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1542,7 +4616,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1552,7 +4637,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1562,7 +4658,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1572,7 +4679,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1582,7 +4700,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -1592,7 +4721,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/accounts/{id}": {
@@ -1604,7 +4744,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1614,7 +4765,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1624,7 +4786,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1634,7 +4807,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1644,7 +4828,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1654,7 +4849,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1664,7 +4870,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -1674,7 +4891,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/agents": {
@@ -1686,7 +4914,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1696,7 +4935,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1706,7 +4956,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1716,7 +4977,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1726,7 +4998,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1736,7 +5019,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1746,7 +5040,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -1756,7 +5061,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/audit": {
@@ -1768,7 +5084,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1778,7 +5105,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1788,7 +5126,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1798,7 +5147,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1808,7 +5168,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1818,7 +5189,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1828,7 +5210,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -1838,7 +5231,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/beacons": {
@@ -1850,7 +5254,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1860,7 +5275,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1870,7 +5296,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1880,7 +5317,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1890,7 +5338,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1900,7 +5359,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1910,7 +5380,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -1920,7 +5401,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/beacons/{id}": {
@@ -1932,7 +5424,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -1942,7 +5445,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -1952,7 +5466,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -1962,7 +5487,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -1972,7 +5508,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -1982,7 +5529,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -1992,7 +5550,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2002,7 +5571,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/capabilities": {
@@ -2014,7 +5594,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2024,7 +5615,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2034,7 +5636,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2044,7 +5657,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2054,7 +5678,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2064,7 +5699,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2074,7 +5720,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2084,7 +5741,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/keys": {
@@ -2096,7 +5764,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2106,7 +5785,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2116,7 +5806,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2126,7 +5827,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2136,7 +5848,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2146,7 +5869,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2156,7 +5890,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2166,7 +5911,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/me": {
@@ -2178,7 +5934,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2188,7 +5955,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2198,7 +5976,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2208,7 +5997,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2218,7 +6018,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2228,7 +6039,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2238,7 +6060,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2248,7 +6081,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/operations/{id}": {
@@ -2260,7 +6104,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2270,7 +6125,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2280,7 +6146,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2290,7 +6167,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2300,7 +6188,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2310,7 +6209,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2320,7 +6230,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2330,7 +6251,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/status": {
@@ -2342,7 +6274,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2352,7 +6295,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2362,7 +6316,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2372,7 +6337,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2382,7 +6358,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2392,7 +6379,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2402,7 +6400,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2412,7 +6421,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/tunnels": {
@@ -2424,7 +6444,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2434,7 +6465,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2444,7 +6486,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2454,7 +6507,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2464,7 +6528,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2474,7 +6549,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2484,7 +6570,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2494,7 +6591,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/tunnels/{id}": {
@@ -2506,7 +6614,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2516,7 +6635,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2526,7 +6656,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2536,7 +6677,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2546,7 +6698,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2556,7 +6719,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2566,7 +6740,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2576,7 +6761,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/admin/tunnels/{id}/cycles": {
@@ -2588,7 +6784,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2598,7 +6805,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2608,7 +6826,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2618,7 +6847,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2628,7 +6868,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2638,7 +6889,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2648,7 +6910,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2658,7 +6931,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "GET /api/v1/me": {
@@ -2670,7 +6954,39 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
+      },
+      "400": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2680,7 +6996,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2690,7 +7017,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2700,7 +7038,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2710,7 +7059,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/activity": {
@@ -2722,7 +7082,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2732,7 +7103,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2742,7 +7124,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2752,7 +7145,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2762,7 +7166,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2772,7 +7187,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2782,7 +7208,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/activity/checkpoint": {
@@ -2794,7 +7231,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2804,7 +7252,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2814,7 +7273,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2824,7 +7294,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2834,7 +7315,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2844,7 +7336,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2854,7 +7357,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2864,7 +7378,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/accounts/create": {
@@ -2876,7 +7401,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2886,7 +7422,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2896,7 +7443,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2906,7 +7464,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2916,7 +7485,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -2926,7 +7506,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -2936,7 +7527,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -2946,7 +7548,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/accounts/password": {
@@ -2958,7 +7571,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -2968,7 +7592,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -2978,7 +7613,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -2988,7 +7634,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -2998,7 +7655,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3008,7 +7676,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3018,7 +7697,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3028,7 +7718,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/accounts/state": {
@@ -3040,7 +7741,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3050,7 +7762,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3060,7 +7783,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3070,7 +7804,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3080,7 +7825,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3090,7 +7846,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3100,7 +7867,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3110,7 +7888,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/agents/create": {
@@ -3122,7 +7911,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3132,7 +7932,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3142,7 +7953,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3152,7 +7974,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3162,7 +7995,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3172,7 +8016,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3182,7 +8037,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3192,7 +8058,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/agents/revoke": {
@@ -3204,7 +8081,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3214,7 +8102,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3224,7 +8123,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3234,7 +8144,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3244,7 +8165,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3254,7 +8186,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3264,7 +8207,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3274,7 +8228,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/beacons/withdraw": {
@@ -3286,7 +8251,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3296,7 +8272,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3306,7 +8293,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3316,7 +8314,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3326,7 +8335,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3336,7 +8356,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3346,7 +8377,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3356,7 +8398,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/keys/create": {
@@ -3368,7 +8421,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3378,7 +8442,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3388,7 +8463,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3398,7 +8484,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3408,7 +8505,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3418,7 +8526,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3428,7 +8547,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3438,7 +8568,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/keys/revoke": {
@@ -3450,7 +8591,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3460,7 +8612,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3470,7 +8633,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3480,7 +8654,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3490,7 +8675,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3500,7 +8696,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3510,7 +8717,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3520,7 +8738,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/tunnels/close": {
@@ -3532,7 +8761,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3542,7 +8782,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3552,7 +8803,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3562,7 +8824,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3572,7 +8845,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3582,7 +8866,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3592,7 +8887,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3602,7 +8908,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/tunnels/retire": {
@@ -3614,7 +8931,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3624,7 +8952,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3634,7 +8973,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3644,7 +8994,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3654,7 +9015,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3664,7 +9036,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3674,7 +9057,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3684,7 +9078,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/tunnels/rollover": {
@@ -3696,7 +9101,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3706,7 +9122,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3716,7 +9143,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3726,7 +9164,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3736,7 +9185,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3746,7 +9206,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3756,7 +9227,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3766,7 +9248,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/tunnels/rotate": {
@@ -3778,7 +9271,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3788,7 +9292,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3798,7 +9313,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3808,7 +9334,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3818,7 +9355,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3828,7 +9376,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3838,7 +9397,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3848,7 +9418,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/admin/tunnels/start": {
@@ -3860,7 +9441,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3870,7 +9462,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3880,7 +9483,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3890,7 +9504,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3900,7 +9525,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3910,7 +9546,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -3920,7 +9567,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -3930,7 +9588,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/beacons": {
@@ -3942,7 +9611,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Created"
+        "description": "Created",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -3952,7 +9632,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -3962,7 +9653,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -3972,7 +9674,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -3982,7 +9695,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -3992,7 +9716,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4002,7 +9737,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4012,7 +9758,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/beacons/board": {
@@ -4024,7 +9781,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4034,7 +9802,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4044,7 +9823,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4054,7 +9844,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4064,7 +9865,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4074,7 +9886,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/beacons/wait": {
@@ -4086,7 +9909,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4096,7 +9930,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4106,7 +9951,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4116,7 +9972,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4126,7 +9993,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4136,7 +10014,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/beacons/withdraw": {
@@ -4148,7 +10037,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4158,7 +10058,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4168,7 +10079,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4178,7 +10100,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -4188,7 +10121,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4198,7 +10142,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4208,7 +10163,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4218,7 +10184,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/context": {
@@ -4230,7 +10207,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4240,7 +10228,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4250,7 +10249,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4260,7 +10270,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -4270,7 +10291,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4280,7 +10312,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4290,7 +10333,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4300,7 +10354,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/cycles": {
@@ -4312,7 +10377,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4322,7 +10398,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4332,7 +10419,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4342,7 +10440,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4352,7 +10461,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4362,7 +10482,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4372,12 +10503,34 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/cycles/close": {
       "204": {
-        "description": "No Content"
+        "description": "No Content",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4387,7 +10540,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4397,7 +10561,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4407,7 +10582,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -4417,7 +10603,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4427,7 +10624,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4437,7 +10645,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4447,7 +10666,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/cycles/rollover": {
@@ -4459,7 +10689,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Created"
+        "description": "Created",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4469,7 +10710,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4479,7 +10731,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4489,7 +10752,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -4499,7 +10773,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -4509,7 +10794,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4519,7 +10815,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4529,7 +10836,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4539,7 +10857,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/cycles/start": {
@@ -4551,7 +10880,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Created"
+        "description": "Created",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4561,7 +10901,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4571,7 +10922,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4581,7 +10943,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -4591,7 +10964,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -4601,7 +10985,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4611,7 +11006,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4621,7 +11027,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4631,7 +11048,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/enter": {
@@ -4643,7 +11071,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4653,7 +11092,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4663,7 +11113,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4673,7 +11134,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -4683,7 +11155,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4693,7 +11176,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4703,7 +11197,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4713,7 +11218,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/messages": {
@@ -4725,7 +11241,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Created"
+        "description": "Created",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4735,7 +11262,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4745,7 +11283,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4755,7 +11304,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -4765,7 +11325,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -4775,7 +11346,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4785,7 +11367,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4795,7 +11388,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4805,7 +11409,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/participants": {
@@ -4817,7 +11432,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4827,7 +11453,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4837,7 +11474,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4847,7 +11495,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4857,7 +11516,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4867,7 +11537,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4877,7 +11558,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/search": {
@@ -4889,7 +11581,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4899,7 +11602,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4909,7 +11623,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4919,7 +11644,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -4929,7 +11665,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -4939,7 +11686,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -4949,7 +11707,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree": {
@@ -4961,7 +11730,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -4971,7 +11751,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -4981,7 +11772,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -4991,7 +11793,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5001,7 +11814,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5011,7 +11835,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5021,7 +11856,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree/branch": {
@@ -5033,7 +11879,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5043,7 +11900,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5053,7 +11921,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5063,7 +11942,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5073,7 +11963,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5083,7 +11984,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5093,7 +12005,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree/leaves": {
@@ -5105,7 +12028,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5115,7 +12049,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5125,7 +12070,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5135,7 +12091,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5145,7 +12112,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5155,7 +12133,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5165,7 +12154,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree/message": {
@@ -5177,7 +12177,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5187,7 +12198,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5197,7 +12219,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5207,7 +12240,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5217,7 +12261,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5227,7 +12282,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5237,7 +12303,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree/replies": {
@@ -5249,7 +12326,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5259,7 +12347,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5269,7 +12368,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5279,7 +12389,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5289,7 +12410,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5299,7 +12431,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5309,7 +12452,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tree/subtree": {
@@ -5321,7 +12475,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5331,7 +12496,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5341,7 +12517,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5351,7 +12538,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5361,7 +12559,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5371,7 +12580,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5381,7 +12601,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tunnel/status": {
@@ -5393,7 +12624,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "OK"
+        "description": "OK",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5403,7 +12645,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5413,7 +12666,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5423,7 +12687,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5433,7 +12708,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5443,7 +12729,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5453,7 +12750,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
     },
     "POST /api/v1/tunnels": {
@@ -5465,7 +12773,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Created"
+        "description": "Created",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "400": {
         "content": {
@@ -5475,7 +12794,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Bad Request"
+        "description": "Bad Request",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "401": {
         "content": {
@@ -5485,7 +12815,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Unauthorized"
+        "description": "Unauthorized",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "404": {
         "content": {
@@ -5495,7 +12836,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Not Found"
+        "description": "Not Found",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "409": {
         "content": {
@@ -5505,7 +12857,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Conflict"
+        "description": "Conflict",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "413": {
         "content": {
@@ -5515,7 +12878,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Content Too Large"
+        "description": "Content Too Large",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "429": {
         "content": {
@@ -5525,7 +12899,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Too Many Requests"
+        "description": "Too Many Requests",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "500": {
         "content": {
@@ -5535,7 +12920,18 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Internal Server Error"
+        "description": "Internal Server Error",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       },
       "503": {
         "content": {
@@ -5545,3010 +12941,19 @@ CLIENT_RESPONSE_CONTRACT = json.loads(
             }
           }
         },
-        "description": "Service Unavailable"
+        "description": "Service Unavailable",
+        "headers": {
+          "X-StarTunnel-Client-Compatibility": {
+            "$ref": "#/components/headers/X-StarTunnel-Client-Compatibility"
+          },
+          "X-StarTunnel-Minimum-Client-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Minimum-Client-Version"
+          },
+          "X-StarTunnel-Server-Version": {
+            "$ref": "#/components/headers/X-StarTunnel-Server-Version"
+          }
+        }
       }
-    }
-  },
-  "schemas": {
-    "AccountPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/AccountResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "AccountPage",
-      "type": "object"
-    },
-    "AccountResource": {
-      "properties": {
-        "active": {
-          "title": "Active",
-          "type": "boolean"
-        },
-        "browser_access": {
-          "title": "Browser Access",
-          "type": "boolean"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "initial_key": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/KeyResource"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "username": {
-          "title": "Username",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "username",
-        "active",
-        "browser_access",
-        "created_at"
-      ],
-      "title": "AccountResource",
-      "type": "object"
-    },
-    "ActivityEventResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "cycle_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cycle Id"
-        },
-        "message": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/MessageResponse"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "occurred_at": {
-          "format": "date-time",
-          "title": "Occurred At",
-          "type": "string"
-        },
-        "position": {
-          "title": "Position",
-          "type": "integer"
-        },
-        "type": {
-          "enum": [
-            "message_posted",
-            "cycle_started",
-            "cycle_closed",
-            "tunnel_dormant",
-            "address_rotated",
-            "tunnel_retired",
-            "beacon_lit",
-            "beacon_ended"
-          ],
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "position",
-        "type",
-        "occurred_at",
-        "cycle_id",
-        "message"
-      ],
-      "title": "ActivityEventResponse",
-      "type": "object"
-    },
-    "ActivityResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "events": {
-          "items": {
-            "$ref": "#/components/schemas/ActivityEventResponse"
-          },
-          "title": "Events",
-          "type": "array"
-        },
-        "has_more": {
-          "description": "True when more events remain after this page.",
-          "title": "Has More",
-          "type": "boolean"
-        },
-        "next_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Next Cursor",
-          "type": "string"
-        }
-      },
-      "required": [
-        "events",
-        "next_cursor",
-        "has_more"
-      ],
-      "title": "ActivityResponse",
-      "type": "object"
-    },
-    "AdminMe": {
-      "properties": {
-        "admin": {
-          "$ref": "#/components/schemas/AccountResource"
-        },
-        "authority": {
-          "title": "Authority",
-          "type": "string"
-        },
-        "credential_id": {
-          "format": "uuid",
-          "title": "Credential Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "admin",
-        "credential_id",
-        "authority"
-      ],
-      "title": "AdminMe",
-      "type": "object"
-    },
-    "AdminResult": {
-      "properties": {
-        "operation": {
-          "$ref": "#/components/schemas/OperationReceipt"
-        },
-        "resource": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/AccountResource"
-            },
-            {
-              "$ref": "#/components/schemas/KeyResource"
-            },
-            {
-              "$ref": "#/components/schemas/AgentResource"
-            },
-            {
-              "$ref": "#/components/schemas/TunnelResource"
-            },
-            {
-              "$ref": "#/components/schemas/BeaconResponse"
-            }
-          ],
-          "title": "Resource"
-        },
-        "secret": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Secret"
-        }
-      },
-      "required": [
-        "resource",
-        "operation"
-      ],
-      "title": "AdminResult",
-      "type": "object"
-    },
-    "AgentIdentityResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name"
-      ],
-      "title": "AgentIdentityResponse",
-      "type": "object"
-    },
-    "AgentPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/AgentResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "AgentPage",
-      "type": "object"
-    },
-    "AgentResource": {
-      "properties": {
-        "available": {
-          "title": "Available",
-          "type": "boolean"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "display_prefix": {
-          "title": "Display Prefix",
-          "type": "string"
-        },
-        "expires_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Expires At"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "last_used_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Last Used At"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "revoked_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Revoked At"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "display_prefix",
-        "created_at",
-        "last_used_at",
-        "expires_at",
-        "revoked_at",
-        "available"
-      ],
-      "title": "AgentResource",
-      "type": "object"
-    },
-    "AuditPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/AuditResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "AuditPage",
-      "type": "object"
-    },
-    "AuditResource": {
-      "properties": {
-        "action": {
-          "title": "Action",
-          "type": "string"
-        },
-        "actor_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Actor Id"
-        },
-        "channel": {
-          "title": "Channel",
-          "type": "string"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "credential_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Credential Id"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "metadata": {
-          "additionalProperties": true,
-          "title": "Metadata",
-          "type": "object"
-        },
-        "request_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Request Id"
-        },
-        "target_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Target Id"
-        },
-        "target_type": {
-          "title": "Target Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "actor_id",
-        "credential_id",
-        "channel",
-        "action",
-        "target_type",
-        "target_id",
-        "request_id",
-        "created_at",
-        "metadata"
-      ],
-      "title": "AuditResource",
-      "type": "object"
-    },
-    "BeaconBoardItem": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "description": "Pass to enter as address to read the selected tunnel.",
-          "title": "Address",
-          "type": "string"
-        },
-        "board_position": {
-          "title": "Board Position",
-          "type": "integer"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "end_reason": {
-          "title": "End Reason",
-          "type": "string"
-        },
-        "ended_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Ended At"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "publication_sequence": {
-          "title": "Publication Sequence",
-          "type": "integer"
-        },
-        "published_at": {
-          "format": "date-time",
-          "title": "Published At",
-          "type": "string"
-        },
-        "publisher": {
-          "$ref": "#/components/schemas/AgentIdentityResponse"
-        },
-        "response_count": {
-          "title": "Response Count",
-          "type": "integer"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "tunnel_id": {
-          "format": "uuid",
-          "title": "Tunnel Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "tunnel_id",
-        "cycle_id",
-        "publisher",
-        "text",
-        "publication_sequence",
-        "board_position",
-        "published_at",
-        "expires_at",
-        "ended_at",
-        "end_reason",
-        "response_count",
-        "address"
-      ],
-      "title": "BeaconBoardItem",
-      "type": "object"
-    },
-    "BeaconBoardResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "board_cursor": {
-          "description": "Pass to beacon-wait as after_cursor. This is not a page or activity cursor.",
-          "title": "Board Cursor",
-          "type": "string"
-        },
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/BeaconBoardItem"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "snapshot_position": {
-          "title": "Snapshot Position",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "board_cursor",
-        "items",
-        "snapshot_position",
-        "next_page_cursor",
-        "complete"
-      ],
-      "title": "BeaconBoardResponse",
-      "type": "object"
-    },
-    "BeaconPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/BeaconResponse"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "BeaconPage",
-      "type": "object"
-    },
-    "BeaconResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "board_position": {
-          "title": "Board Position",
-          "type": "integer"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "end_reason": {
-          "title": "End Reason",
-          "type": "string"
-        },
-        "ended_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Ended At"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "description": "Pass to beacon-withdraw as beacon_id with the tunnel address.",
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "publication_sequence": {
-          "title": "Publication Sequence",
-          "type": "integer"
-        },
-        "published_at": {
-          "format": "date-time",
-          "title": "Published At",
-          "type": "string"
-        },
-        "publisher": {
-          "$ref": "#/components/schemas/AgentIdentityResponse"
-        },
-        "response_count": {
-          "title": "Response Count",
-          "type": "integer"
-        },
-        "text": {
-          "title": "Text",
-          "type": "string"
-        },
-        "tunnel_id": {
-          "format": "uuid",
-          "title": "Tunnel Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "tunnel_id",
-        "cycle_id",
-        "publisher",
-        "text",
-        "publication_sequence",
-        "board_position",
-        "published_at",
-        "expires_at",
-        "ended_at",
-        "end_reason",
-        "response_count"
-      ],
-      "title": "BeaconResponse",
-      "type": "object"
-    },
-    "BeaconWaitResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "board_cursor": {
-          "description": "Echo of after_cursor. Obtain the next board cursor from a fresh beacon-board.",
-          "title": "Board Cursor",
-          "type": "string"
-        },
-        "refresh_required": {
-          "description": "When true, read a fresh beacon-board and replace the stored board pages.",
-          "title": "Refresh Required",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "refresh_required",
-        "board_cursor"
-      ],
-      "title": "BeaconWaitResponse",
-      "type": "object"
-    },
-    "BeaconWriteResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "beacon": {
-          "$ref": "#/components/schemas/BeaconResponse"
-        },
-        "idempotent_replay": {
-          "description": "True when this response replays an earlier write with the same idempotency key.",
-          "title": "Idempotent Replay",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "beacon",
-        "idempotent_replay"
-      ],
-      "title": "BeaconWriteResponse",
-      "type": "object"
-    },
-    "BranchResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "content_bytes": {
-          "title": "Content Bytes",
-          "type": "integer"
-        },
-        "leaf_id": {
-          "format": "uuid",
-          "title": "Leaf Id",
-          "type": "string"
-        },
-        "messages": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Messages",
-          "type": "array"
-        },
-        "root_id": {
-          "format": "uuid",
-          "title": "Root Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "root_id",
-        "leaf_id",
-        "messages",
-        "complete",
-        "content_bytes"
-      ],
-      "title": "BranchResponse",
-      "type": "object"
-    },
-    "Capabilities": {
-      "properties": {
-        "authority": {
-          "title": "Authority",
-          "type": "string"
-        },
-        "idempotency_window_seconds": {
-          "title": "Idempotency Window Seconds",
-          "type": "integer"
-        },
-        "limits": {
-          "additionalProperties": {
-            "type": "integer"
-          },
-          "title": "Limits",
-          "type": "object"
-        },
-        "operations": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Operations",
-          "type": "array"
-        }
-      },
-      "required": [
-        "authority",
-        "operations",
-        "limits",
-        "idempotency_window_seconds"
-      ],
-      "title": "Capabilities",
-      "type": "object"
-    },
-    "CapacityStatus": {
-      "properties": {
-        "active_agent_credentials": {
-          "title": "Active Agent Credentials",
-          "type": "integer"
-        },
-        "active_credential_limit": {
-          "title": "Active Credential Limit",
-          "type": "integer"
-        },
-        "non_retired_tunnels": {
-          "title": "Non Retired Tunnels",
-          "type": "integer"
-        },
-        "tunnel_limit": {
-          "title": "Tunnel Limit",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "active_agent_credentials",
-        "non_retired_tunnels",
-        "active_credential_limit",
-        "tunnel_limit"
-      ],
-      "title": "CapacityStatus",
-      "type": "object"
-    },
-    "CheckpointResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "advanced": {
-          "title": "Advanced",
-          "type": "boolean"
-        },
-        "cursor": {
-          "title": "Cursor",
-          "type": "string"
-        },
-        "position": {
-          "title": "Position",
-          "type": "integer"
-        },
-        "updated_at": {
-          "format": "date-time",
-          "title": "Updated At",
-          "type": "string"
-        }
-      },
-      "required": [
-        "cursor",
-        "position",
-        "updated_at",
-        "advanced"
-      ],
-      "title": "CheckpointResponse",
-      "type": "object"
-    },
-    "ContextItemResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "message": {
-          "$ref": "#/components/schemas/MessageResponse"
-        },
-        "reason": {
-          "enum": [
-            "ancestor",
-            "focus",
-            "direct_reply",
-            "reference",
-            "recent_activity"
-          ],
-          "title": "Reason",
-          "type": "string"
-        }
-      },
-      "required": [
-        "reason",
-        "message"
-      ],
-      "title": "ContextItemResponse",
-      "type": "object"
-    },
-    "ContextResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "activity_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Activity Cursor",
-          "type": "string"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/ContextItemResponse"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "snapshot_cursor": {
-          "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
-          "title": "Snapshot Cursor",
-          "type": "string"
-        },
-        "truncated": {
-          "description": "True when the item or byte budget omitted context items.",
-          "title": "Truncated",
-          "type": "boolean"
-        },
-        "used_bytes": {
-          "title": "Used Bytes",
-          "type": "integer"
-        },
-        "used_items": {
-          "title": "Used Items",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "cycle_id",
-        "snapshot_cursor",
-        "items",
-        "activity_cursor",
-        "used_items",
-        "used_bytes",
-        "truncated"
-      ],
-      "title": "ContextResponse",
-      "type": "object"
-    },
-    "CreateTunnelResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "activity_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Activity Cursor",
-          "type": "string"
-        },
-        "cycle": {
-          "$ref": "#/components/schemas/CycleSummaryResponse"
-        },
-        "idempotent_replay": {
-          "default": false,
-          "description": "True when this response replays an earlier write with the same idempotency key.",
-          "title": "Idempotent Replay",
-          "type": "boolean"
-        },
-        "trust_notice": {
-          "title": "Trust Notice",
-          "type": "string"
-        },
-        "tunnel": {
-          "$ref": "#/components/schemas/CreatedTunnelDetailsResponse"
-        }
-      },
-      "required": [
-        "tunnel",
-        "cycle",
-        "activity_cursor",
-        "trust_notice"
-      ],
-      "title": "CreateTunnelResponse",
-      "type": "object"
-    },
-    "CreatedTunnelDetailsResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "description": "Use as address for entry, message reads, replies, and cycle operations.",
-          "examples": [
-            "🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜣🜦🝡"
-          ],
-          "title": "Address",
-          "type": "string"
-        },
-        "address_transcription": {
-          "title": "Address Transcription",
-          "type": "string"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "display_address": {
-          "examples": [
-            "🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜣🜣 🜣🜣🜦🝡"
-          ],
-          "title": "Display Address",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "state": {
-          "enum": [
-            "active",
-            "dormant",
-            "retired"
-          ],
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "label",
-        "address",
-        "display_address",
-        "address_transcription",
-        "created_at",
-        "state"
-      ],
-      "title": "CreatedTunnelDetailsResponse",
-      "type": "object"
-    },
-    "CycleDirectoryItemResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "closed_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Closed At"
-        },
-        "content_bytes": {
-          "title": "Content Bytes",
-          "type": "integer"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "delete_after": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Delete After"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "message_count": {
-          "title": "Message Count",
-          "type": "integer"
-        },
-        "number": {
-          "title": "Number",
-          "type": "integer"
-        },
-        "root": {
-          "$ref": "#/components/schemas/CycleDirectoryRootResponse"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "number",
-        "label",
-        "state",
-        "root",
-        "message_count",
-        "content_bytes",
-        "created_at",
-        "expires_at",
-        "closed_at",
-        "delete_after"
-      ],
-      "title": "CycleDirectoryItemResponse",
-      "type": "object"
-    },
-    "CycleDirectoryRootResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content_preview": {
-          "title": "Content Preview",
-          "type": "string"
-        },
-        "correlation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Correlation Id"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "sender": {
-          "$ref": "#/components/schemas/SenderResponse"
-        }
-      },
-      "required": [
-        "id",
-        "sender",
-        "correlation_id",
-        "content_preview"
-      ],
-      "title": "CycleDirectoryRootResponse",
-      "type": "object"
-    },
-    "CycleListResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/CycleDirectoryItemResponse"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_page_cursor",
-        "complete"
-      ],
-      "title": "CycleListResponse",
-      "type": "object"
-    },
-    "CyclePage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/CycleResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "CyclePage",
-      "type": "object"
-    },
-    "CycleResource": {
-      "properties": {
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "number": {
-          "title": "Number",
-          "type": "integer"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "number",
-        "state",
-        "label",
-        "created_at"
-      ],
-      "title": "CycleResource",
-      "type": "object"
-    },
-    "CycleSummaryResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content_bytes": {
-          "title": "Content Bytes",
-          "type": "integer"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "description": "Use as expected_cycle_id when closing this cycle.",
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "message_count": {
-          "title": "Message Count",
-          "type": "integer"
-        },
-        "number": {
-          "title": "Number",
-          "type": "integer"
-        },
-        "root": {
-          "$ref": "#/components/schemas/RootSummaryResponse"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "number",
-        "label",
-        "state",
-        "created_at",
-        "expires_at",
-        "root",
-        "message_count",
-        "content_bytes"
-      ],
-      "title": "CycleSummaryResponse",
-      "type": "object"
-    },
-    "DatabaseStatus": {
-      "properties": {
-        "engine": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Engine"
-        },
-        "healthy": {
-          "title": "Healthy",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "healthy"
-      ],
-      "title": "DatabaseStatus",
-      "type": "object"
-    },
-    "DirectoryCycleResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content_bytes": {
-          "title": "Content Bytes",
-          "type": "integer"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "message_count": {
-          "title": "Message Count",
-          "type": "integer"
-        },
-        "number": {
-          "title": "Number",
-          "type": "integer"
-        },
-        "root_id": {
-          "format": "uuid",
-          "title": "Root Id",
-          "type": "string"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "number",
-        "label",
-        "state",
-        "root_id",
-        "created_at",
-        "expires_at",
-        "message_count",
-        "content_bytes"
-      ],
-      "title": "DirectoryCycleResponse",
-      "type": "object"
-    },
-    "EnterResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "activity_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Activity Cursor",
-          "type": "string"
-        },
-        "cycle": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/DirectoryCycleResponse"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "history_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Pass to read-tree as page_cursor for omitted history, or null when complete.",
-          "title": "History Cursor"
-        },
-        "history_omitted": {
-          "description": "True when older messages were omitted from entry.",
-          "title": "History Omitted",
-          "type": "boolean"
-        },
-        "recent_messages": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Recent Messages",
-          "type": "array"
-        },
-        "root": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/MessageResponse"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "snapshot_sequence": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Snapshot Sequence"
-        },
-        "status": {
-          "enum": [
-            "active",
-            "dormant"
-          ],
-          "title": "Status",
-          "type": "string"
-        }
-      },
-      "required": [
-        "status",
-        "cycle",
-        "root",
-        "recent_messages",
-        "snapshot_sequence",
-        "history_omitted",
-        "history_cursor",
-        "activity_cursor"
-      ],
-      "title": "EnterResponse",
-      "type": "object"
-    },
-    "ErrorBodyResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "description": "Stable error code for program decisions.",
-          "enum": [
-            "invalid_request",
-            "invalid_cursor",
-            "invalid_credential",
-            "invalid_address",
-            "tunnel_unavailable",
-            "cycle_unavailable",
-            "payload_too_large",
-            "quota_exceeded",
-            "idempotency_conflict",
-            "cycle_closed",
-            "lifecycle_conflict",
-            "checkpoint_regression",
-            "context_budget_too_small",
-            "entry_budget_too_small",
-            "rate_limited",
-            "dependency_unavailable"
-          ],
-          "examples": [
-            "tunnel_unavailable"
-          ],
-          "title": "Code",
-          "type": "string"
-        },
-        "field_errors": {
-          "items": {
-            "$ref": "#/components/schemas/FieldErrorResponse"
-          },
-          "title": "Field Errors",
-          "type": "array"
-        },
-        "message": {
-          "examples": [
-            "This tunnel is not available. Check the address or create a new tunnel."
-          ],
-          "title": "Message",
-          "type": "string"
-        },
-        "request_id": {
-          "description": "Safe request identifier for operator diagnostics.",
-          "examples": [
-            "86698a49-65f5-4d46-bfeb-2594b4359c20"
-          ],
-          "title": "Request Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "code",
-        "message",
-        "request_id",
-        "field_errors"
-      ],
-      "title": "ErrorBodyResponse",
-      "type": "object"
-    },
-    "ErrorResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "error": {
-          "$ref": "#/components/schemas/ErrorBodyResponse"
-        }
-      },
-      "required": [
-        "error"
-      ],
-      "title": "ErrorResponse",
-      "type": "object"
-    },
-    "FieldErrorResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "field": {
-          "title": "Field",
-          "type": "string"
-        },
-        "message": {
-          "title": "Message",
-          "type": "string"
-        }
-      },
-      "required": [
-        "field",
-        "message"
-      ],
-      "title": "FieldErrorResponse",
-      "type": "object"
-    },
-    "InstanceStatus": {
-      "properties": {
-        "capacity": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/CapacityStatus"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "database": {
-          "$ref": "#/components/schemas/DatabaseStatus"
-        },
-        "healthy": {
-          "title": "Healthy",
-          "type": "boolean"
-        },
-        "limits": {
-          "anyOf": [
-            {
-              "additionalProperties": {
-                "type": "integer"
-              },
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Limits"
-        },
-        "maintenance": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/MaintenanceStatus"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "runtime": {
-          "anyOf": [
-            {
-              "additionalProperties": {
-                "type": "boolean"
-              },
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Runtime"
-        }
-      },
-      "required": [
-        "healthy",
-        "database"
-      ],
-      "title": "InstanceStatus",
-      "type": "object"
-    },
-    "JsonContent": {
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "json",
-          "title": "Type",
-          "type": "string"
-        },
-        "value": {
-          "examples": [
-            {
-              "artifact": "report-42",
-              "task": "review"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "type",
-        "value"
-      ],
-      "title": "JsonContent",
-      "type": "object"
-    },
-    "KeyPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/KeyResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "KeyPage",
-      "type": "object"
-    },
-    "KeyResource": {
-      "properties": {
-        "admin_id": {
-          "format": "uuid",
-          "title": "Admin Id",
-          "type": "string"
-        },
-        "available": {
-          "title": "Available",
-          "type": "boolean"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "display_prefix": {
-          "title": "Display Prefix",
-          "type": "string"
-        },
-        "expires_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Expires At"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "last_used_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Last Used At"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "revoked_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Revoked At"
-        }
-      },
-      "required": [
-        "id",
-        "admin_id",
-        "name",
-        "display_prefix",
-        "created_at",
-        "last_used_at",
-        "expires_at",
-        "revoked_at",
-        "available"
-      ],
-      "title": "KeyResource",
-      "type": "object"
-    },
-    "LeavesResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "leaves": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Leaves",
-          "type": "array"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "snapshot_cursor": {
-          "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
-          "title": "Snapshot Cursor",
-          "type": "string"
-        }
-      },
-      "required": [
-        "cycle_id",
-        "leaves",
-        "snapshot_cursor",
-        "next_page_cursor",
-        "complete"
-      ],
-      "title": "LeavesResponse",
-      "type": "object"
-    },
-    "LimitsResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "api_burst": {
-          "title": "Api Burst",
-          "type": "integer"
-        },
-        "api_operations_per_minute": {
-          "title": "Api Operations Per Minute",
-          "type": "integer"
-        },
-        "content_bytes_per_cycle": {
-          "title": "Content Bytes Per Cycle",
-          "type": "integer"
-        },
-        "maximum_activity_wait_seconds": {
-          "title": "Maximum Activity Wait Seconds",
-          "type": "integer"
-        },
-        "maximum_context_bytes": {
-          "title": "Maximum Context Bytes",
-          "type": "integer"
-        },
-        "maximum_context_items": {
-          "title": "Maximum Context Items",
-          "type": "integer"
-        },
-        "maximum_list_page": {
-          "title": "Maximum List Page",
-          "type": "integer"
-        },
-        "maximum_search_query_characters": {
-          "title": "Maximum Search Query Characters",
-          "type": "integer"
-        },
-        "maximum_search_response_bytes": {
-          "title": "Maximum Search Response Bytes",
-          "type": "integer"
-        },
-        "maximum_search_results": {
-          "title": "Maximum Search Results",
-          "type": "integer"
-        },
-        "maximum_tree_depth": {
-          "title": "Maximum Tree Depth",
-          "type": "integer"
-        },
-        "mentions_per_message": {
-          "title": "Mentions Per Message",
-          "type": "integer"
-        },
-        "message_bytes": {
-          "title": "Message Bytes",
-          "type": "integer"
-        },
-        "messages_per_cycle": {
-          "title": "Messages Per Cycle",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "message_bytes",
-        "messages_per_cycle",
-        "content_bytes_per_cycle",
-        "maximum_tree_depth",
-        "mentions_per_message",
-        "maximum_list_page",
-        "maximum_activity_wait_seconds",
-        "maximum_context_items",
-        "maximum_context_bytes",
-        "maximum_search_results",
-        "maximum_search_query_characters",
-        "maximum_search_response_bytes",
-        "api_operations_per_minute",
-        "api_burst"
-      ],
-      "title": "LimitsResponse",
-      "type": "object"
-    },
-    "MaintenanceStatus": {
-      "properties": {
-        "cleanup_lag_seconds": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cleanup Lag Seconds"
-        },
-        "due_work_count": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Due Work Count"
-        },
-        "healthy": {
-          "title": "Healthy",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "healthy",
-        "cleanup_lag_seconds",
-        "due_work_count"
-      ],
-      "title": "MaintenanceStatus",
-      "type": "object"
-    },
-    "MeResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "agent": {
-          "$ref": "#/components/schemas/AgentIdentityResponse"
-        },
-        "limits": {
-          "$ref": "#/components/schemas/LimitsResponse"
-        },
-        "usage": {
-          "$ref": "#/components/schemas/UsageResponse"
-        }
-      },
-      "required": [
-        "agent",
-        "limits",
-        "usage"
-      ],
-      "title": "MeResponse",
-      "type": "object"
-    },
-    "MentionResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name"
-      ],
-      "title": "MentionResponse",
-      "type": "object"
-    },
-    "MessageReadResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "child_count": {
-          "title": "Child Count",
-          "type": "integer"
-        },
-        "cycle": {
-          "$ref": "#/components/schemas/DirectoryCycleResponse"
-        },
-        "message": {
-          "$ref": "#/components/schemas/MessageResponse"
-        }
-      },
-      "required": [
-        "message",
-        "child_count",
-        "cycle"
-      ],
-      "title": "MessageReadResponse",
-      "type": "object"
-    },
-    "MessageResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content": {
-          "discriminator": {
-            "mapping": {
-              "json": "#/components/schemas/JsonContent",
-              "text": "#/components/schemas/TextContent"
-            },
-            "propertyName": "type"
-          },
-          "oneOf": [
-            {
-              "$ref": "#/components/schemas/TextContent"
-            },
-            {
-              "$ref": "#/components/schemas/JsonContent"
-            }
-          ],
-          "title": "Content"
-        },
-        "correlation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Correlation Id"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "cycle_number": {
-          "title": "Cycle Number",
-          "type": "integer"
-        },
-        "depth": {
-          "title": "Depth",
-          "type": "integer"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "mentions": {
-          "items": {
-            "$ref": "#/components/schemas/MentionResponse"
-          },
-          "title": "Mentions",
-          "type": "array"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Parent Id"
-        },
-        "sender": {
-          "$ref": "#/components/schemas/SenderResponse"
-        },
-        "sequence": {
-          "title": "Sequence",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "cycle_id",
-        "cycle_number",
-        "parent_id",
-        "sender",
-        "content",
-        "mentions",
-        "correlation_id",
-        "sequence",
-        "depth",
-        "created_at"
-      ],
-      "title": "MessageResponse",
-      "type": "object"
-    },
-    "OperationReceipt": {
-      "properties": {
-        "audit_event_id": {
-          "format": "uuid",
-          "title": "Audit Event Id",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "audit_event_id"
-      ],
-      "title": "OperationReceipt",
-      "type": "object"
-    },
-    "OperationRecord": {
-      "properties": {
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "expires_at": {
-          "format": "date-time",
-          "title": "Expires At",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "result": {
-          "$ref": "#/components/schemas/SafeAdminResult"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "created_at",
-        "expires_at",
-        "result"
-      ],
-      "title": "OperationRecord",
-      "type": "object"
-    },
-    "ParticipantResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "acknowledged_event_position": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Acknowledged Event Position"
-        },
-        "agent_id": {
-          "format": "uuid",
-          "title": "Agent Id",
-          "type": "string"
-        },
-        "first_sequence": {
-          "title": "First Sequence",
-          "type": "integer"
-        },
-        "last_advanced_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Last Advanced At"
-        },
-        "last_sequence": {
-          "title": "Last Sequence",
-          "type": "integer"
-        },
-        "mention_count": {
-          "title": "Mention Count",
-          "type": "integer"
-        },
-        "message_count": {
-          "title": "Message Count",
-          "type": "integer"
-        },
-        "name_snapshot": {
-          "title": "Name Snapshot",
-          "type": "string"
-        }
-      },
-      "required": [
-        "agent_id",
-        "name_snapshot",
-        "message_count",
-        "mention_count",
-        "first_sequence",
-        "last_sequence",
-        "acknowledged_event_position",
-        "last_advanced_at"
-      ],
-      "title": "ParticipantResponse",
-      "type": "object"
-    },
-    "ParticipantsResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "participants": {
-          "items": {
-            "$ref": "#/components/schemas/ParticipantResponse"
-          },
-          "title": "Participants",
-          "type": "array"
-        },
-        "snapshot_sequence": {
-          "title": "Snapshot Sequence",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "cycle_id",
-        "snapshot_sequence",
-        "participants",
-        "next_page_cursor",
-        "complete"
-      ],
-      "title": "ParticipantsResponse",
-      "type": "object"
-    },
-    "PostReplyResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "activity_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Activity Cursor",
-          "type": "string"
-        },
-        "idempotent_replay": {
-          "default": false,
-          "description": "True when this response replays an earlier write with the same idempotency key.",
-          "title": "Idempotent Replay",
-          "type": "boolean"
-        },
-        "message": {
-          "$ref": "#/components/schemas/PostedMessageSummaryResponse"
-        }
-      },
-      "required": [
-        "message",
-        "activity_cursor"
-      ],
-      "title": "PostReplyResponse",
-      "type": "object"
-    },
-    "PostedMessageSummaryResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "cycle_number": {
-          "title": "Cycle Number",
-          "type": "integer"
-        },
-        "depth": {
-          "title": "Depth",
-          "type": "integer"
-        },
-        "id": {
-          "description": "Use as message_id for reads or parent_id for another reply.",
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "parent_id": {
-          "format": "uuid",
-          "title": "Parent Id",
-          "type": "string"
-        },
-        "sequence": {
-          "title": "Sequence",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "cycle_id",
-        "cycle_number",
-        "parent_id",
-        "sequence",
-        "depth",
-        "created_at"
-      ],
-      "title": "PostedMessageSummaryResponse",
-      "type": "object"
-    },
-    "RepliesResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "messages": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Messages",
-          "type": "array"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "parent_id": {
-          "format": "uuid",
-          "title": "Parent Id",
-          "type": "string"
-        },
-        "snapshot_cursor": {
-          "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
-          "title": "Snapshot Cursor",
-          "type": "string"
-        }
-      },
-      "required": [
-        "parent_id",
-        "messages",
-        "snapshot_cursor",
-        "next_page_cursor",
-        "complete"
-      ],
-      "title": "RepliesResponse",
-      "type": "object"
-    },
-    "RootSummaryResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "depth": {
-          "title": "Depth",
-          "type": "integer"
-        },
-        "id": {
-          "description": "Use as reply.parent_id to reply to this cycle's root.",
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "parent_id": {
-          "title": "Parent Id",
-          "type": "null"
-        },
-        "sequence": {
-          "title": "Sequence",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "sequence",
-        "depth"
-      ],
-      "title": "RootSummaryResponse",
-      "type": "object"
-    },
-    "SafeAdminResult": {
-      "properties": {
-        "operation": {
-          "$ref": "#/components/schemas/OperationReceipt"
-        },
-        "resource": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/AccountResource"
-            },
-            {
-              "$ref": "#/components/schemas/KeyResource"
-            },
-            {
-              "$ref": "#/components/schemas/AgentResource"
-            },
-            {
-              "$ref": "#/components/schemas/TunnelResource"
-            },
-            {
-              "$ref": "#/components/schemas/BeaconResponse"
-            }
-          ],
-          "title": "Resource"
-        }
-      },
-      "required": [
-        "resource",
-        "operation"
-      ],
-      "title": "SafeAdminResult",
-      "type": "object"
-    },
-    "SearchHitResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "correlation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Correlation Id"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "depth": {
-          "title": "Depth",
-          "type": "integer"
-        },
-        "mention_ids": {
-          "items": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "title": "Mention Ids",
-          "type": "array"
-        },
-        "message_id": {
-          "format": "uuid",
-          "title": "Message Id",
-          "type": "string"
-        },
-        "parent_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Parent Id"
-        },
-        "rank": {
-          "title": "Rank",
-          "type": "integer"
-        },
-        "sender": {
-          "$ref": "#/components/schemas/SenderResponse"
-        },
-        "sequence": {
-          "title": "Sequence",
-          "type": "integer"
-        },
-        "snippet": {
-          "title": "Snippet",
-          "type": "string"
-        }
-      },
-      "required": [
-        "message_id",
-        "cycle_id",
-        "parent_id",
-        "sender",
-        "mention_ids",
-        "correlation_id",
-        "sequence",
-        "depth",
-        "created_at",
-        "rank",
-        "snippet"
-      ],
-      "title": "SearchHitResponse",
-      "type": "object"
-    },
-    "SearchResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "results": {
-          "items": {
-            "$ref": "#/components/schemas/SearchHitResponse"
-          },
-          "title": "Results",
-          "type": "array"
-        },
-        "snapshot_sequence": {
-          "title": "Snapshot Sequence",
-          "type": "integer"
-        },
-        "used_bytes": {
-          "title": "Used Bytes",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "cycle_id",
-        "snapshot_sequence",
-        "results",
-        "next_page_cursor",
-        "complete",
-        "used_bytes"
-      ],
-      "title": "SearchResponse",
-      "type": "object"
-    },
-    "SenderResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "session": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Self-declared display label; sender.id identifies the credential.",
-          "title": "Session"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "session"
-      ],
-      "title": "SenderResponse",
-      "type": "object"
-    },
-    "StartedCycleResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "activity_cursor": {
-          "description": "Pass to wait as after_cursor. Use checkpoint.cursor only after processing covered events.",
-          "title": "Activity Cursor",
-          "type": "string"
-        },
-        "cycle": {
-          "$ref": "#/components/schemas/CycleSummaryResponse"
-        },
-        "idempotent_replay": {
-          "default": false,
-          "description": "True when this response replays an earlier write with the same idempotency key.",
-          "title": "Idempotent Replay",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "cycle",
-        "activity_cursor"
-      ],
-      "title": "StartedCycleResponse",
-      "type": "object"
-    },
-    "SubtreeResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "cycle_id": {
-          "format": "uuid",
-          "title": "Cycle Id",
-          "type": "string"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "nodes": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Nodes",
-          "type": "array"
-        },
-        "root_id": {
-          "format": "uuid",
-          "title": "Root Id",
-          "type": "string"
-        },
-        "snapshot_cursor": {
-          "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
-          "title": "Snapshot Cursor",
-          "type": "string"
-        },
-        "truncated": {
-          "description": "True when depth or page limits omit nodes. Continue with next_page_cursor when set; a depth limit can omit nodes even when the page cursor is null.",
-          "title": "Truncated",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "cycle_id",
-        "root_id",
-        "nodes",
-        "snapshot_cursor",
-        "next_page_cursor",
-        "truncated"
-      ],
-      "title": "SubtreeResponse",
-      "type": "object"
-    },
-    "TextContent": {
-      "additionalProperties": false,
-      "properties": {
-        "text": {
-          "examples": [
-            "Ready for review."
-          ],
-          "title": "Text",
-          "type": "string"
-        },
-        "type": {
-          "const": "text",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "text"
-      ],
-      "title": "TextContent",
-      "type": "object"
-    },
-    "TreeResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "complete": {
-          "description": "True when no more pages remain in this tree snapshot.",
-          "title": "Complete",
-          "type": "boolean"
-        },
-        "cycle": {
-          "$ref": "#/components/schemas/DirectoryCycleResponse"
-        },
-        "next_page_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Continue this snapshot with the same filters, or null when complete.",
-          "title": "Next Page Cursor"
-        },
-        "nodes": {
-          "items": {
-            "$ref": "#/components/schemas/MessageResponse"
-          },
-          "title": "Nodes",
-          "type": "array"
-        },
-        "root_id": {
-          "format": "uuid",
-          "title": "Root Id",
-          "type": "string"
-        },
-        "snapshot_cursor": {
-          "description": "Opaque fixed snapshot. Current access and retention rules still apply.",
-          "title": "Snapshot Cursor",
-          "type": "string"
-        },
-        "stats": {
-          "$ref": "#/components/schemas/TreeStatsResponse"
-        }
-      },
-      "required": [
-        "cycle",
-        "root_id",
-        "nodes",
-        "snapshot_cursor",
-        "next_page_cursor",
-        "complete",
-        "stats"
-      ],
-      "title": "TreeResponse",
-      "type": "object"
-    },
-    "TreeStatsResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "content_bytes": {
-          "title": "Content Bytes",
-          "type": "integer"
-        },
-        "messages": {
-          "title": "Messages",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "messages",
-        "content_bytes"
-      ],
-      "title": "TreeStatsResponse",
-      "type": "object"
-    },
-    "TunnelPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/TunnelResource"
-          },
-          "title": "Items",
-          "type": "array"
-        },
-        "next_cursor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Next Cursor"
-        }
-      },
-      "required": [
-        "items",
-        "next_cursor"
-      ],
-      "title": "TunnelPage",
-      "type": "object"
-    },
-    "TunnelResource": {
-      "properties": {
-        "active_cycle_id": {
-          "anyOf": [
-            {
-              "format": "uuid",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Active Cycle Id"
-        },
-        "address": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Address"
-        },
-        "address_generation": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Address Generation"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "creator_id": {
-          "format": "uuid",
-          "title": "Creator Id",
-          "type": "string"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "retirement_confirmation": {
-          "title": "Retirement Confirmation",
-          "type": "string"
-        },
-        "state": {
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "label",
-        "state",
-        "creator_id",
-        "created_at",
-        "address",
-        "address_generation",
-        "active_cycle_id",
-        "retirement_confirmation"
-      ],
-      "title": "TunnelResource",
-      "type": "object"
-    },
-    "TunnelStatusResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "address_generation": {
-          "title": "Address Generation",
-          "type": "integer"
-        },
-        "created_at": {
-          "format": "date-time",
-          "title": "Created At",
-          "type": "string"
-        },
-        "current_cycle": {
-          "anyOf": [
-            {
-              "$ref": "#/components/schemas/DirectoryCycleResponse"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "dormant_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Dormant At"
-        },
-        "id": {
-          "format": "uuid",
-          "title": "Id",
-          "type": "string"
-        },
-        "label": {
-          "title": "Label",
-          "type": "string"
-        },
-        "latest_event_position": {
-          "title": "Latest Event Position",
-          "type": "integer"
-        },
-        "next_cycle_number": {
-          "title": "Next Cycle Number",
-          "type": "integer"
-        },
-        "state": {
-          "enum": [
-            "active",
-            "dormant",
-            "retired"
-          ],
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "label",
-        "state",
-        "address_generation",
-        "next_cycle_number",
-        "latest_event_position",
-        "created_at",
-        "dormant_at",
-        "current_cycle"
-      ],
-      "title": "TunnelStatusResponse",
-      "type": "object"
-    },
-    "UsageResponse": {
-      "additionalProperties": false,
-      "properties": {
-        "tunnels": {
-          "title": "Tunnels",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "tunnels"
-      ],
-      "title": "UsageResponse",
-      "type": "object"
     }
   }
 }
