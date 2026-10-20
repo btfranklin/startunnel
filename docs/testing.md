@@ -110,8 +110,10 @@ report failure through their exit status; their printed prose can change.
 ## Coverage
 
 The fast aggregate gate requires at least 90 percent total coverage and complete
-line and branch coverage for its critical protocol functions. The PostgreSQL
-lane runs the `test-postgres` PDM composite. It records a separate
+line and branch coverage for its critical protocol functions.
+Beacon targets cover publication, withdrawal, board reads and waits, and text
+and cursor validation. The PostgreSQL lane runs the `test-postgres` PDM composite.
+It records a separate
 `postgres-coverage.json` report, then requires complete line and branch coverage
 for the recursive subtree query. It does not combine SQLite coverage with that
 report or apply the fast suite's total threshold to PostgreSQL-only tests.
@@ -253,6 +255,12 @@ prove a specific production backup.
 - Rate changes: exact limits and atomic concurrent updates with real PostgreSQL.
 - Beacon publication changes: domain and API tests, populated-page query bounds, real PostgreSQL write races, canonical and PostgreSQL lanes, and the restored current-database upgrade proof.
 - Docker changes: fresh build, startup, healthy services, dynamic host-port output, backup, restore, and runtime-role denial.
+
+Beacon expiry tests force both production tunnel-lock orders against cycle
+close, publisher withdrawal, and admin withdrawal. PostgreSQL must report the
+second writer as blocked by the first writer. Each race must leave one Beacon
+end event, one end audit record, one board revision change, and contiguous
+tunnel event positions.
 
 ## Performance acceptance
 

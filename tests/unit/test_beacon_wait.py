@@ -8,11 +8,20 @@ from typing import Any
 
 import pytest
 from asgiref.sync import async_to_sync
+from django.db import connection
 from django.utils import timezone
 
+from agents.models import AgentCredential
+from core.activity_listener import ActivityListener
 from core.cursors import decode_cursor, encode_cursor
 from core.errors import InvalidCredential, InvalidCursor, InvalidRequest
-from tunnels.beacons import BOARD_WAIT_CURSOR_KIND, publish_beacon, read_board, wait_for_board
+from tunnels.beacons import (
+    BOARD_WAIT_CURSOR_KIND,
+    _read_board_wait_state_for_async,
+    publish_beacon,
+    read_board,
+    wait_for_board,
+)
 from tunnels.cycles import create_tunnel
 from tunnels.models import ActivityCheckpoint, Beacon, BoardState
 
@@ -136,6 +145,56 @@ def test_wait_cursor_has_required_expiry_field(credential_factory: Any) -> None:
 
     with pytest.raises(InvalidCursor):
         async_to_sync(wait_for_board)(credential=reader, after_cursor=malformed, wait_seconds=0)
+
+
+@pytest.mark.parametrize("expiry", [42, "not-an-expiry", "2026-10-20T12:00:00"])
+def test_wait_rejects_nontext_invalid_or_naive_cursor_expiry(
+    credential_factory: Any, expiry: Any
+) -> None:
+    reader, _ = credential_factory()
+    cursor = encode_cursor(BOARD_WAIT_CURSOR_KIND, board_position=0, next_expiry=expiry)
+    with pytest.raises(InvalidCursor):
+        async_to_sync(wait_for_board)(credential=reader, after_cursor=cursor, wait_seconds=0)
+
+
+def test_unchanged_board_wait_reaches_its_deadline_and_unregisters(
+    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reader, _ = credential_factory()
+    cursor = read_board(credential=reader).board_cursor
+    listener = ActivityListener()
+    monkeypatch.setattr("tunnels.beacons.activity_listener", listener)
+
+    async def wait() -> dict[str, Any]:
+        try:
+            return await wait_for_board(credential=reader, after_cursor=cursor, wait_seconds=1)
+        finally:
+            await listener.stop()
+
+    result = async_to_sync(wait)()
+    assert result == {"refresh_required": False, "board_cursor": cursor}
+    assert not listener._board_waiters
+
+
+def test_wait_rejects_revocation_after_the_board_state_read(credential_factory: Any) -> None:
+    publisher, _ = credential_factory()
+    reader, _ = credential_factory()
+    _publish(publisher)
+    cursor = read_board(credential=reader).board_cursor
+    revoked = False
+
+    def revoke_after_read(execute: Any, sql: str, params: Any, many: bool, context: Any) -> Any:
+        nonlocal revoked
+        result = execute(sql, params, many, context)
+        if not revoked and sql.startswith("SELECT") and 'FROM "tunnels_boardstate"' in sql:
+            revoked = True
+            AgentCredential.objects.filter(pk=reader.id).update(revoked_at=timezone.now())
+        return result
+
+    with connection.execute_wrapper(revoke_after_read), pytest.raises(InvalidCredential):
+        _read_board_wait_state_for_async(credential=reader, after_cursor=cursor)
+    assert revoked
+    assert AgentCredential.objects.get(pk=reader.id).revoked_at is not None
 
 
 def test_wait_cursor_carries_global_revision_and_expiry(credential_factory: Any) -> None:

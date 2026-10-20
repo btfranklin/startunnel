@@ -120,8 +120,8 @@ def test_publish_retry_is_exact_and_cycle_has_one_final_publication(
     assert BoardState.objects.get(pk=1).position == 2
 
 
-@pytest.mark.parametrize("text", ["", " leading", "trailing ", "line\nbreak", "x\u200by"])
-def test_beacon_text_rejects_empty_outer_space_and_control_or_format_chars(
+@pytest.mark.parametrize("text", ["", " leading", "trailing ", "line\nbreak", "x\u200by", "\ud800"])
+def test_beacon_text_rejects_empty_space_control_and_invalid_unicode(
     credential_factory: Any, text: str
 ) -> None:
     creator, _ = credential_factory()
@@ -133,6 +133,13 @@ def test_beacon_text_rejects_empty_outer_space_and_control_or_format_chars(
             address=created.address,
             text=text,
         )
+
+
+@pytest.mark.parametrize("limit", [0, 101, True, 1.5])
+def test_board_rejects_invalid_page_limits(credential_factory: Any, limit: Any) -> None:
+    reader, _ = credential_factory()
+    with pytest.raises(InvalidRequest, match="limit"):
+        read_board(credential=reader, limit=limit)
 
 
 def test_board_counts_distinct_nonpublisher_credentials_that_reply_after_publish(

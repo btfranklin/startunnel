@@ -60,6 +60,17 @@ CRITICAL_TARGETS = (
         ),
     ),
     CriticalTarget("src/tunnels/retention.py", ("delete_due_cycle_content",)),
+    CriticalTarget(
+        "src/tunnels/beacons.py",
+        (
+            "publish_beacon",
+            "withdraw_beacon",
+            "read_board",
+            "wait_for_board",
+            "_cursor_expiry",
+            "_validate_beacon_text",
+        ),
+    ),
     CriticalTarget("src/core/rate_limits.py", ("_consume",)),
     CriticalTarget("src/core/maintenance.py", ("cleanup_once",)),
 )
