@@ -226,8 +226,14 @@ def post_reply(
             raise TunnelUnavailable()
         if not cycle_is_readable(message.cycle):
             raise CycleUnavailable()
-        event = TunnelEvent.objects.get(message=message, event_type=TunnelEvent.Type.MESSAGE_POSTED)
-        return PostedReply(message, event.position, replay=True)
+        event_position = idempotency.record.response.get("event_position")
+        if (
+            not isinstance(event_position, int)
+            or isinstance(event_position, bool)
+            or event_position < 1
+        ):
+            raise TunnelUnavailable()
+        return PostedReply(message, event_position, replay=True)
 
     tunnel = resolve_tunnel(
         credential=credential,

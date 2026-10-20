@@ -8,10 +8,18 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from core.errors import CycleClosed, IdempotencyConflict, InvalidRequest, TunnelUnavailable
+from agents.models import AgentCredential
+from core.errors import (
+    CycleClosed,
+    IdempotencyConflict,
+    InvalidCredential,
+    InvalidRequest,
+    TunnelUnavailable,
+)
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.messages import _resolve_mentions, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
@@ -163,6 +171,120 @@ def test_replies_form_an_immutable_ordered_tree_and_allow_self_reply(
     assert created.cycle.message_count == 3
     assert created.cycle.next_sequence == 4
     assert created.tunnel.next_event_position == 5
+
+
+def test_reply_replay_keeps_original_position_without_event_reads_or_writes(
+    credential_factory: Any,
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator, key="reply-position-create")
+    arguments = {
+        "credential": creator,
+        "idempotency_key": "reply-position-original",
+        "address": created.address,
+        "parent_id": created.root.id,
+        "content": {"type": "text", "text": "Original reply."},
+    }
+    original = post_reply(**arguments)
+    later = post_reply(
+        credential=creator,
+        idempotency_key="reply-position-later",
+        address=created.address,
+        parent_id=created.root.id,
+        content={"type": "text", "text": "Later reply."},
+    )
+    assert later.event_position > original.event_position
+    receipt = creator.agent_receipts.get(operation="post_reply", resource_id=original.message.id)
+    original_response = receipt.response.copy()
+    created.tunnel.refresh_from_db()
+    created.cycle.refresh_from_db()
+    counters = (
+        created.tunnel.next_event_position,
+        created.cycle.next_sequence,
+        created.cycle.message_count,
+        created.cycle.content_bytes,
+    )
+
+    with CaptureQueriesContext(connection) as queries:
+        replay = post_reply(**arguments)
+
+    assert replay.replay is True
+    assert replay.message.id == original.message.id
+    assert replay.event_position == original.event_position
+    assert not any(TunnelEvent._meta.db_table in query["sql"] for query in queries)
+    assert not any(
+        query["sql"].lstrip().split(maxsplit=1)[0].upper() in {"INSERT", "UPDATE", "DELETE"}
+        for query in queries
+    )
+    receipt.refresh_from_db()
+    created.tunnel.refresh_from_db()
+    created.cycle.refresh_from_db()
+    assert receipt.response == original_response
+    assert (
+        created.tunnel.next_event_position,
+        created.cycle.next_sequence,
+        created.cycle.message_count,
+        created.cycle.content_bytes,
+    ) == counters
+
+
+@pytest.mark.parametrize(
+    "position_fields",
+    [
+        {},
+        {"event_position": None},
+        {"event_position": False},
+        {"event_position": True},
+        {"event_position": 0},
+        {"event_position": -1},
+        {"event_position": "3"},
+        {"event_position": 3.0},
+    ],
+    ids=["missing", "null", "false", "true", "zero", "negative", "string", "float"],
+)
+def test_reply_replay_rejects_an_invalid_stored_event_position(
+    credential_factory: Any, position_fields: dict[str, Any]
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator, key="reply-invalid-position-create")
+    arguments = {
+        "credential": creator,
+        "idempotency_key": "reply-invalid-position",
+        "address": created.address,
+        "parent_id": created.root.id,
+        "content": {"type": "text", "text": "Original reply."},
+    }
+    original = post_reply(**arguments)
+    receipt = creator.agent_receipts.get(operation="post_reply", resource_id=original.message.id)
+    receipt.response.pop("event_position")
+    receipt.response.update(position_fields)
+    receipt.save(update_fields=["response"])
+
+    with pytest.raises(TunnelUnavailable):
+        post_reply(**arguments)
+
+
+@pytest.mark.parametrize("field", ["revoked_at", "expires_at"])
+def test_reply_replay_rejects_an_unavailable_credential_from_a_stale_object(
+    credential_factory: Any, field: str
+) -> None:
+    creator, _ = credential_factory()
+    created = _create(creator, key="reply-credential-create")
+    arguments = {
+        "credential": creator,
+        "idempotency_key": "reply-credential-original",
+        "address": created.address,
+        "parent_id": created.root.id,
+        "content": {"type": "text", "text": "Original reply."},
+    }
+    post_reply(**arguments)
+    AgentCredential.objects.filter(pk=creator.pk).update(
+        **{field: timezone.now() - timedelta(seconds=1)}
+    )
+    assert creator.is_available is True
+
+    with pytest.raises(InvalidCredential):
+        post_reply(**arguments)
 
 
 def test_parent_must_belong_to_the_active_cycle(credential_factory: Any) -> None:

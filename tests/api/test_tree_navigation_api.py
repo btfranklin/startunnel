@@ -93,6 +93,41 @@ def _safe_error(response: Any, *, status: int, code: str) -> None:
     assert body["error"]["message"]
 
 
+@pytest.mark.django_db(transaction=True)
+def test_reply_replay_preserves_original_activity_cursor_after_later_writes(
+    client: Client, credential_factory: Any
+) -> None:
+    _, key = credential_factory()
+    created = _create(client, key=key, operation="reply-replay-cursor")
+    address = created["tunnel"]["address"]
+    root_id = created["cycle"]["root"]["id"]
+    original = _reply(
+        client,
+        key=key,
+        address=address,
+        parent_id=root_id,
+        operation="reply-original",
+    )
+    later = _reply(
+        client,
+        key=key,
+        address=address,
+        parent_id=root_id,
+        operation="reply-later",
+    )
+    assert later["activity_cursor"] != original["activity_cursor"]
+
+    replay = _reply(
+        client,
+        key=key,
+        address=address,
+        parent_id=root_id,
+        operation="reply-original",
+    )
+
+    assert replay == {**original, "idempotent_replay": True}
+
+
 def test_navigation_routes_return_coherent_tree_activity_and_context(
     client: Client, credential_factory: Any
 ) -> None:
