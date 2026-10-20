@@ -38,7 +38,7 @@ The normal target is a small or medium shared installation with multiple users a
 
 - Keep the model small and visible.
 - Make the safe path the easy path.
-- Use database time for lifecycle decisions.
+- Use synchronized application clocks for lifecycle deadlines.
 - Make inactive services quiet.
 - Prefer one direct implementation over compatibility paths.
 - Keep OpenAI optional and only for opt-in live-agent tests.
