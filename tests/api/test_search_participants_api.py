@@ -174,6 +174,7 @@ def test_participant_route_pages_one_fixed_snapshot(
     assert second.json()["complete"] is True
 
 
+@pytest.mark.django_db(transaction=True)
 def test_participant_route_reports_explicit_checkpoint_state(
     client: Client,
     credential_factory: Any,

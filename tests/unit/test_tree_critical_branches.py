@@ -74,17 +74,21 @@ def test_create_rejects_long_correlation_and_instance_quota(
 
 def test_create_replay_rejects_missing_resources(credential_factory: Any) -> None:
     credential, _ = credential_factory()
-    created = _create(credential, "critical-create-replay")
+    _create(credential, "critical-create-replay")
     record = credential.agent_receipts.get(operation="create_tunnel")
     record.resource_id = None
     record.save(update_fields=["resource_id"])
     with pytest.raises(TunnelUnavailable):
         _create(credential, "critical-create-replay")
-    record.resource_id = created.tunnel.id
-    record.save(update_fields=["resource_id"])
+
+
+@pytest.mark.sqlite_only
+def test_create_replay_rejects_a_corrupt_missing_cycle_root(credential_factory: Any) -> None:
+    credential, _ = credential_factory()
+    created = _create(credential, "critical-create-missing-root")
     Cycle.objects.filter(pk=created.cycle.pk).update(root_message=None)
     with pytest.raises(TunnelUnavailable):
-        _create(credential, "critical-create-replay")
+        _create(credential, "critical-create-missing-root")
 
 
 def test_resolve_exact_fallback_and_locked_address_race(
@@ -140,6 +144,7 @@ def test_fast_locked_resolve_rejects_address_removed_after_lookup(
 
 
 @pytest.mark.parametrize("for_update", [False, True])
+@pytest.mark.sqlite_only
 def test_resolve_rejects_retired_tunnel(credential_factory: Any, for_update: bool) -> None:
     credential, _ = credential_factory()
     created = _create(credential, f"critical-retired-{for_update}")

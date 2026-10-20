@@ -407,21 +407,26 @@ def test_admin_list_filters_with_missing_ids_keep_empty_pages(
 def test_existing_tunnel_cycle_list_keeps_validation_and_cursor_errors(
     client: Any, user_factory: Any, credential_factory: Any, query: dict[str, Any], code: str
 ) -> None:
-    from tunnels.models import Tunnel
+    from tunnels.cycles import create_tunnel
 
     credential, _ = credential_factory()
-    tunnel = Tunnel.objects.create(creator=credential)
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="admin-cycle-list-create",
+        root_content={"type": "text", "text": "Existing cycle"},
+    )
+    audit_ids = set(AuditEvent.objects.values_list("id", flat=True))
     _, key = issue_admin_key(owner=user_factory(), name="Cycle reader")
-    path = f"/api/v1/admin/tunnels/{tunnel.id}/cycles"
+    path = f"/api/v1/admin/tunnels/{created.tunnel.id}/cycles"
     headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
-    empty = client.get(path, **headers)
-    assert empty.status_code == 200
-    assert empty.json() == {"items": [], "next_cursor": None}
+    page = client.get(path, **headers)
+    assert page.status_code == 200
+    assert [cycle["id"] for cycle in page.json()["items"]] == [str(created.cycle.id)]
     response = client.get(path, query, **headers)
     assert response.status_code == 400
     assert response.json()["error"]["code"] == code
     assert not AdminReceipt.objects.exists()
-    assert not AuditEvent.objects.exists()
+    assert set(AuditEvent.objects.values_list("id", flat=True)) == audit_ids
 
 
 @pytest.mark.parametrize(

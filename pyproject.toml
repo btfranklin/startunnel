@@ -68,6 +68,7 @@ testpaths = ["tests"]
 addopts = "--strict-config --strict-markers"
 markers = [
     "postgres: requires PostgreSQL",
+    "sqlite_only: tests a non-PostgreSQL dependency or deliberately invalid database state",
     "browser: requires a browser",
     "live_agents: spends OpenAI API credits",
 ]
@@ -112,7 +113,7 @@ docs-structure = "perfect-doc check . --offline --no-banner"
 manage = "python manage.py"
 dev = "python scripts/start_development.py"
 test = "pytest"
-test-postgres = { composite = ["pytest tests/integration -m postgres --cov=src --cov-branch --cov-report=json:postgres-coverage.json --cov-fail-under=0", "python scripts/check_critical_coverage.py postgres-coverage.json --postgres"] }
+test-postgres = { composite = ["pytest tests/integration -m postgres --cov=src --cov-branch --cov-report=json:postgres-coverage.json --cov-fail-under=0", "python scripts/check_critical_coverage.py postgres-coverage.json --postgres", "pytest tests/unit tests/api --no-cov"] }
 check = "python scripts/check.py"
 mypy = { cmd = "mypy", env = { PYTHONPATH = "src" } }
 openapi = { composite = ["python manage.py export_openapi --output generated/openapi.json", "python scripts/generate_client_contract.py"] }

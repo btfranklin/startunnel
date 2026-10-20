@@ -26,7 +26,9 @@ from tunnels.retention import delete_due_cycle_content
 pytestmark = pytest.mark.django_db
 
 
-def _conversation(credential_factory: Any, suffix: str = "retention") -> tuple[Any, Any]:
+def _conversation(
+    credential_factory: Any, suffix: str = "retention", *, closed: bool = False
+) -> tuple[Any, Any]:
     credential, _ = credential_factory()
     created = create_tunnel(
         credential=credential,
@@ -42,6 +44,13 @@ def _conversation(credential_factory: Any, suffix: str = "retention") -> tuple[A
         parent_id=created.root.id,
         content={"type": "text", "text": "Reply content."},
     )
+    if closed:
+        close_cycle(
+            credential=credential,
+            address=created.address,
+            idempotency_key=f"close-{suffix}",
+            expected_cycle_id=created.cycle.id,
+        )
     return created, reply
 
 
@@ -93,7 +102,7 @@ def test_active_cycle_deadline_is_exact_before_worker_closure(credential_factory
 def test_closed_cycle_becomes_unreadable_at_exact_delete_deadline(
     credential_factory: Any,
 ) -> None:
-    created, _ = _conversation(credential_factory, "boundary")
+    created, _ = _conversation(credential_factory, "boundary", closed=True)
     deadline = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,
@@ -109,7 +118,7 @@ def test_closed_cycle_becomes_unreadable_at_exact_delete_deadline(
 def test_due_deletion_keeps_minimal_tombstone_and_is_idempotent(
     credential_factory: Any,
 ) -> None:
-    created, reply = _conversation(credential_factory, "delete")
+    created, reply = _conversation(credential_factory, "delete", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,
@@ -144,6 +153,12 @@ def test_deletion_rejects_not_due_or_active_cycle(credential_factory: Any) -> No
     created, _ = _conversation(credential_factory, "not-due")
     now = timezone.now()
     assert not delete_due_cycle_content(cycle_id=created.cycle.id, now=now)
+    close_cycle(
+        credential=created.tunnel.creator,
+        address=created.address,
+        idempotency_key="close-not-due",
+        expected_cycle_id=created.cycle.id,
+    )
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,
         closed_at=now,
@@ -154,7 +169,7 @@ def test_deletion_rejects_not_due_or_active_cycle(credential_factory: Any) -> No
 
 
 def test_expired_history_is_not_materialized_by_reads(credential_factory: Any) -> None:
-    created, _ = _conversation(credential_factory, "read")
+    created, _ = _conversation(credential_factory, "read", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,
@@ -396,7 +411,9 @@ def test_cycle_control_replays_check_current_address(
 def test_admin_cycle_labels_stop_at_history_deadline_without_extra_queries(
     credential_factory: Any, state: str
 ) -> None:
-    created, _ = _conversation(credential_factory, "admin-labels-first")
+    created, _ = _conversation(
+        credential_factory, "admin-labels-first", closed=state == Cycle.State.CLOSED
+    )
     actor = created.tunnel.creator.created_by
     deadline = timezone.now() + timedelta(seconds=1)
     Cycle.objects.filter(pk=created.cycle.id).update(

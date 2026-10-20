@@ -20,6 +20,10 @@ from agents.models import AgentCredential
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if settings.DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+        sqlite_only = [item for item in items if item.get_closest_marker("sqlite_only") is not None]
+        if sqlite_only:
+            items[:] = [item for item in items if item not in sqlite_only]
+            config.hook.pytest_deselected(items=sqlite_only)
         return
     postgres = [item for item in items if item.get_closest_marker("postgres") is not None]
     if not postgres:

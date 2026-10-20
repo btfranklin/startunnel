@@ -75,6 +75,7 @@ def test_search_rejects_invalid_or_unbounded_inputs_before_database_search(
         )
 
 
+@pytest.mark.sqlite_only
 def test_valid_search_fails_directly_without_the_required_postgresql_dependency(
     credential_factory: Any,
 ) -> None:
@@ -224,8 +225,7 @@ def test_search_hit_payload_preserves_public_fields_and_full_timestamp_precision
         correlation_id="search-validation",
     ).message
     created_at = datetime(2026, 2, 3, 4, 5, 6, 123456, tzinfo=UTC)
-    type(message).objects.filter(pk=message.pk).update(created_at=created_at)
-    message.refresh_from_db()
+    message.created_at = created_at
 
     payload = search_hit_payload(
         SearchHit(message=message, snippet="A safe café snippet.", rank=42)

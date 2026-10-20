@@ -17,7 +17,6 @@ from tunnels.admin_actions import (
 )
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.messages import post_reply
-from tunnels.models import Message
 
 pytestmark = pytest.mark.django_db
 
@@ -54,6 +53,7 @@ def _reply(created: Any, credential: Any, key: str, text: str) -> Any:
     )
 
 
+@pytest.mark.django_db(transaction=True)
 def test_enter_returns_root_once_and_a_continuation_before_recent_messages(
     client: Client,
     credential_factory: Any,
@@ -145,6 +145,7 @@ def test_enter_enforces_full_response_bytes_and_fails_when_root_cannot_fit(
     assert too_small.json()["error"]["code"] == "entry_budget_too_small"
 
 
+@time_machine.travel(datetime(2026, 10, 18, 1, 2, 3, 123, tzinfo=UTC), tick=False)
 def test_enter_accepts_exact_wire_size_and_trims_one_byte_below(
     client: Client,
     credential_factory: Any,
@@ -152,13 +153,7 @@ def test_enter_accepts_exact_wire_size_and_trims_one_byte_below(
 ) -> None:
     creator, key = credential_factory(name="Exact entry budget creator")
     created = _create(creator, "entry-exact-budget-create")
-    reply = _reply(created, creator, "entry-exact-budget-reply", "Unicode: café 🜣.")
-    Message.objects.filter(pk=created.root.id).update(
-        created_at=datetime(2026, 10, 18, 1, 2, 3, 123, tzinfo=UTC)
-    )
-    Message.objects.filter(pk=reply.message.id).update(
-        created_at=datetime(2026, 10, 18, 1, 2, 4, 123, tzinfo=UTC)
-    )
+    _reply(created, creator, "entry-exact-budget-reply", "Unicode: café 🜣.")
 
     full = _post(client, "/api/v1/enter", {"address": created.address}, key=key)
     assert full.status_code == 200, full.content

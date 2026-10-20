@@ -7,8 +7,9 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, ProgrammingError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -469,7 +470,7 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
     creator, _ = credential_factory()
     created = _create(creator)
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises((IntegrityError, ProgrammingError)) as error, transaction.atomic():
         Message.objects.create(
             tunnel=created.tunnel,
             cycle=created.cycle,
@@ -482,6 +483,12 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
             text_payload="Another root",
             byte_count=12,
         )
+    if connection.vendor == "postgresql":
+        assert isinstance(error.value.__cause__, psycopg.errors.RaiseException)
+        assert error.value.__cause__.sqlstate == "P0001"
+    else:
+        assert isinstance(error.value, IntegrityError)
+    assert Message.objects.filter(cycle=created.cycle).count() == 1
 
 
 @pytest.mark.parametrize("operation", ["close", "rollover"])

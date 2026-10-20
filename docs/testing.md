@@ -30,6 +30,11 @@ tests. Explicit `-m postgres` selection requires a PostgreSQL test database and
 fails with the isolated lane command when that setup is missing. Browser and
 live-agent tests keep their own dependency and opt-in checks. Credential rotation
 tests require TCP connections so they can verify password authentication.
+The `sqlite_only` marker is limited to the absent-PostgreSQL dependency check
+and deliberate stored-state corruption that PostgreSQL guards reject. These
+cases are deselected on PostgreSQL. Ordinary API, async, retention, and lifecycle
+tests run on both backends. Async tests that use separate connections commit
+their fixture data with `transaction=True`.
 
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
 It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
@@ -130,6 +135,10 @@ pdm run python scripts/run_isolated_test_lane.py proxy
 ```
 
 The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions.
+It first runs the integration tests and checks their critical-coverage report.
+It then runs all unit and API tests on PostgreSQL with `--no-cov`. This second
+pass cannot replace the integration coverage evidence. CI uses the same lane;
+the fast aggregate suite continues to run on SQLite.
 The `proxy` lane uses production Django settings, the shared Caddy service,
 and the unchanged production Caddyfile. Its browser checks HTTPS login, secure
 cookies, replaced forwarding headers, a valid password change, and rejection of

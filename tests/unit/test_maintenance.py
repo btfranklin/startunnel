@@ -28,14 +28,14 @@ from core.maintenance import (
 from core.maintenance_status import read_maintenance_status
 from core.management.commands.maintenance_loop import Command as MaintenanceCommand
 from core.models import AgentReceipt, AuditEvent, MaintenanceState, RateLimitBucket
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import Cycle, Message
 
 pytestmark = pytest.mark.django_db
 
 
-def _tree(credential_factory: Any, suffix: str) -> Any:
+def _tree(credential_factory: Any, suffix: str, *, closed: bool = False) -> Any:
     creator, _ = credential_factory(name=f"Coordinator {suffix}")
     created = create_tunnel(
         credential=creator,
@@ -49,6 +49,13 @@ def _tree(credential_factory: Any, suffix: str) -> Any:
         parent_id=created.root.id,
         content={"type": "text", "text": "The review is complete."},
     )
+    if closed:
+        close_cycle(
+            credential=creator,
+            address=created.address,
+            idempotency_key=f"close-{suffix}",
+            expected_cycle_id=created.cycle.id,
+        )
     return created
 
 
@@ -166,7 +173,7 @@ def test_delete_batch_preserves_rows_refreshed_after_selection(
 def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    created = _tree(credential_factory, "failed-deletion-backlog")
+    created = _tree(credential_factory, "failed-deletion-backlog", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,
@@ -271,8 +278,8 @@ def test_admin_receipt_deadlines_and_cleanup_are_bounded(
 def test_failed_cycle_does_not_block_later_deletion(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    first = _tree(credential_factory, "failure-first")
-    second = _tree(credential_factory, "failure-second")
+    first = _tree(credential_factory, "failure-first", closed=True)
+    second = _tree(credential_factory, "failure-second", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk__in=[first.cycle.pk, second.cycle.pk]).update(
         state=Cycle.State.CLOSED,
@@ -304,7 +311,7 @@ def test_failed_cycle_does_not_block_later_deletion(
 def test_cleanup_records_deletion_failure_and_observed_lag(
     credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    created = _tree(credential_factory, "record-failure")
+    created = _tree(credential_factory, "record-failure", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
         state=Cycle.State.CLOSED,

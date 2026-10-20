@@ -30,6 +30,7 @@ def _post(
     )
 
 
+@pytest.mark.django_db(transaction=True)
 def test_labeled_root_and_reply_appear_in_public_reads(
     client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

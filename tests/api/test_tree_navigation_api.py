@@ -128,6 +128,7 @@ def test_reply_replay_preserves_original_activity_cursor_after_later_writes(
     assert replay == {**original, "idempotent_replay": True}
 
 
+@pytest.mark.django_db(transaction=True)
 def test_navigation_routes_return_coherent_tree_activity_and_context(
     client: Client, credential_factory: Any
 ) -> None:
@@ -331,6 +332,7 @@ def test_leaf_pages_keep_leaf_status_at_the_first_snapshot(
     assert second_page.json()["complete"] is True
 
 
+@pytest.mark.django_db(transaction=True)
 def test_cursors_reject_tampering_wrong_purpose_oversize_and_wrong_tunnel(
     client: Client, credential_factory: Any
 ) -> None:
@@ -394,6 +396,7 @@ def test_cursors_reject_tampering_wrong_purpose_oversize_and_wrong_tunnel(
 
 
 @pytest.mark.parametrize("wait_seconds", [0, 20])
+@pytest.mark.django_db(transaction=True)
 def test_activity_rejects_another_tunnels_cursor_before_registering_a_wait(
     client: Client,
     credential_factory: Any,

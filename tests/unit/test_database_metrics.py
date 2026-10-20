@@ -21,10 +21,18 @@ def select_count() -> float:
     )
 
 
+def close_database() -> None:
+    """Resolve and close the test connection inside its database worker."""
+    connection.close()
+
+
 def read_database() -> None:
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT 1")
-        assert cursor.fetchone() == (1,)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            assert cursor.fetchone() == (1,)
+    finally:
+        close_database()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -32,9 +40,12 @@ def read_database() -> None:
 async def test_asgi_health_query_updates_database_metrics(settings: Any) -> None:
     settings.ALLOWED_HOSTS = ["testserver"]
     before = select_count()
-    response = await AsyncClient().get("/health/ready")
-    assert response.status_code == 200
-    assert select_count() > before
+    try:
+        response = await AsyncClient().get("/health/ready")
+        assert response.status_code == 200
+        assert select_count() > before
+    finally:
+        await sync_to_async(close_database, thread_sensitive=True)()
 
 
 @pytest.mark.django_db(transaction=True)

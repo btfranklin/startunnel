@@ -86,6 +86,7 @@ def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
         ((TunnelEvent.Type.CYCLE_CLOSED,), [], 5, False, 3, 5),
     ],
 )
+@pytest.mark.django_db(transaction=True)
 def test_activity_workers_keep_cursor_progress_and_query_bounds(
     credential_factory: Any,
     django_assert_num_queries: Any,
@@ -227,6 +228,7 @@ def test_mentions_are_prefetched_only_when_needed(credential_factory: Any) -> No
     assert [item.display_name for item in message.mentions.all()] == [mentioned.name]
 
 
+@pytest.mark.django_db(transaction=True)
 def test_async_helpers_revalidate_revocation_and_address_rotation(
     credential_factory: Any, user_factory: Any
 ) -> None:
