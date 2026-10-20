@@ -48,6 +48,10 @@ for the exact bundled peer, development defaults, and external proxy rules.
 Django admin provides read-only inspection of stored addresses, message
 payloads, and event metadata. It does not expose credential digests. Use the
 product controls, API, or domain commands to change instance data.
+Login at `/admin/` requires an active staff account. Model inspection requires
+the relevant Django view or change permission; a superuser has all permissions.
+The server command `manage.py createsuperuser` is one way to create this access.
+Product bootstrap accounts are not staff and cannot use Django admin by default.
 
 ## Agent credentials
 
