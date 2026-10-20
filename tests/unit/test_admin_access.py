@@ -6,7 +6,7 @@ import hmac
 import json
 from datetime import timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from django.conf import settings
@@ -109,6 +109,46 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
     labeled_cycle = Cycle.objects.get(pk=labeled["resource"]["active_cycle_id"])
     assert labeled_cycle.root_message is not None
     assert labeled_cycle.root_message.session == "operator-chat"
+
+
+@pytest.mark.parametrize("command_type", [AccountCreate, AccountPassword])
+def test_password_retry_rejects_changed_input_without_another_mutation(
+    command_type: type[AdminCommand],
+    user_factory: Any,
+) -> None:
+    actor = user_factory()
+    password = "Original-retry-password-7839!"
+    changed_password = "Changed-retry-password-9462!"
+    key = str(uuid4())
+    data: dict[str, Any] = {"password": password}
+    if command_type is AccountCreate:
+        data["username"] = "operator-regression"
+    else:
+        target = user_factory()
+        data["admin_id"] = str(target.id)
+
+    result = run(actor, command_type, data, key)
+    target = User.objects.get(pk=result["resource"]["id"])
+    receipt = AdminReceipt.objects.get(pk=result["operation"]["id"])
+    original_digest = bytes(receipt.request_digest)
+    user_count = User.objects.count()
+
+    assert run(actor, command_type, data, key) == result
+    with pytest.raises(IdempotencyConflict):
+        run(actor, command_type, {**data, "password": changed_password}, key)
+
+    target.refresh_from_db()
+    receipt.refresh_from_db()
+    assert target.check_password(password)
+    assert not target.check_password(changed_password)
+    assert bytes(receipt.request_digest) == original_digest
+    assert AdminReceipt.objects.filter(owner=actor).count() == 1
+    assert User.objects.count() == user_count
+    assert list(
+        AuditEvent.objects.filter(action=command_type.operation, target_id=target.id).values_list(
+            "id", flat=True
+        )
+    ) == [UUID(result["operation"]["audit_event_id"])]
 
 
 def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
