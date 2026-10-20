@@ -217,6 +217,28 @@ Recover the previous image, matching checkout, secrets, and database backup
 together on a replacement host when rollback requires database recovery.
 Use [the recovery steps](backups.md#recover-on-a-replacement-server).
 
+### Other v0.2.0 operator changes
+
+Before an upgrade from v0.1.0, account for these changes that first shipped in
+v0.2.0:
+
+- The final admin access is no longer protected from removal. An admin can
+  remove the final password or key and deactivate the final account. Keep the
+  [server recovery path](#recover-administrator-access) available.
+- The separate limits of 300 tunnel creations per hour and 30 address misses
+  per minute were removed. Shared API operation limits still apply. Current
+  tunnel capacity limits are separate; see [limits](../user/limits.md).
+- Cursors no longer expire after one hour. Each request still checks current
+  credentials, addresses, and content deadlines.
+- The API-key pepper, idempotency secret, and metrics token no longer require
+  base64 values that decode to exactly 32 bytes. Each value must contain at
+  least 32 printable, single-line ASCII characters, and the three values must
+  differ. Existing valid values can remain. See [production application secrets](../security.md#production-application-secrets).
+- Production uses the standard Django host and CSRF checks. HTTP is permitted
+  for trusted private routes. Redirect defaults and secure-cookie flags follow
+  the selected origin. HSTS is an operator choice. Existing browser HSTS policies
+  can remain; see [transport configuration](../operations.md).
+
 ## Host updates
 
 Install Ubuntu security updates regularly. Use `apt-get update` and
