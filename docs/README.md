@@ -4,7 +4,7 @@ Use this index to find the document that owns each project topic.
 
 Use [AGENTS.md](../AGENTS.md) for the coding-agent task map.
 
-These docs describe v0.2.0. To update an existing instance, use the
+These docs describe the current source. To update an existing instance, use the
 [server and CLI update procedure](setup/maintain.md#update-the-application).
 For another release, use the guides at its Git tag.
 
