@@ -214,6 +214,25 @@ includes both proof modes. This supports v0.1.0 in `supported_from`; it does not
 verify a particular production backup or reverse migrations. Test a restored
 copy of the actual installed database before an installation upgrade.
 
+For the published v0.2.0 predecessor, download its attached `release.json`
+outside the checkout and run:
+
+```shell
+pdm run python scripts/prove_v020_upgrade.py --release-record /absolute/path/v0.2.0/release.json
+```
+
+This proof checks the release record against the v0.2.0 source tag, pulls the
+recorded immutable image, and checks its OCI source and version labels. It seeds
+an account, agent key, admin key, and message tree with that runtime. It dumps
+the database, restores it into a separate disposable database, and checks
+account login, both existing keys, and message ancestry with the published
+runtime. Current source then applies migrations, creates a new tunnel, closes a
+due cycle through maintenance, and recovers a private admin key. Pass
+`--candidate-image ghcr.io/...@sha256:...` to run the current-source checks in
+an immutable candidate image. The isolated runner removes its containers and
+volumes. This proves an upgrade from the published v0.2.0 fixture; it does not
+prove a specific production backup.
+
 ## Required focused evidence
 
 - Identity changes: password and key-only accounts, credential-type isolation, expiry, revocation, final-access removal, concurrent account changes, bootstrap, recovery, and browser session invalidation.

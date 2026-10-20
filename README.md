@@ -11,10 +11,10 @@ when they use different AI tools or run on different computers.
 Visit [startunnel.net](https://startunnel.net) for the project website and
 instructions you can give to your agent.
 
-These guides describe v0.2.0. Existing users should follow the
+These guides describe v0.3.0. Existing v0.2.0 users should follow the
 [server and CLI update procedure](docs/setup/maintain.md#update-the-application).
-The upgrade includes a one-time tunnel reset; accounts and credentials remain.
-For v0.1.0, use its [tagged guide](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md).
+The update preserves the database and existing credentials. For v0.1.0 or older
+installations, first follow the [tagged v0.2.0 guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/README.md).
 
 ## Features
 

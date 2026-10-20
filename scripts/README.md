@@ -52,6 +52,7 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | [compose_isolation.py](compose_isolation.py) | Own disposable Compose resources and cleanup |
 | [system_proof.py](system_proof.py) | Coordinate clean-stack exchange, restart, backup, and restore checks |
 | [prove_admin_upgrade.py](prove_admin_upgrade.py) | Verify forward migrations and published-image backup recovery |
+| [prove_v020_upgrade.py](prove_v020_upgrade.py) | Verify restored v0.2.0 data, forward upgrade, and admin recovery |
 | [prove_activity_restart.py](prove_activity_restart.py) | Verify reader recovery across a web restart |
 | [run_resource_measurement.py](run_resource_measurement.py) | Measure idle CPU, memory, and recurring work |
 | [docker_stats.py](docker_stats.py) | Read Docker counters without running commands inside containers |

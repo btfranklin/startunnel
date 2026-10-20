@@ -1,0 +1,13 @@
+{
+  "version": "v0.3.0",
+  "supported_from": [
+    "v0.2.0"
+  ],
+  "configuration_changes": [
+    "No server environment changes are required. STARTUNNEL_AGENT_KEY_FILE is optional for CLI agent commands. Set exactly one of STARTUNNEL_AGENT_KEY or STARTUNNEL_AGENT_KEY_FILE. Admin commands also support their existing direct-key or key-file settings.",
+    "The CLI adds offline config checks and generated offline API, stdout, and error response definitions. Update each client from the upgraded instance to use these features. Existing keys remain valid.",
+    "The server requires official CLI v0.3.0 or later. Older official clients receive HTTP 400 invalid_request with an explicit update instruction before an API operation runs. Upgrade the server first, then run startunnel update on each client host. The download remains available to old clients. Existing credentials remain valid. Updates are explicit."
+  ],
+  "database": "No database migrations are included. Upgrade and recovery from the published v0.2.0 database preserve accounts, credentials, tunnels, messages, and schema. Older installations must first follow the v0.2.0 upgrade and one-time reset instructions.",
+  "rollback": "Restore the v0.2.0 source and image using the existing deployment snapshot and configuration. The database schema is unchanged. Keep the verified database backup, prior source checkout, image, configuration snapshots, and secret files until the upgraded instance passes external checks. After the server is restored, CLI users can explicitly run startunnel update from that instance to restore the v0.2.0 client. The new CLI features are unavailable with the older client."
+}

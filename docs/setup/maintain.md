@@ -78,21 +78,19 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
-These steps update the server and its team's clients to v0.2.0. Use the
+These steps update the server and its team's clients to v0.3.0. Use the
 published release's `release.json` and matching tagged guides. The supported
-published predecessor is v0.1.0. Custom or unversioned deployments must check
-their installed source and migration history as described below.
+published predecessor is v0.2.0. For v0.1.0 or older installations, first use
+the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
+Custom or unversioned deployments must check their installed source and
+migration history as described below.
 
-For a database that still stores address digests, this upgrade performs a
-[one-time tunnel reset](address-storage.md). It deletes all existing tunnels
-and their message data. Accounts and credentials remain. Read that notice and
-make a verified backup before applying the update. No conversion file is needed.
+This release has no database migration. It preserves the v0.2.0 schema, data,
+and credentials. The server requires official CLI v0.3.0 or later. Older copies
+receive a clear update error before an API operation runs. Update each client
+after the server update; the download remains available to older clients.
 
-For databases that already store glyph addresses, removing the unused
-per-message content digest preserves existing messages and payloads. The
-application no longer stores a per-message content digest.
-
-1. Select v0.2.0 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.2.0).
+1. Select v0.3.0 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.3.0).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.
    Keep the source commit and immutable image digest together.
@@ -100,9 +98,7 @@ application no longer stores a per-message content digest.
    backup and recovery secrets outside the server. Record the installed image
    digest and its source revision label. Keep the old image available and plan
    a short maintenance window.
-   Keep all old secret files with the recovery copy. The new runtime ignores
-   `STARTUNNEL_ADDRESS_SECRET` and `STARTUNNEL_ADDRESS_DERIVATION_SECRET`, but
-   the old image needs them to recover a pre-upgrade backup.
+   Keep all existing secret files with the recovery copy.
 3. Run `git status --short` and resolve tracked changes. Run `umask 022`,
    `git fetch --tags origin`, and `git checkout --detach COMMIT`, replacing
    `COMMIT` with the full source commit from the release record. Run `umask 077`
@@ -155,33 +151,31 @@ application no longer stores a per-message content digest.
    There is no automatic rollback. After an interrupted attempt, check the
    printed snapshot, configuration, migrations, and service state. Retry from
    the old configuration only if the database and writers remain unchanged.
-6. Tell each CLI user to install the client from the upgraded instance. The
-   command installation is new in v0.2.0. Existing v0.1.0 script users must
-   perform this initial installation on each CLI machine:
+6. Tell each CLI user to update the client from the upgraded instance. Run on
+   each agent and administrator host:
 
    ```shell
-   curl -fSLo star_tunnel.py "$STARTUNNEL_BASE_URL/downloads/star_tunnel.py"
-   python3 star_tunnel.py install
-   export PATH="$HOME/.local/bin:$PATH"
-   startunnel --help
+   startunnel update
    startunnel version
+   startunnel config
+   startunnel me
    ```
 
-   Use that instance's URL in `STARTUNNEL_BASE_URL`. Update copies in agent
-   images and job artifacts too. The server cannot update files on those
-   machines. Keys remain valid; users do not need new keys for a client update.
-   See [the client guide](../../cli/README.md#update-the-client).
-   After this first installation, later server upgrades need only
-   `startunnel update` on each agent host, followed by `startunnel me` or
-   `startunnel admin me`. The instance URL selects the update source.
-   Record `startunnel version` after the update with the server version and
-   source commit. Default custom builds can report `unreleased`; their file
-   checksum still identifies the exact client copy.
-   The updated client also provides `startunnel schema` for offline agent
-   command definitions. Compare request types and limits with the upgraded
-   instance's `/api/v1/openapi.json`.
-   Argument errors now return JSON on stderr with code `usage_error` and exit
-   status `2`. Update callers that parse the old argument-error text.
+   Set `STARTUNNEL_BASE_URL` to that instance's origin before the update. Admin
+   users run `startunnel admin config` and `startunnel admin me`. Keep existing
+   credentials. Update copies in agent images and job artifacts too. The server
+   cannot update files on those machines. Updates remain explicit.
+
+   If the installed script has no `update` command, download and install the
+   client as shown in [the client guide](../../cli/README.md#update-the-client).
+   Record the client version, source revision, and executable path with the
+   server version and source commit. Source builds report `unreleased` and
+   remain unverified. The file checksum identifies the exact client copy.
+
+   `startunnel config` checks local settings without a request; it does not
+   prove server access or key validity. `startunnel schema` and
+   `startunnel admin schema` provide offline command and response definitions.
+   Compare them with the upgraded instance's `/api/v1/openapi.json`.
 7. Repeat [external verification](verify.md), including administrator authentication and a two-agent
    exchange, and make a new backup. A container health check alone does not
    prove the complete deployment. Record the new version, commit, and digest.

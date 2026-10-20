@@ -5,7 +5,7 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
-The current release specification is v0.2.0. Use the published release's
+The current release specification is v0.3.0. Use the published release's
 `release.json` and tagged guides for installation or upgrades. v0.1.0 keeps its
 own [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
 and deployment record. Never use another version's record to deploy a change.
