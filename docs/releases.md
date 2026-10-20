@@ -59,7 +59,7 @@ commands do not check for updates. There is no package-manager release.
 
 1. Work on `main`. Update `VERSION`, the release specification, and the reviewed
    notes. Keep upgrade and recovery evidence for every supported predecessor.
-2. Run local gates and `pdm run docs-structure`, then commit and push. Wait for
+2. Run the [local gates](testing.md#local-gates), then commit and push. Wait for
    CI to pass on that exact commit. CI checks source secrets, lock files, Bandit,
    and npm dependencies before service builds. It also checks documentation
    structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
