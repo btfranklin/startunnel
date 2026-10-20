@@ -509,8 +509,6 @@ def _read_board_wait_state_for_async(
     """Read revision and expiry state in a short-lived database worker."""
 
     try:
-        if not credential_is_active(credential):
-            raise InvalidCredential()
         cursor = decode_cursor(after_cursor, kind=BOARD_WAIT_CURSOR_KIND)
         after_position = cursor_int(cursor, "board_position")
         next_expiry = _cursor_expiry(cursor)

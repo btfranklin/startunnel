@@ -197,6 +197,25 @@ def test_wait_rejects_revocation_after_the_board_state_read(credential_factory: 
     assert AgentCredential.objects.get(pk=reader.id).revoked_at is not None
 
 
+@pytest.mark.parametrize("populated", [False, True])
+def test_wait_reads_board_state_and_current_authority_in_two_queries(
+    credential_factory: Any, django_assert_num_queries: Any, populated: bool
+) -> None:
+    reader, _ = credential_factory()
+    if populated:
+        _publish(reader)
+    cursor = read_board(credential=reader).board_cursor
+    with django_assert_num_queries(2):
+        refresh, seconds_until_expiry = _read_board_wait_state_for_async(
+            credential=reader, after_cursor=cursor
+        )
+    assert refresh is False
+    if populated:
+        assert seconds_until_expiry is not None and seconds_until_expiry > 0
+    else:
+        assert seconds_until_expiry is None
+
+
 def test_wait_cursor_carries_global_revision_and_expiry(credential_factory: Any) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
