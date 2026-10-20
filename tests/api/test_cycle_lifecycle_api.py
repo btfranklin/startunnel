@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -10,6 +11,7 @@ import pytest
 from django.test import Client
 
 from tunnels.admin_actions import rotate_address_as_admin
+from tunnels.cycles import create_tunnel
 
 pytestmark = pytest.mark.django_db
 
@@ -70,6 +72,80 @@ def _cycle_body(address: str, *, text: str) -> dict[str, Any]:
             "root": {"content": {"type": "text", "text": text}},
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("kind", "character", "length"),
+    [
+        (kind, character, length)
+        for kind in ("text", "json")
+        for character in ("x", "🜣")
+        for length in (279, 280, 281)
+    ]
+    + [(kind, "x", 65536) for kind in ("text", "json")]
+    + [("text", "x", 0), ("json", "x", 2)],
+)
+def test_cycle_directory_preserves_content_previews_and_metadata(
+    client: Client, credential_factory: Any, kind: str, character: str, length: int
+) -> None:
+    creator, key = credential_factory(name="Coordinator")
+    if kind == "text":
+        raw = character * length
+        content = {"type": "text", "text": raw}
+    else:
+        value = character * (length - 2)
+        content = {"type": "json", "value": value}
+        raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="cycle-preview-create",
+        root_content=content,
+        cycle_label="Preview boundary",
+        root_correlation_id="preview-root",
+        root_session="review",
+    )
+
+    response = _post(client, "/api/v1/cycles", {"address": created.address}, key=key)
+
+    assert response.status_code == 200, response.content
+    page = response.json()
+    assert page["complete"] is True
+    assert page["next_page_cursor"] is None
+    assert len(page["items"]) == 1
+    item = page["items"][0]
+    assert item["root"] == {
+        "id": str(created.root.id),
+        "sender": {"id": str(creator.id), "name": "Coordinator", "session": "review"},
+        "correlation_id": "preview-root",
+        "content_preview": raw if len(raw) <= 280 else raw[:279] + "…",
+    }
+    assert item["id"] == str(created.cycle.id)
+    assert item["number"] == 1
+    assert item["label"] == "Preview boundary"
+    assert item["state"] == "active"
+    assert item["message_count"] == 1
+    assert item["content_bytes"] == len(raw.encode("utf-8"))
+    for field in ("created_at", "expires_at"):
+        expected = getattr(created.cycle, field)
+        assert datetime.fromisoformat(item[field]) == expected.replace(
+            microsecond=expected.microsecond // 1000 * 1000
+        )
+    assert item["closed_at"] is None
+    assert item["delete_after"] is None
+
+
+def test_cycle_directory_preserves_json_null(client: Client, credential_factory: Any) -> None:
+    creator, key = credential_factory()
+    created = create_tunnel(
+        credential=creator,
+        idempotency_key="cycle-preview-null",
+        root_content={"type": "json", "value": None},
+    )
+
+    response = _post(client, "/api/v1/cycles", {"address": created.address}, key=key)
+
+    assert response.status_code == 200, response.content
+    assert response.json()["items"][0]["root"]["content_preview"] == "null"
 
 
 def test_status_close_start_rollover_and_cycle_history(

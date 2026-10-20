@@ -54,7 +54,7 @@ from tunnels.messages import (
     post_reply,
     read_tree,
 )
-from tunnels.models import Cycle, Message, Tunnel, TunnelEvent
+from tunnels.models import Cycle, Tunnel, TunnelEvent
 from tunnels.participants import list_participants
 from tunnels.search import SearchHit, search_hit_payload, search_messages
 
@@ -347,11 +347,7 @@ def _started_cycle_response(started: StartedCycle) -> StartedCycleResponse:
     )
 
 
-def _cycle_content_preview(message: Message) -> str:
-    if message.payload_type == Message.PayloadType.TEXT:
-        value = message.text_payload or ""
-    else:
-        value = message.json_payload or "null"
+def _cycle_content_preview(value: str) -> str:
     return value if len(value) <= 280 else f"{value[:279]}…"
 
 
@@ -359,6 +355,7 @@ def _cycle_directory_item(cycle: Cycle) -> CycleDirectoryItemResponse:
     root = cycle.root_message
     if root is None:
         raise InvalidRequest("The cycle root is not available.")
+    preview = cast(str, getattr(cycle, "_root_content_preview"))  # noqa: B009
     return CycleDirectoryItemResponse(
         id=cycle.id,
         number=cycle.number,
@@ -368,7 +365,7 @@ def _cycle_directory_item(cycle: Cycle) -> CycleDirectoryItemResponse:
             id=root.id,
             sender=SenderResponse(id=root.sender_id, name=root.sender_name, session=root.session),
             correlation_id=root.correlation_id or None,
-            content_preview=_cycle_content_preview(root),
+            content_preview=_cycle_content_preview(preview),
         ),
         message_count=cycle.message_count,
         content_bytes=cycle.content_bytes,

@@ -11,7 +11,8 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Count, Q
+from django.db.models import Case, Count, Q, TextField, Value, When
+from django.db.models.functions import Coalesce, NullIf, Substr
 from django.utils import timezone
 
 from accounts.models import User
@@ -399,8 +400,22 @@ def list_cycles(
     if before_number is not None and (before_number < 1 or before_number > high_water + 1):
         raise InvalidRequest("The cycle page position is not valid for this tunnel.")
     now = timezone.now()
+    root_content = Case(
+        When(
+            root_message__payload_type=Message.PayloadType.TEXT,
+            then=Coalesce("root_message__text_payload", Value(""), output_field=TextField()),
+        ),
+        default=Coalesce(
+            NullIf("root_message__json_payload", Value("")),
+            Value("null"),
+            output_field=TextField(),
+        ),
+        output_field=TextField(),
+    )
     query = (
         Cycle.objects.select_related("root_message", "creator")
+        .annotate(_root_content_preview=Substr(root_content, 1, 281))
+        .defer("root_message__text_payload", "root_message__json_payload")
         .filter(tunnel=tunnel, number__lte=high_water)
         .filter(
             Q(state=Cycle.State.ACTIVE)
