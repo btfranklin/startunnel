@@ -413,7 +413,7 @@ def list_cycles(
         output_field=TextField(),
     )
     query = (
-        Cycle.objects.select_related("root_message", "creator")
+        Cycle.objects.select_related("root_message")
         .annotate(_root_content_preview=Substr(root_content, 1, 281))
         .defer("root_message__text_payload", "root_message__json_payload")
         .filter(tunnel=tunnel, number__lte=high_water)

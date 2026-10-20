@@ -47,6 +47,7 @@ def test_cycle_directory_bounds_root_content_before_model_loading(credential_fac
     assert page.next_before_number is None
     assert page.complete is True
     for cycle, raw in zip(page.cycles, (json_text, text), strict=True):
+        assert "creator" not in cycle._state.fields_cache
         root = cycle.root_message
         assert root is not None
         assert root.get_deferred_fields() == {"text_payload", "json_payload"}

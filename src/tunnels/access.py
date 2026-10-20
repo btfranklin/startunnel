@@ -42,7 +42,7 @@ def _resolve_current_tunnel_if_authorized(
     address_row = (
         address_query(address=canonical)
         .annotate(credential_is_active=Exists(active_credential_query(credential=credential)))
-        .select_related("tunnel", "tunnel__creator")
+        .select_related("tunnel")
         .first()
     )
     if (
@@ -65,12 +65,7 @@ def resolve_tunnel(
         if not for_update:
             return tunnel
         canonical = canonical_address(address)
-        locked = (
-            Tunnel.objects.select_related("creator")
-            .select_for_update(of=("self",))
-            .filter(pk=tunnel.pk)
-            .first()
-        )
+        locked = Tunnel.objects.select_for_update(of=("self",)).filter(pk=tunnel.pk).first()
         if (
             locked is None
             or locked.state == Tunnel.State.RETIRED
@@ -82,9 +77,7 @@ def resolve_tunnel(
         raise InvalidCredential()
     canonical = canonical_address(address)
     if not for_update:
-        address_row = (
-            address_query(address=canonical).select_related("tunnel", "tunnel__creator").first()
-        )
+        address_row = address_query(address=canonical).select_related("tunnel").first()
         if address_row is None or address_row.tunnel.state == Tunnel.State.RETIRED:
             raise TunnelUnavailable()
         return address_row.tunnel
@@ -92,7 +85,7 @@ def resolve_tunnel(
     address_row = address_query(address=canonical).only("id", "tunnel_id").first()
     if address_row is None:
         raise TunnelUnavailable()
-    query = Tunnel.objects.select_related("creator").select_for_update(of=("self",))
+    query = Tunnel.objects.select_for_update(of=("self",))
     tunnel = query.filter(pk=address_row.tunnel_id).first()
     if tunnel is None or tunnel.state == Tunnel.State.RETIRED:
         raise TunnelUnavailable()
