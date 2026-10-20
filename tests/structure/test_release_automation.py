@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -1229,6 +1230,15 @@ def test_system_report_records_every_used_service_image(
         "proxy-tests",
     }
     assert services == list(image_ids)
+
+
+def test_external_workflow_actions_use_immutable_commits() -> None:
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for job in load_workflow(path.name)["jobs"].values():
+            actions = [job.get("uses"), *(step.get("uses") for step in job.get("steps", []))]
+            for action in actions:
+                if action and not action.startswith("./"):
+                    assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", action), f"{path.name}: {action}"
 
 
 def test_source_workflow_checks_service_lanes_and_cli_platforms() -> None:

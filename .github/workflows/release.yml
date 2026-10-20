@@ -32,7 +32,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       GENERATE_RELEASE_SUMMARY: ${{ secrets.OPENAI_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
@@ -44,7 +44,7 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           python3 scripts/release_record.py --check "$RELEASE_TAG"
           python3 scripts/release_candidate.py --find-run "$RELEASE_TAG"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.ci.outputs.run_id }}
@@ -66,8 +66,8 @@ jobs:
           PY
       - name: Check draft recovery is permitted
         run: python3 scripts/release_draft.py "$RELEASE_TAG" --check
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -84,7 +84,7 @@ jobs:
         id: notes
         if: env.GENERATE_RELEASE_SUMMARY == 'true'
         continue-on-error: true
-        uses: btfranklin/release-notes-scribe@v0
+        uses: btfranklin/release-notes-scribe@a96739ad621bbf55793655ebd39ac464a22bbf04 # v0
         with:
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

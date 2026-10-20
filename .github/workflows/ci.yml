@@ -28,10 +28,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.14"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
       - name: Run without project dependencies
@@ -43,15 +43,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out the candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           package-manager-cache: false
@@ -75,7 +75,7 @@ jobs:
         run: pdm run security-release source
       - name: Upload source scan reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: source-security-${{ github.run_id }}
           path: artifacts/security/
@@ -103,7 +103,7 @@ jobs:
     timeout-minutes: 50
     steps:
       - name: Check out the candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Run the isolated service lane
@@ -111,7 +111,7 @@ jobs:
           python3 scripts/run_isolated_test_lane.py postgres
           --project-name stci-postgres-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Set up Python for the restored baseline proof
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
       - name: Install locked proof dependencies
@@ -150,7 +150,7 @@ jobs:
           - agents
     steps:
       - name: Check out the candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Run the isolated proof
@@ -165,7 +165,7 @@ jobs:
     timeout-minutes: 80
     steps:
       - name: Check out the candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Run the isolated browser lane
