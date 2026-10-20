@@ -124,10 +124,11 @@ after the server update; the download remains available to older clients.
    not need to be running; PostgreSQL must be available. The preview does not
    change configuration, stored data, or running services.
 
-   Versioned installations must appear in `supported_from`. Unversioned
-   installations need an ancestor source commit and unchanged migration files.
-   Test forward migration and recovery from the exact installed source before
-   claiming compatibility. If the revision label is missing, recover the build
+   Versioned installations must appear in `supported_from`. For an unversioned
+   installation, use the v0.2.0 route above unless a direct upgrade has separate
+   review and restored-database proof from the exact installed source.
+   The helper's ancestor and migration-prefix checks are necessary, but they do
+   not prove compatibility. If the revision label is missing, recover the build
    record and arrange a reviewed manual upgrade.
 5. Once the preview passes and the backup checks in step 2 are complete, apply:
 
@@ -188,11 +189,15 @@ after the server update; the download remains available to older clients.
 
 ### Existing pre-release installations
 
-The first release establishes a supported baseline; it does not convert the
-older migration graph. Use the installed image's source revision to determine
-eligibility with the preview above. A matching applied migration prefix and
-verified forward migration preserve accounts, credentials, and deployment
-secrets. If the one-time tunnel reset is pending, it deletes existing tunnels
+Use the tagged v0.2.0 guide linked above for the standard release route. The
+first release baseline does not convert every older migration graph. Inspect
+the installed image's source revision and applied migrations. A direct upgrade
+requires separate review and forward migration and recovery proof on a restored
+database from that exact source. Passing the preview's ancestor and
+migration-prefix checks alone does not establish compatibility.
+
+A verified path preserves accounts, credentials, and deployment secrets.
+If the one-time tunnel reset is pending, it deletes existing tunnels
 and messages. Later upgrades preserve new tunnels after that reset has been
 applied. If the migration graphs differ, stop and arrange an explicit data
 conversion tested against a restored copy.

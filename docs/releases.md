@@ -18,13 +18,19 @@ changes need an explicit compatibility decision and migration instructions,
 including during the initial `0.x` series. Never move a published tag or replace
 a published version's deployment record. Fix a released defect in a new version.
 
-The first version is `v0.1.0`. Its initial migration graph is the supported
-baseline. Unversioned instances can reach it only when their source is an
-ancestor and their applied migration files match an unchanged release migration prefix.
-The admin migrations and the [one-time tunnel reset](setup/address-storage.md)
-require restored-database upgrade and recovery proof for the exact installed
-source before compatibility is claimed. Inspect the actual installed revision before promising compatibility. Older graphs require a
-separately reviewed conversion tested on a restored database.
+The first published baseline is `v0.1.0`. The standard released path to
+`v0.3.0` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
+start with the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
+That guide's baseline requirements still apply. This route does not make every
+unversioned migration graph supported.
+
+A direct upgrade from an unversioned source needs separate review and forward
+migration and recovery proof on a restored database from the exact installed
+source. The helper requires an ancestor source commit and unchanged applied
+migration files. These structural checks do not prove compatibility. The admin
+migrations and the [one-time tunnel reset](setup/address-storage.md) need the
+same restored-database proof. Older graphs require a separately reviewed
+conversion tested on a restored database.
 
 For each release, update the root `VERSION` file and create
 `releases/vMAJOR.MINOR.PATCH.json` and reviewed `releases/vMAJOR.MINOR.PATCH.md`.
