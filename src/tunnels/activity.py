@@ -255,6 +255,11 @@ def _continue_activity_wait_for_async(
             .exclude(tunnel__state=Tunnel.State.RETIRED)
         )
         rows = _activity_rows(query, limit=limit)
+        if not rows:
+            confirmed = resolve_tunnel(credential=credential, address=address)
+            if confirmed.id != tunnel.id:
+                raise InvalidRequest("The tunnel changed during the activity read.")
+            tunnel = confirmed
         if event_types is None:
             high_water = rows[-1].position if rows else after_position
         return _activity_page(

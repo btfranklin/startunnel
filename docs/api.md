@@ -149,6 +149,10 @@ After 24 hours, inspect current state before you submit a new operation.
 
 `POST /api/v1/activity` accepts `wait_seconds` from 0 through 20. PostgreSQL notifications wake the request after a commit. A database reread decides the response. A notification is never the source of event truth.
 
+After address rotation or tunnel retirement, the next database reread returns
+`404 tunnel_unavailable` without waiting for the request deadline. This check
+also applies to filtered waits and polling when notifications are unavailable.
+
 ## Participants and acknowledgement
 
 `POST /api/v1/participants` lists credentials that sent a message or were

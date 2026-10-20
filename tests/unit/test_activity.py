@@ -83,7 +83,7 @@ def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
     [
         (None, [3], 3, True, 1, 4),
         ((TunnelEvent.Type.MESSAGE_POSTED,), [3], 3, True, 2, 5),
-        ((TunnelEvent.Type.CYCLE_CLOSED,), [], 5, False, 2, 5),
+        ((TunnelEvent.Type.CYCLE_CLOSED,), [], 5, False, 3, 5),
     ],
 )
 def test_activity_workers_keep_cursor_progress_and_query_bounds(
@@ -130,7 +130,7 @@ def test_activity_workers_keep_cursor_progress_and_query_bounds(
     assert not immediate.authorization_confirmed
     assert continued.authorization_confirmed is bool(expected_positions)
 
-    with django_assert_num_queries(read_queries):
+    with django_assert_num_queries(2 if event_types is None else 3):
         empty = _continue_activity_wait_for_async(
             tunnel=created.tunnel,
             credential=creator,
@@ -245,29 +245,29 @@ def test_async_helpers_revalidate_revocation_and_address_rotation(
     assert page.events and page.authorization_confirmed
     reader.revoked_at = created.tunnel.created_at
     reader.save(update_fields=["revoked_at"])
-    revoked = _continue_activity_wait_for_async(
-        tunnel=created.tunnel,
-        credential=reader,
-        address=created.address,
-        after_position=2,
-        limit=100,
-        event_types=None,
-    )
-    assert revoked.events == () and not revoked.authorization_confirmed
     with pytest.raises(InvalidCredential):
-        _confirm_activity_page_for_async(page=revoked, credential=reader, address=created.address)
+        _continue_activity_wait_for_async(
+            tunnel=created.tunnel,
+            credential=reader,
+            address=created.address,
+            after_position=2,
+            limit=100,
+            event_types=None,
+        )
+    with pytest.raises(InvalidCredential):
+        _confirm_activity_page_for_async(page=page, credential=reader, address=created.address)
 
     actor = user_factory()
     rotate_address_as_admin(actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1)
-    rotated = _continue_activity_wait_for_async(
-        tunnel=created.tunnel,
-        credential=creator,
-        address=created.address,
-        after_position=2,
-        limit=100,
-        event_types=None,
-    )
-    assert rotated.events == () and not rotated.authorization_confirmed
+    with pytest.raises(TunnelUnavailable):
+        _continue_activity_wait_for_async(
+            tunnel=created.tunnel,
+            credential=creator,
+            address=created.address,
+            after_position=2,
+            limit=100,
+            event_types=None,
+        )
     with pytest.raises(TunnelUnavailable):
         _confirm_activity_page_for_async(page=page, credential=creator, address=created.address)
 

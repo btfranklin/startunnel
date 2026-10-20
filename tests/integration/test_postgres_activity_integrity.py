@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from typing import Any
 from uuid import UUID
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.db import DatabaseError, close_old_connections, connection, transaction
 
 from agents.models import AgentCredential
+from core.activity_listener import ActivityListener
+from core.errors import TunnelUnavailable
+from tunnels import activity
 from tunnels.access import resolve_tunnel
+from tunnels.admin_actions import (
+    retire_tunnel_as_admin,
+    retirement_confirmation,
+    rotate_address_as_admin,
+)
 from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import ActivityCheckpoint, Cycle, Message, Tunnel, TunnelEvent
@@ -25,6 +36,96 @@ def _create_board(credential: AgentCredential, *, key: str) -> CreatedTunnel:
         idempotency_key=key,
         root_content={"type": "text", "text": "Record durable activity."},
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["rotate", "retire"])
+@pytest.mark.parametrize("filtered", [False, True])
+@pytest.mark.parametrize("notifications", [False, True])
+async def test_activity_wait_rejects_changed_address_before_its_deadline(
+    credential_factory: Any,
+    user_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    filtered: bool,
+    notifications: bool,
+) -> None:
+    def prepare() -> tuple[Any, AgentCredential, CreatedTunnel]:
+        try:
+            creator, _ = credential_factory()
+            reader, _ = credential_factory()
+            actor = user_factory()
+            return actor, reader, _create_board(creator, key="wait-invalidation-create")
+        finally:
+            connection.close()
+
+    actor, reader, created = await sync_to_async(prepare)()
+    listener = ActivityListener()
+    monkeypatch.setattr(activity, "activity_listener", listener)
+    entered_wait = asyncio.Event()
+    original_wait = listener.wait
+
+    async def observe_wait(waiter: asyncio.Event, timeout: float) -> None:
+        entered_wait.set()
+        await original_wait(waiter, timeout)
+
+    monkeypatch.setattr(listener, "wait", observe_wait)
+    waiting: asyncio.Task[activity.ActivityPage] | None = None
+    try:
+        if notifications:
+            listener.start()
+            await asyncio.wait_for(listener._ready.wait(), timeout=10)
+        else:
+            monkeypatch.setattr(listener, "start", lambda: None)
+        waiting = asyncio.create_task(
+            activity.read_activity_async(
+                credential=reader,
+                address=created.address,
+                after_position=2,
+                wait_seconds=20,
+                event_types=(TunnelEvent.Type.MESSAGE_POSTED,) if filtered else None,
+            )
+        )
+        await asyncio.wait_for(entered_wait.wait(), timeout=10)
+        assert listener._waiters
+        assert listener._ready.is_set() is notifications
+
+        def change_address() -> None:
+            try:
+                with transaction.atomic():
+                    post_reply(
+                        credential=created.tunnel.creator,
+                        idempotency_key="wait-invalidation-reply",
+                        address=created.address,
+                        parent_id=created.root.id,
+                        content={"type": "text", "text": "Do not return this pending event."},
+                    )
+                    if operation == "rotate":
+                        rotate_address_as_admin(
+                            actor=actor,
+                            tunnel_id=created.tunnel.id,
+                            expected_address_generation=1,
+                        )
+                    else:
+                        retire_tunnel_as_admin(
+                            actor=actor,
+                            tunnel_id=created.tunnel.id,
+                            expected_address_generation=1,
+                            confirmation=retirement_confirmation(created.tunnel),
+                        )
+            finally:
+                connection.close()
+
+        await sync_to_async(change_address)()
+        with pytest.raises(TunnelUnavailable):
+            await asyncio.wait_for(waiting, timeout=5)
+        assert not listener._waiters
+    finally:
+        if waiting is not None and not waiting.done():
+            waiting.cancel()
+            with suppress(asyncio.CancelledError):
+                await waiting
+        await listener.stop()
 
 
 def test_checkpoint_accepts_zero_and_committed_event_positions(
