@@ -8,12 +8,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from django.contrib.postgres.search import SearchHeadline, SearchQuery, SearchRank, SearchVector
 from django.db import connection
+from django.db.models import BigIntegerField, TextField, Value
+from django.db.models.functions import Cast, Coalesce
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 
 from core.limits import effective_limits
 from tunnels.cycles import create_tunnel
 from tunnels.messages import post_reply
+from tunnels.models import Message
 from tunnels.search import SearchHit, search_hit_payload, search_messages
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -93,6 +98,101 @@ def test_search_finds_text_and_canonical_json_with_safe_ranked_snippets(
     assert all("<" not in hit.snippet and ">" not in hit.snippet for hit in page.hits)
     assert page.complete is True
     assert page.used_bytes > 0
+
+
+@pytest.mark.parametrize("kind", ["text", "json"])
+@pytest.mark.parametrize("query", [None, "needle"])
+def test_search_bounds_large_payloads_before_model_loading(
+    credential_factory: Any, kind: str, query: str | None
+) -> None:
+    coordinator, _ = credential_factory()
+    worker, _ = credential_factory()
+    mentioned, _ = credential_factory()
+    created = _create(coordinator, key="search-bounded-create")
+    seed = "needle " + "café" * 80 + " "
+    payload_bytes = 65536 - (2 if kind == "json" else 0)
+    repeats, remainder = divmod(payload_bytes, len(seed.encode("utf-8")))
+    value = seed * repeats + "x" * remainder
+    if kind == "text":
+        raw = value
+        content = {"type": "text", "text": value}
+    else:
+        raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        content = {"type": "json", "value": value}
+    assert len(raw.encode("utf-8")) == 65536
+    reply = _reply(
+        worker,
+        created,
+        created.root,
+        key="search-bounded-reply",
+        content=content,
+        mentions=[mentioned],
+        correlation_id="bounded-payload",
+        session="bounded-session",
+    )
+    if query is None:
+        full_snippet, expected_rank = raw, 0
+    else:
+        parsed_query = SearchQuery(query, config="simple", search_type="websearch")
+        vector = SearchVector("text_payload", "json_payload", config="simple")
+        full_snippet, expected_rank = (
+            Message.objects.filter(pk=reply.id)
+            .annotate(
+                reference_snippet=SearchHeadline(
+                    Coalesce("text_payload", "json_payload", Value(""), output_field=TextField()),
+                    parsed_query,
+                    config="simple",
+                    start_sel="[",
+                    stop_sel="]",
+                    min_words=8,
+                    max_words=32,
+                    short_word="3",
+                    highlight_all=False,
+                    max_fragments=2,
+                    fragment_delimiter=" … ",
+                ),
+                reference_rank=Cast(
+                    SearchRank(vector, parsed_query, cover_density=True) * Value(1_000_000.0),
+                    output_field=BigIntegerField(),
+                ),
+            )
+            .values_list("reference_snippet", "reference_rank")
+            .get()
+        )
+        assert expected_rank > 0
+    assert len(full_snippet) > 280
+
+    page = search_messages(
+        credential=coordinator,
+        address=created.address,
+        query=query,
+        sender_id=worker.id,
+        mentioned_agent_id=mentioned.id,
+        correlation_id="bounded-payload",
+    )
+
+    assert [hit.message.id for hit in page.hits] == [reply.id]
+    hit = page.hits[0]
+    assert hit.message.get_deferred_fields() == {"text_payload", "json_payload"}
+    assert "search_vector" not in hit.message.__dict__
+    assert getattr(hit.message, "search_snippet", None) == full_snippet[:280]
+    assert hit.snippet == full_snippet[:280]
+    assert hit.rank == expected_rank
+    with CaptureQueriesContext(connection) as queries:
+        payload = search_hit_payload(hit)
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    assert len(queries) == 0
+    assert payload["mention_ids"] == [str(mentioned.id)]
+    assert payload["sender"]["session"] == "bounded-session"
+    assert payload["correlation_id"] == "bounded-payload"
+    assert page.used_bytes == len(encoded)
+    assert page.snapshot_sequence == reply.sequence
+    assert page.complete is True
+    assert page.next_after_rank is None
+    assert page.next_after_sequence is None
+    assert page.next_after_message_id is None
 
 
 def test_search_applies_metadata_branch_and_sequence_filters(

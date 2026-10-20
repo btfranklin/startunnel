@@ -12,7 +12,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection, transaction
 from django.db.models import BigIntegerField, F, Q, QuerySet, TextField, Value
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Cast, Coalesce
+from django.db.models.functions import Cast, Coalesce, Substr
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
@@ -109,8 +109,10 @@ def _base_query(
     sequence_after: int | None,
     sequence_before: int | None,
 ) -> QuerySet[Message]:
-    result = Message.objects.prefetch_related("mentions").filter(
-        cycle=cycle, sequence__lte=high_water
+    result = (
+        Message.objects.prefetch_related("mentions")
+        .defer("text_payload", "json_payload")
+        .filter(cycle=cycle, sequence__lte=high_water)
     )
     if sender_id is not None:
         result = result.filter(sender_id=sender_id)
@@ -244,30 +246,37 @@ def search_messages(
         if query_text:
             parsed_query = SearchQuery(query_text, config="simple", search_type="websearch")
             vector = SearchVector("text_payload", "json_payload", config="simple")
-            rows = rows.annotate(
-                search_vector=vector,
-                search_rank=Cast(
-                    SearchRank(vector, parsed_query, cover_density=True) * Value(1_000_000.0),
-                    output_field=BigIntegerField(),
-                ),
-                search_snippet=SearchHeadline(
-                    searchable_content,
-                    parsed_query,
-                    config="simple",
-                    start_sel="[",
-                    stop_sel="]",
-                    min_words=8,
-                    max_words=32,
-                    short_word="3",
-                    highlight_all=False,
-                    max_fragments=2,
-                    fragment_delimiter=" … ",
-                ),
-            ).filter(search_vector=parsed_query)
+            rows = (
+                rows.alias(search_vector=vector)
+                .annotate(
+                    search_rank=Cast(
+                        SearchRank(vector, parsed_query, cover_density=True) * Value(1_000_000.0),
+                        output_field=BigIntegerField(),
+                    ),
+                    search_snippet=Substr(
+                        SearchHeadline(
+                            searchable_content,
+                            parsed_query,
+                            config="simple",
+                            start_sel="[",
+                            stop_sel="]",
+                            min_words=8,
+                            max_words=32,
+                            short_word="3",
+                            highlight_all=False,
+                            max_fragments=2,
+                            fragment_delimiter=" … ",
+                        ),
+                        1,
+                        SNIPPET_MAX_CHARACTERS,
+                    ),
+                )
+                .filter(search_vector=parsed_query)
+            )
         else:
             rows = rows.annotate(
                 search_rank=Value(0, output_field=BigIntegerField()),
-                search_snippet=searchable_content,
+                search_snippet=Substr(searchable_content, 1, SNIPPET_MAX_CHARACTERS),
             )
         if after_rank is not None and after_sequence is not None and after_message_id is not None:
             rows = rows.filter(
@@ -286,8 +295,8 @@ def search_messages(
     used_bytes = 0
     byte_truncated = False
     for message in selected[:limit]:
-        snippet = str(message.search_snippet)[:SNIPPET_MAX_CHARACTERS]  # type: ignore[attr-defined]
-        rank = int(message.search_rank)  # type: ignore[attr-defined]
+        snippet = str(message.search_snippet)
+        rank = int(message.search_rank)
         hit = SearchHit(message=message, snippet=snippet, rank=rank)
         hit_bytes = len(
             json.dumps(
