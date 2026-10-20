@@ -381,7 +381,7 @@ def main() -> int:
                 "/proof-data/snapshot.json",
                 timeout_seconds=120,
             )
-            dump = "/tmp/v020-upgrade.dump"
+            dump = "/var/lib/postgresql/v020-upgrade.dump"
             stack.run(
                 "Dump v0.2.0 database",
                 "exec",
