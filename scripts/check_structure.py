@@ -62,6 +62,7 @@ def check_import_directions() -> list[Failure]:
                     )
                 )
         if path.name == "services.py" or path.relative_to(SOURCE).as_posix() in {
+            "accounts/admin_access.py",
             "accounts/admin_commands.py",
             "accounts/admin_data.py",
             "accounts/admin_services.py",
@@ -70,10 +71,18 @@ def check_import_directions() -> list[Failure]:
             "core/idempotency.py",
             "core/maintenance.py",
             "tunnels/access.py",
+            "tunnels/activity.py",
             "tunnels/admin_actions.py",
+            "tunnels/beacons.py",
+            "tunnels/context.py",
             "tunnels/cycles.py",
+            "tunnels/entry.py",
+            "tunnels/events.py",
             "tunnels/messages.py",
+            "tunnels/participants.py",
             "tunnels/payloads.py",
+            "tunnels/retention.py",
+            "tunnels/search.py",
         }:
             forbidden = sorted(name for name in imports if name.startswith(service_forbidden))
             if forbidden:

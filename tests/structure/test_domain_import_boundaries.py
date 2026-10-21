@@ -11,10 +11,21 @@ from scripts import check_structure
 @pytest.mark.parametrize(
     ("package_name", "owner"),
     [
+        ("agents", "services"),
+        ("tunnels", "access"),
+        ("tunnels", "activity"),
+        ("tunnels", "beacons"),
+        ("tunnels", "context"),
+        ("tunnels", "entry"),
+        ("tunnels", "events"),
         ("tunnels", "messages"),
         ("tunnels", "cycles"),
         ("tunnels", "admin_actions"),
+        ("tunnels", "participants"),
         ("tunnels", "payloads"),
+        ("tunnels", "retention"),
+        ("tunnels", "search"),
+        ("accounts", "admin_access"),
         ("accounts", "admin_commands"),
         ("accounts", "admin_data"),
         ("accounts", "admin_services"),
@@ -24,7 +35,10 @@ from scripts import check_structure
         ("core", "maintenance"),
     ],
 )
-@pytest.mark.parametrize("dependency", ["api", "ninja", "django.http", "django.template", "openai"])
+@pytest.mark.parametrize(
+    "dependency",
+    ["api", "site_app", "ninja", "django.http", "django.shortcuts", "django.template", "openai"],
+)
 def test_domain_owners_reject_transport_and_provider_imports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package_name: str, owner: str, dependency: str
 ) -> None:
