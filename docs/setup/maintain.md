@@ -84,19 +84,23 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
-These steps update the server and its team's clients to v0.3.0. Use the
+These steps update the server and its team's clients to v0.4.0. Use the
 published release's `release.json` and matching tagged guides. The supported
-published predecessor is v0.2.0. For v0.1.0 or older installations, first use
+published predecessors are v0.2.0 and v0.3.0. For v0.1.0 or older installations, first use
 the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
 Custom or unversioned deployments must check their installed source and
 migration history as described below.
 
-This release has no database migration. It preserves the v0.2.0 schema, data,
-and credentials. The server requires official CLI v0.3.0 or later. Older copies
+Migration `tunnels.0011` adds runtime-role history and retry guards. It preserves
+existing data and credentials without a tunnel reset. The migration has no
+reverse operation; rollback needs the verified pre-upgrade database backup.
+Read the [release notes](https://github.com/btfranklin/startunnel/blob/v0.4.0/releases/v0.4.0.md)
+for the credential creation cap and proxy changes. The server still requires
+official CLI v0.3.0 or later. Older copies
 receive a clear update error before an API operation runs. Update each client
 after the server update; the download remains available to older clients.
 
-1. Select v0.3.0 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.3.0).
+1. Select v0.4.0 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.4.0).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.
    Keep the source commit and immutable image digest together.
@@ -148,8 +152,12 @@ after the server update; the download remains available to older clients.
    snapshots. Database volumes and secret files remain in place. A pending
    database migration can change stored data, including the one-time reset.
 
-   If you use the included Caddy service, re-create it so its bind mount reads
-   the new configuration. This causes a short TLS interruption:
+   If you use the included Caddy service, check that
+   `STARTUNNEL_PROXY_IPV4_PREFIX` selects an unused private network. Replace an
+   old explicit trusted-proxy value that includes `172.16.0.0/12` with only the
+   required direct proxy peers. See [proxy configuration](../operations.md#production).
+   Re-create Caddy so it joins the new proxy network and reads its configuration.
+   This causes a short TLS interruption:
 
    ```shell
    docker compose up -d --no-deps --force-recreate caddy

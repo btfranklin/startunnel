@@ -1,0 +1,14 @@
+{
+  "version": "v0.4.0",
+  "supported_from": [
+    "v0.2.0",
+    "v0.3.0"
+  ],
+  "configuration_changes": [
+    "Each agent credential can create at most 100 non-retired tunnels. The instance limit remains 500. Existing tunnels, keys, and addresses remain valid. Dormant tunnels count toward both limits. Revocation does not retire tunnels; administrators can explicitly retire inspected selections from a revoked credential.",
+    "The included Caddy edge uses a separate proxy network and a reserved peer address. STARTUNNEL_PROXY_IPV4_PREFIX defaults to 172.30.254; select another unused private prefix if that network conflicts with the host. Re-create Caddy with the upgraded stack. Production trusts its exact peer address. Replace an old explicit STARTUNNEL_TRUSTED_PROXY_CIDRS value that includes 172.16.0.0/12 with only the required direct proxies; explicit values are preserved.",
+    "The minimum official CLI remains v0.3.0. Update clients explicitly from the upgraded instance to use the new admin tunnel retirement command, creator filter, current response definitions, and improved command help. Existing credentials remain valid."
+  ],
+  "database": "Forward migration tunnels.0011 protects stored history, Beacon endings, audit records, board state, and retry receipts from runtime-role changes. No tunnel reset or content deletion is part of this upgrade. Restored-database upgrade and recovery proofs cover the published v0.2.0 and v0.3.0 images. Older installations must first follow the tagged v0.2.0 upgrade and one-time reset instructions. Keep the original database administrator and runtime-role separation.",
+  "rollback": "Migration tunnels.0011 has no reverse operation. Do not use reverse migrations or restore only the old image against the migrated database. Stop writers and recover the previous source, image, configuration, secrets, and verified pre-upgrade database backup together. This discards writes made after that backup. Keep recovery inputs outside the server until external checks pass. Once the previous server is restored, clients can explicitly run startunnel update from that instance."
+}

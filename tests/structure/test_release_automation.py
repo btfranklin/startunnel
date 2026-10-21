@@ -1273,7 +1273,8 @@ def test_source_scan_failure_blocks_service_builds() -> None:
     ("version", "script", "option"),
     [
         ("v0.1.0", "prove_admin_upgrade.py", "--baseline-record"),
-        ("v0.2.0", "prove_v020_upgrade.py", "--release-record"),
+        ("v0.2.0", "prove_published_upgrade.py", "--release-record"),
+        ("v0.3.0", "prove_published_upgrade.py", "--release-record"),
     ],
 )
 def test_ci_checks_each_published_upgrade_with_its_own_record(
@@ -1281,7 +1282,11 @@ def test_ci_checks_each_published_upgrade_with_its_own_record(
 ) -> None:
     job = load_workflow("ci.yml")["jobs"]["postgres"]
     steps = [
-        step for step in job["steps"] if script in step.get("run", "") and option in step["run"]
+        step
+        for step in job["steps"]
+        if script in step.get("run", "")
+        and option in step["run"]
+        and f"startunnel-{version}/" in step["run"]
     ]
     assert len(steps) == 1
     step = steps[0]

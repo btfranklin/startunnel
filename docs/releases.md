@@ -5,7 +5,7 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
-The current release specification is v0.3.0. Use the published release's
+The current release specification is v0.4.0. Use the published release's
 `release.json` and tagged guides for installation or upgrades. v0.1.0 keeps its
 own [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
 and deployment record. Never use another version's record to deploy a change.
@@ -23,7 +23,7 @@ is an explicit exception to compatible minor releases. It requires a separate
 client update after the server update.
 
 The first published baseline is `v0.1.0`. The standard released path to
-`v0.3.0` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
+`v0.4.0` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
 start with the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
 That guide's baseline requirements still apply. This route does not make every
 unversioned migration graph supported.
@@ -64,7 +64,7 @@ commands do not check for updates. There is no package-manager release.
    and npm dependencies before service builds. It also checks documentation
    structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
    Linux, macOS, and Windows with Python 3.10 and 3.14. Main CI checks restored
-   databases from the synthetic baseline and the published v0.1.0 and v0.2.0 images.
+   databases from the synthetic baseline and the published v0.1.0, v0.2.0, and v0.3.0 images.
 3. Select **Run workflow** for `release-candidate.yml` on `main`, or run:
 
    ```sh

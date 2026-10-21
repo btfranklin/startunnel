@@ -1,4 +1,4 @@
-"""Prove a restored v0.2.0 database upgrades and recovers on current source."""
+"""Prove a restored published database upgrades and recovers on current source."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "v0.2.0"
 
 
 def published_record(path: Path) -> dict[str, str]:
@@ -21,20 +20,24 @@ def published_record(path: Path) -> dict[str, str]:
 
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
+    from scripts.release_record import VERSION as RELEASE_VERSION
     from scripts.start_production import validate_image_reference
 
     record = json.loads(path.read_text(encoding="utf-8"))
-    if record.get("version") != VERSION:
-        raise ValueError(f"The published predecessor must be {VERSION}.")
+    if not isinstance(record, dict):
+        raise ValueError("The published release record must be an object.")
+    version = record.get("version")
+    if not isinstance(version, str) or not RELEASE_VERSION.fullmatch(version):
+        raise ValueError("The published version must be vMAJOR.MINOR.PATCH.")
     revision = subprocess.check_output(
-        ["git", "rev-parse", f"{VERSION}^{{commit}}"], cwd=ROOT, text=True
+        ["git", "rev-parse", f"{version}^{{commit}}"], cwd=ROOT, text=True
     ).strip()
     if record.get("source_commit") != revision:
-        raise ValueError(f"Published {VERSION} source differs from its tag.")
+        raise ValueError(f"Published {version} source differs from its tag.")
     image = validate_image_reference(record.get("image", ""))
     if record.get("platform") != "linux/amd64":
-        raise ValueError(f"Published {VERSION} uses the linux/amd64 platform.")
-    return {"version": VERSION, "source_commit": revision, "image": image}
+        raise ValueError(f"Published {version} uses the linux/amd64 platform.")
+    return {"version": version, "source_commit": revision, "image": image}
 
 
 def assert_candidate_identity(labels: dict[str, str], revision: str, version: str) -> None:
@@ -61,12 +64,12 @@ def seed(snapshot_path: Path) -> None:
     from tunnels.cycles import create_tunnel
 
     password = "Proof-" + base64.urlsafe_b64encode(os.urandom(24)).decode().rstrip("=")
-    user = User.objects.create(username="v020-upgrade-proof", password=make_password(password))
-    admin, admin_key = issue_admin_key(owner=user, name="v020 upgrade proof")
-    issued = create_credential(actor=user, name="v020 upgrade proof")
+    user = User.objects.create(username="published-upgrade-proof", password=make_password(password))
+    admin, admin_key = issue_admin_key(owner=user, name="published upgrade proof")
+    issued = create_credential(actor=user, name="published upgrade proof")
     created = create_tunnel(
         credential=issued.credential,
-        idempotency_key="v020-upgrade-proof-root",
+        idempotency_key="published-upgrade-proof-root",
         root_content={"type": "text", "text": "Message retained across upgrade"},
     )
     from tunnels.messages import post_reply
@@ -74,7 +77,7 @@ def seed(snapshot_path: Path) -> None:
     reply = post_reply(
         credential=issued.credential,
         address=created.address,
-        idempotency_key="v020-upgrade-proof-reply",
+        idempotency_key="published-upgrade-proof-reply",
         parent_id=created.root.pk,
         content={"type": "text", "text": "Reply retained across upgrade"},
     )
@@ -134,7 +137,7 @@ def _assert_published_data(snapshot_path: Path) -> None:
 
 
 def published_recovery(snapshot_path: Path) -> None:
-    """Check login, key authentication, and retained messages on v0.2.0."""
+    """Check login, key authentication, and retained messages on the published runtime."""
 
     _assert_published_data(snapshot_path)
 
@@ -162,13 +165,13 @@ def current_upgrade(snapshot_path: Path) -> None:
     credential = authenticate_key(expected["agent_key"])
     added = create_tunnel(
         credential=credential,
-        idempotency_key="v030-upgrade-proof-write",
+        idempotency_key="current-upgrade-proof-write",
         root_content={"type": "text", "text": "New write after upgrade"},
     )
     assert added.root.text_payload == "New write after upgrade"
     due = create_tunnel(
         credential=credential,
-        idempotency_key="v030-upgrade-proof-maintenance",
+        idempotency_key="current-upgrade-proof-maintenance",
         root_content={"type": "text", "text": "Maintenance deadline"},
         expires_in_seconds=300,
     )
@@ -222,7 +225,7 @@ def _assert_published_data_without_admin_key(snapshot_path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--release-record", required=True, type=Path, help="Published v0.2.0 release.json"
+        "--release-record", required=True, type=Path, help="Published predecessor release.json"
     )
     parser.add_argument("--candidate-image", help="Optional immutable current candidate image")
     arguments = parser.parse_args()
@@ -236,8 +239,8 @@ def main() -> int:
     from scripts.compose_isolation import IsolatedComposeProject, generated_project_name
 
     os.umask(0o077)
-    project = generated_project_name("v020-upgrade")
-    with tempfile.TemporaryDirectory(prefix="startunnel-v020-upgrade-") as directory:
+    project = generated_project_name("published-upgrade")
+    with tempfile.TemporaryDirectory(prefix="startunnel-published-upgrade-") as directory:
         temporary = Path(directory).resolve()
         overlay = temporary / "published-runtime.yaml"
         user = f"{os.getuid()}:{os.getgid()}" if sys.platform == "linux" else "10001:10001"
@@ -256,7 +259,7 @@ def main() -> int:
             "      STARTUNNEL_ALLOWED_HOSTS: testserver,localhost,127.0.0.1,web\n"
             "      STARTUNNEL_API_KEY_PEPPER: upgrade-proof-api-pepper\n"
             "      STARTUNNEL_IDEMPOTENCY_SECRET: upgrade-proof-idempotency-secret\n"
-            "      TEST_DATABASE_URL: postgresql://startunnel_admin:startunnel_admin@postgres:5432/v020_source\n"
+            "      TEST_DATABASE_URL: postgresql://startunnel_admin:startunnel_admin@postgres:5432/published_source\n"
             "    volumes:\n"
             f"      - {json.dumps(str(Path(__file__).resolve()) + ':/proof/run.py:ro')}\n"
             f"      - {json.dumps(str(temporary) + ':/proof-data')}\n",
@@ -278,7 +281,7 @@ def main() -> int:
                     "      STARTUNNEL_ALLOWED_HOSTS: testserver,localhost,127.0.0.1,web\n"
                     "      STARTUNNEL_API_KEY_PEPPER: upgrade-proof-api-pepper\n"
                     "      STARTUNNEL_IDEMPOTENCY_SECRET: upgrade-proof-idempotency-secret\n"
-                    "      TEST_DATABASE_URL: postgresql://startunnel_admin:startunnel_admin@postgres:5432/v020_restored\n"
+                    "      TEST_DATABASE_URL: postgresql://startunnel_admin:startunnel_admin@postgres:5432/published_restored\n"
                     "    volumes:\n"
                     f"      - {json.dumps(str(Path(__file__).resolve()) + ':/proof/run.py:ro')}\n"
                     f"      - {json.dumps(str(temporary) + ':/proof-data')}\n"
@@ -293,7 +296,7 @@ def main() -> int:
             port = stack.capture("Local database port", "port", "postgres", "5432").rsplit(":", 1)[
                 1
             ]
-            for database in ("v020_source", "v020_restored"):
+            for database in ("published_source", "published_restored"):
                 stack.run(
                     "Create disposable database",
                     "exec",
@@ -314,7 +317,12 @@ def main() -> int:
                 PYTHONPATH=str(ROOT / "src"),
             )
             snapshot = temporary / "snapshot.json"
-            stack.run("Pull published v0.2.0 image", "pull", "published-proof", timeout_seconds=300)
+            stack.run(
+                f"Pull published {record['version']} image",
+                "pull",
+                "published-proof",
+                timeout_seconds=300,
+            )
             if candidate_image:
                 stack.run("Pull candidate image", "pull", "candidate-proof", timeout_seconds=300)
                 candidate_labels = json.loads(
@@ -351,15 +359,17 @@ def main() -> int:
                 )
             )
             assert labels.get("org.opencontainers.image.revision") == record["source_commit"]
-            assert labels.get("org.opencontainers.image.version") == VERSION
-            source_url = "postgresql://startunnel_admin:startunnel_admin@postgres:5432/v020_source"
+            assert labels.get("org.opencontainers.image.version") == record["version"]
+            source_url = (
+                "postgresql://startunnel_admin:startunnel_admin@postgres:5432/published_source"
+            )
             stack.run(
-                "Migrate database with published v0.2.0 runtime",
+                f"Migrate database with published {record['version']} runtime",
                 "run",
                 "--rm",
                 "--no-deps",
                 "--env",
-                "TEST_DATABASE_URL=postgresql://startunnel_admin:startunnel_admin@postgres:5432/v020_source",
+                "TEST_DATABASE_URL=postgresql://startunnel_admin:startunnel_admin@postgres:5432/published_source",
                 "published-proof",
                 "/app/manage.py",
                 "migrate",
@@ -367,7 +377,7 @@ def main() -> int:
                 timeout_seconds=120,
             )
             stack.run(
-                "Seed with published v0.2.0 runtime",
+                f"Seed with published {record['version']} runtime",
                 "run",
                 "--rm",
                 "--no-deps",
@@ -381,9 +391,9 @@ def main() -> int:
                 "/proof-data/snapshot.json",
                 timeout_seconds=120,
             )
-            dump = "/var/lib/postgresql/v020-upgrade.dump"
+            dump = "/var/lib/postgresql/published-upgrade.dump"
             stack.run(
-                "Dump v0.2.0 database",
+                f"Dump {record['version']} database",
                 "exec",
                 "-T",
                 "postgres",
@@ -393,24 +403,24 @@ def main() -> int:
                 "--format=custom",
                 "--file",
                 dump,
-                "v020_source",
+                "published_source",
                 timeout_seconds=60,
             )
             stack.run(
-                "Restore v0.2.0 database",
+                f"Restore {record['version']} database",
                 "exec",
                 "-T",
                 "postgres",
                 "pg_restore",
                 "--username",
                 "startunnel_admin",
-                "--dbname=v020_restored",
+                "--dbname=published_restored",
                 "--exit-on-error",
                 dump,
                 timeout_seconds=60,
             )
             restored_url = (
-                "postgresql://startunnel_admin:startunnel_admin@postgres:5432/v020_restored"
+                "postgresql://startunnel_admin:startunnel_admin@postgres:5432/published_restored"
             )
             stack.run(
                 "Verify restored data with published runtime",
@@ -428,7 +438,7 @@ def main() -> int:
                 timeout_seconds=120,
             )
             environment["TEST_DATABASE_URL"] = (
-                f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/v020_restored"
+                f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/published_restored"
             )
             if candidate_image:
                 stack.run(
@@ -467,7 +477,7 @@ def main() -> int:
                 "status": "passed",
                 "published_baseline": record,
                 "checks": [
-                    "restored v0.2.0 account login",
+                    "restored published account login",
                     "existing agent and admin authentication",
                     "retained message ancestry",
                     "current-source migrations",
