@@ -455,3 +455,64 @@ def test_candidate_pull_rejects_wrong_source_before_services_start(
     )
     with pytest.raises(isolation.IsolationError, match="source revision"):
         stack.pull_candidate()
+
+
+@pytest.mark.parametrize(
+    ("profiles", "services"),
+    [
+        (("load",), ("web", "migrate", "maintenance")),
+        (
+            ("examples", "agents", "proxy-proof"),
+            ("web", "migrate", "maintenance", "proxy-web"),
+        ),
+    ],
+)
+def test_candidate_identity_checks_only_enabled_runtime_services(
+    monkeypatch: pytest.MonkeyPatch,
+    profiles: tuple[str, ...],
+    services: tuple[str, ...],
+) -> None:
+    stack = isolation.IsolatedComposeProject(
+        "sttest-candidate-profiles", candidate_image=IMAGE, profiles=profiles, source_environment={}
+    )
+    inspected_services: list[str] = []
+
+    def captured(step: str, *arguments: str) -> str:
+        service = arguments[-1]
+        inspected_services.append(service)
+        return service if service in services else ""
+
+    monkeypatch.setattr(stack, "capture", captured)
+    monkeypatch.setattr(isolation, "required_output", lambda *args, **kwargs: IMAGE_ID)
+    stack.verify_candidate_services()
+    assert tuple(inspected_services) == services
+
+
+@pytest.mark.parametrize("service", ["web", "migrate", "maintenance", "proxy-web"])
+@pytest.mark.parametrize("failure", ["missing", "mismatch"])
+def test_candidate_identity_rejects_missing_or_wrong_enabled_service(
+    monkeypatch: pytest.MonkeyPatch, service: str, failure: str
+) -> None:
+    stack = isolation.IsolatedComposeProject(
+        "sttest-candidate-required",
+        candidate_image=IMAGE,
+        profiles=("examples", "agents", "proxy-proof"),
+        source_environment={},
+    )
+
+    def captured(step: str, *arguments: str) -> str:
+        selected = arguments[-1]
+        return "" if failure == "missing" and selected == service else selected
+
+    def inspected(command: list[str], **kwargs: Any) -> str:
+        return (
+            "sha256:" + "d" * 64 if failure == "mismatch" and command[-1] == service else IMAGE_ID
+        )
+
+    monkeypatch.setattr(stack, "capture", captured)
+    monkeypatch.setattr(isolation, "required_output", inspected)
+    message = (
+        f"Expected one image for {service}" if failure == "missing" else f"{service} did not run"
+    )
+    with pytest.raises(isolation.LaneError, match=message):
+        stack.verify_candidate_services()

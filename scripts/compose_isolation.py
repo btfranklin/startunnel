@@ -518,7 +518,10 @@ class IsolatedComposeProject:
             environment=self.environment,
             label="the candidate image ID",
         )
-        for service in ("web", "migrate", "maintenance", "proxy-web"):
+        services: tuple[str, ...] = ("web", "migrate", "maintenance")
+        if "proxy-proof" in self.profiles:
+            services += ("proxy-web",)
+        for service in services:
             images = self.capture(
                 "candidate service image", "images", "--quiet", service
             ).splitlines()
