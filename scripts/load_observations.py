@@ -7,14 +7,14 @@ import math
 import os
 import re
 import resource
-import subprocess  # nosec B404
 import sys
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import IsolatedComposeProject, assert_local_docker
@@ -57,12 +57,27 @@ SQL = """SELECT json_build_object(
  'lock_count', (SELECT count(*) FROM pg_locks),
  'ungranted_locks', (SELECT count(*) FROM pg_locks WHERE NOT granted)
  ) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid();"""
-# The token stays in the container environment and never enters a host argument.
+# This trusted Engine exec reads worker shards without an HTTP request or a token.
 METRICS_COMMAND = (
-    "import os,urllib.request; "
-    "r=urllib.request.Request('http://127.0.0.1:8000/metrics',"
-    "headers={'X-Metrics-Token':os.environ['STARTUNNEL_METRICS_TOKEN']}); "
-    "print(urllib.request.urlopen(r,timeout=1).read(1048576).decode())"
+    "from prometheus_client import CollectorRegistry,generate_latest,multiprocess; "
+    "registry=CollectorRegistry(); multiprocess.MultiProcessCollector(registry); "
+    "print(generate_latest(registry).decode())"
+)
+POSTGRES_COMMAND = (
+    "psql",
+    "--username",
+    "startunnel_admin",
+    "--dbname",
+    "startunnel",
+    "--tuples-only",
+    "--no-align",
+    "--quiet",
+    "--command",
+    SQL,
+)
+POSTGRES_ENVIRONMENT = (
+    "PGCONNECT_TIMEOUT=1",
+    "PGOPTIONS=-c statement_timeout=500 -c lock_timeout=250",
 )
 
 
@@ -132,20 +147,6 @@ def container_counters(raw: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _command(stack: IsolatedComposeProject, *arguments: str) -> str:
-    result = subprocess.run(  # nosec B603
-        stack.compose_command(*arguments),
-        env=stack.environment,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=2,
-    )
-    if result.returncode:
-        raise ValueError("Observation unavailable.")
-    return result.stdout
-
-
 class LoadObservations:
     """Write each sample at once; never retain the sample history in memory."""
 
@@ -170,6 +171,8 @@ class LoadObservations:
         self.identifiers: dict[str, str] = {}
         self.capacity: dict[str, object] = {"host_cpu_count": os.cpu_count()}
         self._output: Any = None
+        self.executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="load-counter")
+        self.max_sample_overhead_seconds = 0.0
 
     def __enter__(self) -> LoadObservations:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,12 +186,12 @@ class LoadObservations:
 
     def __exit__(self, *arguments: object) -> None:
         self.stop_event.set()
-        # One iteration has four Engine reads plus three bounded CLI reads.
-        self.thread.join(timeout=15)
+        self.thread.join(timeout=3)
         if self.thread.is_alive():
             self.failed = True
             self.errors += 1
-        elif self._output is not None:
+        self.executor.shutdown(wait=True, cancel_futures=True)
+        if self._output is not None:
             self._output.close()
 
     def summary(self) -> dict[str, object]:
@@ -196,6 +199,7 @@ class LoadObservations:
             "samples": self.samples,
             "complete": (
                 not self.failed
+                and self.max_sample_overhead_seconds < 1
                 and self.samples > 0
                 and self.services_seen == set(SERVICES)
                 and self.postgres_samples > 0
@@ -210,6 +214,7 @@ class LoadObservations:
             "first_monotonic_seconds": self.first_monotonic,
             "last_monotonic_seconds": self.last_monotonic,
             "max_sample_gap_seconds": self.max_gap_seconds,
+            "max_sample_overhead_seconds": self.max_sample_overhead_seconds,
             "errors": self.errors,
             "collector_failed": self.failed,
             "sample_interval_seconds": 1,
@@ -236,85 +241,93 @@ class LoadObservations:
         errors: list[str] = []
         try:
             if len(self.identifiers) < len(SERVICES):
-                identifiers = _command(self.stack, "ps", "--all", "--format", "json")
-                rows = (
-                    json.loads(identifiers)
-                    if identifiers.lstrip().startswith("[")
-                    else [json.loads(line) for line in identifiers.splitlines() if line]
+                query = urlencode(
+                    {
+                        "all": "true",
+                        "filters": json.dumps(
+                            {"label": [f"com.docker.compose.project={self.stack.project_name}"]}
+                        ),
+                    }
                 )
-                for row in rows:
-                    name, identifier = row.get("Service"), row.get("ID", "")
+                for row in self.stats.get_list(f"/containers/json?{query}"):
+                    name = (row.get("Labels") or {}).get("com.docker.compose.service")
+                    identifier = row.get("Id", "")
                     if (
                         name in SERVICES
                         and row.get("State") == "running"
                         and re.fullmatch(r"[a-f0-9]{12,64}", identifier)
                     ):
                         self.identifiers[name] = identifier
-            services: dict[str, object] = {name: None for name in SERVICES}
-            for name, identifier in self.identifiers.items():
-                try:
-                    services[name] = container_counters(
-                        self.stats.get(
-                            f"/containers/{quote(identifier)}/stats?stream=false&one-shot=true"
-                        )
-                    )
-                    self.services_seen.add(name)
-                except (ValueError, OSError):
-                    errors.append(f"{name}_counters_unavailable")
-            sample["services"] = services
-        except (ValueError, OSError, subprocess.SubprocessError, KeyError, TypeError):
+        except (ValueError, OSError, KeyError, TypeError):
             errors.append("container_inventory_unavailable")
-        try:
-            raw = _command(
-                self.stack,
-                "exec",
-                "-T",
-                "-e",
-                "PGCONNECT_TIMEOUT=1",
-                "-e",
-                "PGOPTIONS=-c statement_timeout=1000 -c lock_timeout=500",
-                "postgres",
-                "psql",
-                "--username",
-                "startunnel_admin",
-                "--dbname",
-                "startunnel",
-                "--tuples-only",
-                "--no-align",
-                "--quiet",
-                "--command",
-                SQL,
+        jobs: dict[str, Future[Any]] = {
+            name: self.executor.submit(
+                self.stats.get, f"/containers/{quote(identifier)}/stats?stream=false&one-shot=true"
             )
-            postgres = numeric_fields(json.loads(raw), DATABASE_FIELDS)
-            sample["postgres"] = postgres
-            if all(value is not None for value in postgres.values()):
-                self.postgres_samples += 1
-        except (ValueError, OSError, subprocess.SubprocessError):
-            errors.append("postgres_counters_unavailable")
-        try:
-            pool = pool_metrics(
-                _command(
-                    self.stack, "exec", "-T", "web", "/app/.venv/bin/python", "-c", METRICS_COMMAND
-                )
+            for name, identifier in self.identifiers.items()
+        }
+        if "postgres" in self.identifiers:
+            jobs["postgres_aggregate"] = self.executor.submit(
+                self.stats.exec,
+                self.identifiers["postgres"],
+                POSTGRES_COMMAND,
+                environment=POSTGRES_ENVIRONMENT,
             )
-            sample["pool"] = pool
-            if pool.get("sampler_ok") == EXPECTED_POOL_WORKERS:
-                self.pool_samples += 1
-            if (numeric(pool.get("sampler_missing")) or 0) > 0:
-                self.pool_missing_samples += 1
-            if (numeric(pool.get("sampler_error")) or 0) > 0:
-                self.pool_error_samples += 1
-                errors.append("pool_sampler_error")
-        except (ValueError, OSError, subprocess.SubprocessError):
-            errors.append("pool_counters_unavailable")
+        if "web" in self.identifiers:
+            jobs["pool"] = self.executor.submit(
+                self.stats.exec,
+                self.identifiers["web"],
+                ("/app/.venv/bin/python", "-c", METRICS_COMMAND),
+            )
+        _, pending = wait(jobs.values(), timeout=max(0.0, started + 1 - time.monotonic()))
+        if pending:
+            # Stop the collector after a missed deadline. No old job can queue into a later sample.
+            self.failed = True
+            self.stop_event.set()
+            errors.append("sample_deadline_exceeded")
+            for future in pending:
+                future.cancel()
+        services: dict[str, object] = {name: None for name in SERVICES}
+        for name, future in jobs.items():
+            if future in pending:
+                errors.append(f"{name}_counters_unavailable")
+                continue
+            try:
+                value = future.result()
+                if name in SERVICES:
+                    services[name] = container_counters(value)
+                    self.services_seen.add(name)
+                elif name == "postgres_aggregate":
+                    postgres = numeric_fields(json.loads(value), DATABASE_FIELDS)
+                    sample["postgres"] = postgres
+                    if all(item is not None for item in postgres.values()):
+                        self.postgres_samples += 1
+                elif name == "pool":
+                    pool = pool_metrics(value)
+                    sample["pool"] = pool
+                    if pool.get("sampler_ok") == EXPECTED_POOL_WORKERS:
+                        self.pool_samples += 1
+                    if (numeric(pool.get("sampler_missing")) or 0) > 0:
+                        self.pool_missing_samples += 1
+                    if (numeric(pool.get("sampler_error")) or 0) > 0:
+                        self.pool_error_samples += 1
+                        errors.append("pool_sampler_error")
+            except (ValueError, OSError, KeyError, TypeError):
+                errors.append(f"{name}_counters_unavailable")
+        sample["services"] = services
         sample["errors"] = errors
         self.errors += len(errors)
+        overhead = time.monotonic() - started
+        self.max_sample_overhead_seconds = max(self.max_sample_overhead_seconds, overhead)
+        if overhead >= 1:
+            self.failed = True
+            self.stop_event.set()
         sample["collector"] = {
             "thread_cpu_seconds": time.thread_time(),
             "process_cpu_seconds": usage.ru_utime + usage.ru_stime,
             "child_cpu_seconds": children.ru_utime + children.ru_stime,
             "peak_memory_bytes": usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024),
-            "sample_overhead_seconds": time.monotonic() - started,
+            "sample_overhead_seconds": overhead,
         }
         return sample
 

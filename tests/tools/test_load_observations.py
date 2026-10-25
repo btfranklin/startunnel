@@ -252,27 +252,12 @@ def test_collector_writes_each_sample_and_retains_safe_error(
     assert "secret" not in json.dumps(observations.summary())
 
 
-def test_metrics_probe_uses_the_service_auth_header(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    import io
-    import urllib.request
-
-    monkeypatch.setenv("STARTUNNEL_METRICS_TOKEN", "private-probe-token")
-
-    def urlopen(request: urllib.request.Request, *, timeout: int) -> io.BytesIO:
-        assert request.get_header("X-metrics-token") == "private-probe-token"
-        assert not request.get_header("Authorization")
-        assert request.full_url == "http://127.0.0.1:8000/metrics"
-        assert timeout == 1
-        return io.BytesIO(b"startunnel_database_pool_size 18")
-
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    exec(load_observations.METRICS_COMMAND, {})
-    output = capsys.readouterr().out
-    assert output.strip() == "startunnel_database_pool_size 18"
-    assert "private-probe-token" not in output
+def test_metrics_probe_reads_worker_shards_without_http_or_credentials() -> None:
+    assert "MultiProcessCollector(registry)" in load_observations.METRICS_COMMAND
+    assert "core.metrics" not in load_observations.METRICS_COMMAND
+    assert "urllib" not in load_observations.METRICS_COMMAND
+    assert "TOKEN" not in load_observations.METRICS_COMMAND
+    assert "statement_timeout=500" in str(load_observations.POSTGRES_ENVIRONMENT)
 
 
 def test_load_runner_rejects_unsafe_project_before_creating_reports(
@@ -302,19 +287,22 @@ def test_collector_requires_all_four_pool_samplers_and_records_failures(
     class Stack:
         environment = {"DOCKER_HOST": "unix:///safe"}
 
-    def command(stack: object, *arguments: str) -> str:
-        if "psql" in arguments:
+    def execute(self: object, identifier: str, command: tuple[str, ...], **kwargs: object) -> str:
+        if "psql" in command:
             return json.dumps({name: 1 for name in load_observations.DATABASE_FIELDS})
         return "\n".join(
             f'startunnel_database_pool_sampler_status{{status="{status}"}} {count}'
             for status, count in (("ok", ok), ("missing", missing), ("error", error))
         )
 
+    monkeypatch.setattr(Stats, "exec", execute, raising=False)
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
-    monkeypatch.setattr(load_observations, "_command", command)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "samples.jsonl")  # type: ignore[arg-type]
     observations.identifiers = {name: "a" * 12 for name in load_observations.SERVICES}
-    sample = observations._sample()
+    try:
+        sample = observations._sample()
+    finally:
+        observations.executor.shutdown(wait=True)
     observations.samples = 1
     assert observations.pool_samples == int(ok == 4)
     assert observations.summary()["complete"] is (ok == 4)
@@ -384,3 +372,217 @@ def test_driver_observer_failure_retains_partial_counts_and_cancels_tasks(
     assert phases.records[-1]["phase"] == "traffic"
     assert phases.records[-1]["status"] == "failed"
     assert "private" not in json.dumps(report)
+
+
+def test_engine_exec_demultiplexes_only_stdout_and_uses_fixed_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import struct
+
+    from scripts.docker_stats import DockerStats
+
+    requests: list[tuple[str, object]] = []
+    identifier = "a" * 64
+    exec_id = "b" * 64
+    stdout = b'{"connections": 4}'
+    stderr = b"private-password"
+    frames = struct.pack(">B3sI", 1, b"\0\0\0", len(stdout)) + stdout
+    frames += struct.pack(">B3sI", 2, b"\0\0\0", len(stderr)) + stderr
+    client = DockerStats("unix:///safe", timeout=1)
+
+    def request(path: str, **kwargs: object) -> bytes:
+        requests.append((path, kwargs.get("payload")))
+        assert 0 < float(str(kwargs["timeout"])) <= 1
+        if path.endswith("/exec"):
+            return json.dumps({"Id": exec_id}).encode()
+        if path.endswith("/start"):
+            return frames
+        return b'{"Running":false,"ExitCode":0}'
+
+    monkeypatch.setattr(client, "_request", request)
+    result = client.exec(
+        identifier,
+        load_observations.POSTGRES_COMMAND,
+        environment=load_observations.POSTGRES_ENVIRONMENT,
+    )
+    assert result == stdout.decode()
+    assert "private-password" not in result
+    body = requests[0][1]
+    assert isinstance(body, dict)
+    assert body["Cmd"] == list(load_observations.POSTGRES_COMMAND)
+    assert body["Tty"] is False
+    assert body["AttachStderr"] is True
+    assert "PGOPTIONS=-c statement_timeout=500 -c lock_timeout=250" in body["Env"]
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize("raw", [b"bad", b"\1\0\0\0\0\0\0\5x", b"\3\0\0\0\0\0\0\0"])
+def test_engine_exec_rejects_incomplete_or_invalid_frames(raw: bytes) -> None:
+    from scripts.docker_stats import demultiplex_stdout
+
+    with pytest.raises(ValueError):
+        demultiplex_stdout(raw)
+
+
+def test_parallel_sample_finishes_under_one_second_and_caches_scoped_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+    from urllib.parse import parse_qs, urlsplit
+
+    inventories: list[str] = []
+
+    class Stats:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get_list(self, path: str) -> list[dict[str, object]]:
+            inventories.append(path)
+            query = parse_qs(urlsplit(path).query)
+            assert json.loads(query["filters"][0]) == {
+                "label": ["com.docker.compose.project=stload-safe-12345678"]
+            }
+            rows: list[dict[str, object]] = [
+                {
+                    "Id": str(index) * 64,
+                    "State": "running",
+                    "Labels": {"com.docker.compose.service": name},
+                }
+                for index, name in enumerate(load_observations.SERVICES, 1)
+            ]
+            rows.append(
+                {
+                    "Id": "a" * 64,
+                    "State": "created",
+                    "Labels": {"com.docker.compose.service": "load-profile"},
+                }
+            )
+            return rows
+
+        def get(self, path: str) -> dict[str, object]:
+            time.sleep(0.1)
+            return {"cpu_stats": {"cpu_usage": {"total_usage": 1}}}
+
+        def exec(self, identifier: str, command: tuple[str, ...], **kwargs: object) -> str:
+            time.sleep(0.1)
+            if "psql" in command:
+                return json.dumps({name: 1 for name in load_observations.DATABASE_FIELDS})
+            return 'startunnel_database_pool_sampler_status{status="ok"} 4'
+
+    class Stack:
+        environment = {"DOCKER_HOST": "unix:///safe"}
+        project_name = "stload-safe-12345678"
+
+    monkeypatch.setattr(load_observations, "DockerStats", Stats)
+    observations = load_observations.LoadObservations(Stack(), tmp_path / "sample.jsonl")  # type: ignore[arg-type]
+    try:
+        first = observations._sample()
+        second = observations._sample()
+    finally:
+        observations.executor.shutdown(wait=True)
+    assert len(inventories) == 1
+    assert observations.identifiers["load-profile"] == "4" * 64
+    assert observations.max_sample_overhead_seconds < 0.5
+    assert first["errors"] == second["errors"] == []
+
+
+def test_slow_sample_stops_without_queuing_a_second_iteration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    class Stats:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get(self, path: str) -> dict[str, object]:
+            if path == "/info":
+                return {}
+            release.wait(timeout=2)
+            return {}
+
+        def exec(self, *args: object, **kwargs: object) -> str:
+            release.wait(timeout=2)
+            return "{}"
+
+    class Stack:
+        environment = {"DOCKER_HOST": "unix:///safe"}
+
+    release = threading.Event()
+    monkeypatch.setattr(load_observations, "DockerStats", Stats)
+    observations = load_observations.LoadObservations(Stack(), tmp_path / "sample.jsonl")  # type: ignore[arg-type]
+    observations.identifiers = {name: "a" * 64 for name in load_observations.SERVICES}
+    with observations:
+        observations.thread.join(timeout=1.5)
+        assert not observations.thread.is_alive()
+        assert observations.failed
+        assert observations.samples == 1
+        release.set()
+    sample = json.loads(observations.path.read_text())
+    assert "sample_deadline_exceeded" in sample["errors"]
+    assert observations.summary()["complete"] is False
+    assert observations.executor._shutdown
+
+
+def test_metrics_probe_reads_existing_worker_files_without_creating_shards(tmp_path: Path) -> None:
+    import os
+    import subprocess
+    import sys
+
+    environment = {
+        **os.environ,
+        "PROMETHEUS_MULTIPROC_DIR": str(tmp_path),
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+    }
+    for _ in range(4):
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from core.metrics import DATABASE_POOL_SAMPLER_STATUS; "
+                "DATABASE_POOL_SAMPLER_STATUS.labels(status='ok').set(1)",
+            ],
+            env=environment,
+            capture_output=True,
+            check=True,
+            timeout=5,
+        )
+    files = sorted(path.name for path in tmp_path.iterdir())
+    assert files
+    for _ in range(2):
+        result = subprocess.run(
+            [sys.executable, "-c", load_observations.METRICS_COMMAND],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        assert pool_metrics(result.stdout)["sampler_ok"] == 4
+        assert sorted(path.name for path in tmp_path.iterdir()) == files
+
+
+def test_engine_inventory_returns_array_and_failed_exec_discards_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.docker_stats import DockerStats
+
+    client = DockerStats("unix:///safe", timeout=1)
+
+    def request(path: str, **kwargs: object) -> bytes:
+        if path.startswith("/containers/json"):
+            return b'[{"Id":"aaaaaaaaaaaa","Labels":{}}]'
+        if path.endswith("/exec"):
+            return b'{"Id":"bbbbbbbbbbbb"}'
+        if path.endswith("/start"):
+            return b""
+        return b'{"Running":false,"ExitCode":1,"Error":"private-password"}'
+
+    monkeypatch.setattr(client, "_request", request)
+    assert client.get_list("/containers/json?filters=fixed") == [
+        {"Id": "aaaaaaaaaaaa", "Labels": {}}
+    ]
+    with pytest.raises(ValueError, match=r"^The Docker observation command failed\.$"):
+        client.exec("a" * 12, load_observations.POSTGRES_COMMAND)
