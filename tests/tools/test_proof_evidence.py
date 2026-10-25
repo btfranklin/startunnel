@@ -11,7 +11,13 @@ import pytest
 from scripts import proof_build, proof_evidence
 from scripts import release_candidate as candidate
 from scripts.release_candidate import verify_evidence
-from tests.structure.test_candidate_promotion import COMMIT, IMAGE, artifact, evidence
+from tests.structure.test_candidate_promotion import (
+    COMMIT,
+    HELPER_IMAGE_ID,
+    IMAGE,
+    artifact,
+    evidence,
+)
 
 
 @pytest.mark.parametrize("kind", proof_evidence.KINDS)
@@ -111,6 +117,100 @@ def test_load_manifest_rejects_changed_fixed_workload(
     record["files"]["load-workload.json"] = proof_evidence.checksum(workload)
 
     with pytest.raises(ValueError, match="configuration"):
+        proof_evidence.validate_proof(
+            record, manifest.parent, kind="load", commit=COMMIT, image=IMAGE
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("complete", False),
+        ("collector_failed", True),
+        ("sample_interval_seconds", True),
+        ("expected_pool_workers", 3),
+        ("pool_samples", 0),
+        ("services_seen", ["web"]),
+        ("max_sample_overhead_seconds", 1),
+    ],
+)
+def test_load_manifest_rejects_incomplete_observations(
+    field: str,
+    value: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    manifest = tmp_path / "proofs/load/1/proof-load.json"
+    execution = manifest.parent / "load-run-fixture.json"
+    report = json.loads(execution.read_text())
+    report["observations"][field] = value
+    execution.write_text(json.dumps(report))
+    record = proof_evidence.read_object(manifest)
+    record["files"][execution.name] = proof_evidence.checksum(execution)
+
+    with pytest.raises(ValueError, match="observations"):
+        proof_evidence.validate_proof(
+            record, manifest.parent, kind="load", commit=COMMIT, image=IMAGE
+        )
+
+
+@pytest.mark.parametrize("field", ["release_evidence_eligible", "diagnostic_lock_seconds"])
+def test_load_manifest_rejects_diagnostic_workload(
+    field: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    manifest = tmp_path / "proofs/load/1/proof-load.json"
+    workload = manifest.parent / "load-workload.json"
+    report = json.loads(workload.read_text())
+    report[field] = False if field == "release_evidence_eligible" else 1
+    workload.write_text(json.dumps(report))
+    record = proof_evidence.read_object(manifest)
+    record["files"][workload.name] = proof_evidence.checksum(workload)
+
+    with pytest.raises(ValueError, match="diagnostic"):
+        proof_evidence.validate_proof(
+            record, manifest.parent, kind="load", commit=COMMIT, image=IMAGE
+        )
+
+
+def test_load_manifest_requires_helper_id_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    manifest = tmp_path / "proofs/load/1/proof-load.json"
+    workload = manifest.parent / "load-workload.json"
+    report = json.loads(workload.read_text())
+    report["provenance"]["image_ids"] = report["provenance"]["image_ids"].replace(
+        HELPER_IMAGE_ID, "sha256:" + "d" * 64
+    )
+    workload.write_text(json.dumps(report))
+    record = proof_evidence.read_object(manifest)
+    record["files"][workload.name] = proof_evidence.checksum(workload)
+
+    with pytest.raises(ValueError, match="helper identity"):
+        proof_evidence.validate_proof(
+            record, manifest.parent, kind="load", commit=COMMIT, image=IMAGE
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("source_commit", "d" * 40), ("platform", "linux/arm64")],
+)
+def test_load_manifest_rejects_wrong_helper_source_or_platform(
+    field: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    manifest = tmp_path / "proofs/load/1/proof-load.json"
+    execution = manifest.parent / "load-run-fixture.json"
+    report = json.loads(execution.read_text())
+    report["helper"][field] = value
+    execution.write_text(json.dumps(report))
+    record = proof_evidence.read_object(manifest)
+    record["files"][execution.name] = proof_evidence.checksum(execution)
+
+    with pytest.raises(ValueError, match="helper identity"):
         proof_evidence.validate_proof(
             record, manifest.parent, kind="load", commit=COMMIT, image=IMAGE
         )

@@ -230,6 +230,7 @@ def validate_proof(
     build_paths = [name for name in files if Path(name).name.startswith("proof-build-")]
     if not build_paths:
         raise ValueError("Proof helper build provenance is missing.")
+    helper_build_id = ""
     for name in build_paths:
         build = read_object(referenced_file(directory, name))
         if build.get("source_revision") != commit or build.get("platform") != "linux/amd64":
@@ -238,6 +239,10 @@ def validate_proof(
             name: checksum(ROOT / name) for name in ("Dockerfile", "pyproject.toml", "pdm.lock")
         }:
             raise ValueError("Proof helper dependency inputs differ.")
+        if kind == "load":
+            build_ids = build.get("image_ids", {})
+            if isinstance(build_ids, dict):
+                helper_build_id = build_ids.get("load-profile", helper_build_id)
     if kind == "system":
         report = read_object(referenced_file(directory, reports["system"]))
         if (
@@ -267,8 +272,53 @@ def validate_proof(
         raise ValueError("Load execution must pass with exact identity and stack cleanup.")
     if workload.get("passed") is not True or workload.get("fixture_cleanup_complete") is not True:
         raise ValueError("Load workload and fixture cleanup must pass.")
+    if (
+        workload.get("release_evidence_eligible") is not True
+        or type(workload.get("diagnostic_lock_seconds")) is not int
+        or workload.get("diagnostic_lock_seconds") != 0
+    ):
+        raise ValueError("Load workload is diagnostic or not eligible for release evidence.")
     config = workload.get("configuration", {})
     if any(config.get(key) != value for key, value in LOAD_CONFIGURATION.items()):
         raise ValueError("Load configuration differs from the fixed release workload.")
-    if workload.get("provenance", {}).get("build_mode") != "immutable-candidate":
+    provenance = workload.get("provenance", {})
+    if provenance.get("build_mode") != "immutable-candidate":
         raise ValueError("Load workload did not use an immutable candidate.")
+    helper = report.get("helper", {})
+    load_images = dict(pair.split("=", 1) for pair in provenance.get("image_ids", "").split(","))
+    if (
+        not isinstance(helper, dict)
+        or helper.get("imports_passed") is not True
+        or helper.get("source_commit") != commit
+        or helper.get("platform") != "linux/amd64"
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", helper.get("image_id", ""))
+        or helper.get("image_id") != helper_build_id
+        or load_images.get("load-profile") != helper.get("image_id")
+    ):
+        raise ValueError("Load helper identity does not match the verified runtime image.")
+    observations = report.get("observations")
+    overhead = (
+        observations.get("max_sample_overhead_seconds") if isinstance(observations, dict) else None
+    )
+    pool_samples = observations.get("pool_samples") if isinstance(observations, dict) else None
+    services_seen = observations.get("services_seen") if isinstance(observations, dict) else None
+    if (
+        not isinstance(observations, dict)
+        or observations.get("complete") is not True
+        or observations.get("collector_failed") is not False
+        or type(observations.get("sample_interval_seconds")) is not int
+        or observations.get("sample_interval_seconds") != 1
+        or type(observations.get("expected_pool_workers")) is not int
+        or observations.get("expected_pool_workers") != 4
+        or type(pool_samples) is not int
+        or pool_samples <= 0
+        or not isinstance(services_seen, list)
+        or set(services_seen) != {"web", "postgres", "maintenance", "load-profile"}
+        or isinstance(overhead, bool)
+        or not isinstance(overhead, (int, float))
+        or not 0 <= overhead < 1
+    ):
+        raise ValueError("Load observations are incomplete or exceed the sampling limit.")
+    observations_path = referenced_file(directory, reports["observations"])
+    if not observations_path.read_text(encoding="utf-8").strip():
+        raise ValueError("Load observations file is empty.")

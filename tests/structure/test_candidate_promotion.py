@@ -21,6 +21,7 @@ IMAGE = "ghcr.io/btfranklin/startunnel@sha256:" + "a" * 64
 CUSTOM_IMAGE = "registry.example:5000/team/startunnel@sha256:" + "a" * 64
 COMMIT = "b" * 40
 IMAGE_ID = "sha256:" + "c" * 64
+HELPER_IMAGE_ID = "sha256:" + "f" * 64
 
 
 def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None:
@@ -112,14 +113,19 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
                         "passed": True,
                         "fixture_cleanup_complete": True,
                         "configuration": proof_evidence.LOAD_CONFIGURATION,
+                        "release_evidence_eligible": True,
+                        "diagnostic_lock_seconds": 0,
                         "provenance": {
                             "build_mode": "immutable-candidate",
-                            "image_ids": f"web={IMAGE_ID},maintenance={IMAGE_ID}",
+                            "image_ids": (
+                                f"web={IMAGE_ID},maintenance={IMAGE_ID},"
+                                f"load-profile={HELPER_IMAGE_ID}"
+                            ),
                         },
                     }
                 )
             )
-            (attempt_dir / "load-observations.jsonl").write_text("{}\n")
+            (attempt_dir / "load-observations.jsonl").write_text('{"sample":1}\n')
             (attempt_dir / "load-driver-observations.jsonl").write_text("{}\n")
             (attempt_dir / "load-run-fixture.json").write_text(
                 json.dumps(
@@ -133,6 +139,21 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
                         "workload_report": "load-workload.json",
                         "observations_file": "load-observations.jsonl",
                         "driver_observations_file": "load-driver-observations.jsonl",
+                        "helper": {
+                            "image_id": HELPER_IMAGE_ID,
+                            "source_commit": COMMIT,
+                            "platform": "linux/amd64",
+                            "imports_passed": True,
+                        },
+                        "observations": {
+                            "complete": True,
+                            "collector_failed": False,
+                            "sample_interval_seconds": 1,
+                            "expected_pool_workers": 4,
+                            "pool_samples": 1,
+                            "services_seen": ["web", "postgres", "maintenance", "load-profile"],
+                            "max_sample_overhead_seconds": 0.1,
+                        },
                     }
                 )
             )
@@ -146,6 +167,7 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
                     {
                         "source_revision": COMMIT,
                         "platform": "linux/amd64",
+                        "image_ids": {"load-profile": HELPER_IMAGE_ID},
                         "hashes": source_hashes,
                     }
                 )
