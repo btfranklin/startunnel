@@ -12,7 +12,7 @@ import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal, TypedDict
 
 # The Django application and the SDK both use the top-level name ``agents``.
 # This standalone example does not import Django. Remove only this repository's
@@ -31,8 +31,14 @@ sys.path[:] = [
 ]
 
 from examples.python.startunnel_client import (
+    CreateTunnelResponse,
     JsonObject,
+    MeResponse,
+    MessageReadResponse,
+    PostReplyResponse,
     StarTunnelClient,
+    TreeResponse,
+    json_object,
     load_env_file,
     new_idempotency_key,
     require_environment,
@@ -44,6 +50,7 @@ from agents import (
     ModelSettings,
     RunConfig,
     Runner,
+    RunResult,
     ToolExecutionConfig,
     function_tool,
     set_tracing_disabled,
@@ -65,6 +72,23 @@ REQUIRED_TOOL_CALLS = [
     "read_root_and_reply",
     "read_reply_and_confirm",
 ]
+
+
+class ExchangeReport(TypedDict):
+    tunnel_id: str
+    cycle_id: str
+    root_message_id: str
+    reply_message_id: str
+    confirmation_message_id: str
+    sender_credential_id: str
+    receiver_credential_id: str
+    tool_calls: list[str]
+    http_events: list[str]
+    structured_results_validated: bool
+
+
+class LiveEvidence(TypedDict):
+    scenarios: list[ExchangeReport]
 
 
 class AgentStageResult(BaseModel):
@@ -90,15 +114,14 @@ class ExchangeState:
     tool_calls: list[str] = field(default_factory=list)
     http_events: list[str] = field(default_factory=list)
 
-    def report(self) -> dict[str, Any]:
-        resource_ids = (
-            self.tunnel_id,
-            self.cycle_id,
-            self.root_message_id,
-            self.reply_message_id,
-            self.confirmation_message_id,
-        )
-        if not all(resource_ids):
+    def report(self) -> ExchangeReport:
+        if (
+            self.tunnel_id is None
+            or self.cycle_id is None
+            or self.root_message_id is None
+            or self.reply_message_id is None
+            or self.confirmation_message_id is None
+        ):
             raise RuntimeError("The proof does not have complete resource evidence.")
         return {
             "tunnel_id": self.tunnel_id,
@@ -122,7 +145,7 @@ class AgentClient:
 
     async def create(
         self, *, label: str, root_content: JsonObject, correlation_id: str
-    ) -> JsonObject:
+    ) -> CreateTunnelResponse:
         return await self.client.create_tunnel(
             label=label,
             cycle_label="Live agent collaboration",
@@ -138,7 +161,7 @@ class AgentClient:
         parent_id: str,
         content: JsonObject,
         correlation_id: str,
-    ) -> JsonObject:
+    ) -> PostReplyResponse:
         return await self.client.post_reply(
             address=address,
             parent_id=parent_id,
@@ -147,12 +170,14 @@ class AgentClient:
             idempotency_key=new_idempotency_key(),
         )
 
-    async def read_message(self, *, address: str, cycle_id: str, message_id: str) -> JsonObject:
+    async def read_message(
+        self, *, address: str, cycle_id: str, message_id: str
+    ) -> MessageReadResponse:
         return await self.client.read_message(
             address=address, cycle_id=cycle_id, message_id=message_id
         )
 
-    async def read_tree(self, *, address: str, cycle_id: str) -> JsonObject:
+    async def read_tree(self, *, address: str, cycle_id: str) -> TreeResponse:
         return await self.client.read_tree(address=address, cycle_id=cycle_id)
 
     async def close_cycle(self, *, address: str, cycle_id: str) -> None:
@@ -198,11 +223,8 @@ def _load_protected_credential_file() -> None:
     load_env_file(path)
 
 
-def _agent_identity(response: dict[str, Any]) -> str:
-    agent = response.get("agent")
-    if not isinstance(agent, dict):
-        raise RuntimeError("The agent identity response is not valid.")
-    return str(agent.get("id", ""))
+def _agent_identity(response: MeResponse) -> str:
+    return response["agent"]["id"]
 
 
 async def _verify_identities(
@@ -224,15 +246,15 @@ async def _verify_identities(
     return sender_id, receiver_id
 
 
-def _required_object(value: object, description: str) -> dict[str, Any]:
+def _required_object(value: object, description: str) -> JsonObject:
     if not isinstance(value, dict):
         raise RuntimeError(f"The {description} was not valid.")
-    return value
+    return json_object(value)
 
 
-def _validate_stage(result: Any, *, actor: str, stage: str) -> None:
-    output = result.final_output
-    if not isinstance(output, AgentStageResult) or not output.completed:
+def _validate_stage(result: RunResult, *, actor: str, stage: str) -> None:
+    output = result.final_output_as(AgentStageResult, raise_if_incorrect_type=True)
+    if not output.completed:
         raise RuntimeError(f"The {actor} agent did not complete the {stage} stage.")
 
 
@@ -244,7 +266,7 @@ async def _run_scenario(
     model: str,
     expected_sender_id: str | None = None,
     expected_receiver_id: str | None = None,
-) -> dict[str, Any]:
+) -> ExchangeReport:
     sender_client = StarTunnelClient(base_url, sender_key)
     receiver_client = StarTunnelClient(base_url, receiver_key)
     sender_id, receiver_id = await _verify_identities(
@@ -447,7 +469,7 @@ async def _run_scenario(
         await receiver_client.aclose()
 
 
-def _write_evidence(path_value: str, report: dict[str, Any]) -> None:
+def _write_evidence(path_value: str, report: LiveEvidence) -> None:
     path = Path(path_value)
     if not path.is_absolute() or not path.parent.is_dir():
         raise RuntimeError("STARTUNNEL_LIVE_EVIDENCE_PATH must use an existing absolute path.")
@@ -493,7 +515,7 @@ async def run() -> None:
         )
     ]
 
-    report = {"scenarios": reports}
+    report: LiveEvidence = {"scenarios": reports}
     if evidence_path := os.getenv("STARTUNNEL_LIVE_EVIDENCE_PATH"):
         _write_evidence(evidence_path, report)
     print("\nPublic API evidence is complete. Agent prose was not used as proof.")

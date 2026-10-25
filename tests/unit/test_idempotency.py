@@ -1,12 +1,12 @@
 """Idempotency keys bind one request to one operation for 24 hours."""
 
 from datetime import timedelta
-from typing import Any
 from uuid import uuid4
 
 import pytest
 import time_machine
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
 from core.errors import IdempotencyConflict, InvalidRequest
 from core.idempotency import begin, finish, validate_idempotency_key
@@ -26,7 +26,7 @@ def test_valid_idempotency_key_is_accepted(key: str) -> None:
     validate_idempotency_key(key)
 
 
-def test_replay_and_conflict_are_operation_scoped(credential_factory: Any) -> None:
+def test_replay_and_conflict_are_operation_scoped(credential_factory: CredentialFactory) -> None:
     credential, _ = credential_factory()
     first = begin(
         credential=credential,
@@ -60,7 +60,9 @@ def test_replay_and_conflict_are_operation_scoped(credential_factory: Any) -> No
 
 
 @pytest.mark.parametrize("expired_seconds", [0, 1])
-def test_expired_record_can_be_reused(credential_factory: Any, expired_seconds: int) -> None:
+def test_expired_record_can_be_reused(
+    credential_factory: CredentialFactory, expired_seconds: int
+) -> None:
     credential, _ = credential_factory()
     first = begin(
         credential=credential,
@@ -89,7 +91,9 @@ def test_expired_record_can_be_reused(credential_factory: Any, expired_seconds: 
     assert AgentReceipt.objects.count() == 1
 
 
-def test_request_object_key_order_does_not_change_replay(credential_factory: Any) -> None:
+def test_request_object_key_order_does_not_change_replay(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory()
     first = begin(
         credential=credential,

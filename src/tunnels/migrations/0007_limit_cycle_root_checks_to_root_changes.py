@@ -1,8 +1,8 @@
 """Skip cycle-root validation for child message writes."""
 
-from typing import Any
-
+from django.apps.registry import Apps
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 CHECK_CYCLE_ROOT = """
 CREATE OR REPLACE FUNCTION public.startunnel_check_cycle_root()
@@ -31,7 +31,7 @@ $$ LANGUAGE plpgsql SET search_path = pg_catalog, public;
 """
 
 
-def replace_cycle_root_guard(apps: Any, schema_editor: Any) -> None:
+def replace_cycle_root_guard(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
         schema_editor.execute(CHECK_CYCLE_ROOT)

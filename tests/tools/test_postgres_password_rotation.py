@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -243,9 +242,9 @@ def test_database_passwords_are_sent_only_through_subprocess_input(
     admin_password = "admin_private_input_marker_123456789"
     runtime_password = "runtime_private_input_marker_1234567"
     authentication_password = "current_private_input_marker_123456"
-    observed: dict[str, Any] = {}
+    observed: dict[str, object] = {}
 
-    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         observed["command"] = command
         observed.update(kwargs)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -257,12 +256,16 @@ def test_database_passwords_are_sent_only_through_subprocess_input(
         replacement=PasswordPair(admin=admin_password, runtime=runtime_password),
     )
 
-    rendered_command = " ".join(observed["command"])
+    command = observed["command"]
+    assert isinstance(command, list)
+    rendered_command = " ".join(command)
     assert admin_password not in rendered_command
     assert runtime_password not in rendered_command
     assert authentication_password not in rendered_command
-    assert all(marker in observed["input"] for marker in (admin_password, runtime_password))
-    assert authentication_password in observed["input"]
+    input_text = observed["input"]
+    assert isinstance(input_text, str)
+    assert all(marker in input_text for marker in (admin_password, runtime_password))
+    assert authentication_password in input_text
     assert "env" not in observed
     assert observed["stdout"] is subprocess.DEVNULL
     assert "stderr" not in observed
@@ -302,7 +305,7 @@ def test_database_child_reports_safe_failure_without_exception_text(
     }
 
     def execute(program: str, error: psycopg.Error) -> tuple[int, str]:
-        def fail_connect(**kwargs: Any) -> None:
+        def fail_connect(**kwargs: object) -> None:
             raise error
 
         monkeypatch.setattr(psycopg, "connect", fail_connect)
@@ -345,7 +348,7 @@ def test_compose_restart_and_inspection_show_normal_diagnostics(
 ) -> None:
     commands: list[list[str]] = []
 
-    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         assert "stdout" not in kwargs
         assert "stderr" not in kwargs

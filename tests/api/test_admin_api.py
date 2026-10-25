@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 import time_machine
 from django.core.management import call_command
 from django.db import connection
+from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_access import issue_admin_key
 from accounts.models import AdminCredential, AdminReceipt, User
 from agents.models import AgentCredential
 from core.maintenance import cleanup_once
 from core.models import AuditEvent
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -34,10 +41,10 @@ pytestmark = pytest.mark.django_db
     ],
 )
 def test_agent_creation_errors_are_safe_audited_and_atomic(
-    client: Any,
-    user_factory: Any,
-    credential_factory: Any,
-    settings: Any,
+    client: Client,
+    user_factory: UserFactory,
+    credential_factory: CredentialFactory,
+    settings: Settings,
     name: str,
     limit: int,
     status: int,
@@ -65,7 +72,7 @@ def test_agent_creation_errors_are_safe_audited_and_atomic(
 
 
 def test_account_creation_rejects_case_only_username_collision(
-    client: Any, user_factory: Any
+    client: Client, user_factory: UserFactory
 ) -> None:
     actor = user_factory(username="Operator")
     admin_key, secret = issue_admin_key(owner=actor, name="admin")
@@ -86,7 +93,7 @@ def test_account_creation_rejects_case_only_username_collision(
 
 
 def test_admin_tunnel_reads_return_the_stored_current_address(
-    client: Any, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     from tunnels.admin_actions import rotate_address_as_admin
     from tunnels.cycles import create_tunnel
@@ -94,24 +101,24 @@ def test_admin_tunnel_reads_return_the_stored_current_address(
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
     _, secret = issue_admin_key(owner=actor, name="inspection")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    headers = {"Authorization": "Bearer " + secret}
     created = create_tunnel(
         credential=credential,
         idempotency_key="inspect-admin-address",
         root_content={"type": "text", "text": "Inspect this tunnel."},
     )
     path = f"/api/v1/admin/tunnels/{created.tunnel.id}"
-    assert client.get(path, **headers).json()["address"] == created.address
+    assert client.get(path, headers=headers).json()["address"] == created.address
     rotate_address_as_admin(actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1)
     rotated = created.tunnel.addresses.get(state="current")
-    listed = client.get("/api/v1/admin/tunnels", **headers).json()["items"]
+    listed = client.get("/api/v1/admin/tunnels", headers=headers).json()["items"]
     assert listed[0]["address"] == rotated.address
-    assert client.get(path, **headers).json()["address"] == rotated.address
+    assert client.get(path, headers=headers).json()["address"] == rotated.address
     assert rotated.address not in str(list(AuditEvent.objects.values_list("metadata", flat=True)))
 
 
 def test_admin_tunnel_list_batches_address_and_active_cycle_reads(
-    client: Any, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     from tunnels.cycles import create_tunnel
 
@@ -127,12 +134,12 @@ def test_admin_tunnel_list_batches_address_and_active_cycle_reads(
             )
         )
     _, secret = issue_admin_key(owner=actor, name="batch inspection")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
-    client.get("/api/v1/admin/tunnels?limit=1", **headers)
+    headers = {"Authorization": "Bearer " + secret}
+    client.get("/api/v1/admin/tunnels?limit=1", headers=headers)
     with CaptureQueriesContext(connection) as one_tunnel_queries:
-        small = client.get("/api/v1/admin/tunnels?limit=1", **headers)
+        small = client.get("/api/v1/admin/tunnels?limit=1", headers=headers)
     with CaptureQueriesContext(connection) as many_tunnel_queries:
-        many = client.get("/api/v1/admin/tunnels?limit=20", **headers)
+        many = client.get("/api/v1/admin/tunnels?limit=20", headers=headers)
 
     assert small.status_code == many.status_code == 200
     assert len(many.json()["items"]) == 12
@@ -144,17 +151,19 @@ def test_admin_tunnel_list_batches_address_and_active_cycle_reads(
         assert item["active_cycle_id"] == str(tunnel.cycle.id)
 
 
-def test_admin_key_list_uses_one_owner_read_for_each_page(client: Any, user_factory: Any) -> None:
+def test_admin_key_list_uses_one_owner_read_for_each_page(
+    client: Client, user_factory: UserFactory
+) -> None:
     actor = user_factory()
     for index in range(8):
         issue_admin_key(owner=actor, name=f"owner read {index}")
     _, secret = issue_admin_key(owner=actor, name="owner read admin")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
-    client.get("/api/v1/admin/keys?limit=1", **headers)
+    headers = {"Authorization": "Bearer " + secret}
+    client.get("/api/v1/admin/keys?limit=1", headers=headers)
     with CaptureQueriesContext(connection) as one_key_queries:
-        small = client.get("/api/v1/admin/keys?limit=1", **headers)
+        small = client.get("/api/v1/admin/keys?limit=1", headers=headers)
     with CaptureQueriesContext(connection) as many_key_queries:
-        many = client.get("/api/v1/admin/keys?limit=20", **headers)
+        many = client.get("/api/v1/admin/keys?limit=20", headers=headers)
 
     assert small.status_code == many.status_code == 200
     assert len(many.json()["items"]) == 9
@@ -163,15 +172,15 @@ def test_admin_key_list_uses_one_owner_read_for_each_page(client: Any, user_fact
 
 
 def test_admin_reports_configured_credential_limit(
-    client: Any, user_factory: Any, settings: Any
+    client: Client, user_factory: UserFactory, settings: Settings
 ) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 75
     actor = user_factory()
     _, secret = issue_admin_key(owner=actor, name="limit inspection")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    headers = {"Authorization": "Bearer " + secret}
 
-    status = client.get("/api/v1/admin/status", **headers)
-    capabilities = client.get("/api/v1/admin/capabilities", **headers)
+    status = client.get("/api/v1/admin/status", headers=headers)
+    capabilities = client.get("/api/v1/admin/capabilities", headers=headers)
 
     assert status.json()["capacity"]["active_credential_limit"] == 75
     assert status.json()["limits"]["active_credentials"] == 75
@@ -179,21 +188,23 @@ def test_admin_reports_configured_credential_limit(
 
 
 def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
-    client: Any, user_factory: Any, tmp_path: Path
+    client: Client, user_factory: UserFactory, tmp_path: Path
 ) -> None:
     actor = user_factory()
     credential, first_secret = issue_admin_key(
         owner=actor, name="only key", expires_at=timezone.now() + timedelta(hours=1)
     )
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + first_secret}
+    headers = {"Authorization": "Bearer " + first_secret}
 
-    def mutate(path: str, body: dict[str, Any], key: str, auth: dict[str, str]) -> Any:
+    def mutate(
+        path: str, body: Mapping[str, object], key: str, auth: dict[str, str]
+    ) -> _MonkeyPatchedWSGIResponse:
         return client.post(
             path,
             data=json.dumps(body),
             content_type="application/json",
             HTTP_IDEMPOTENCY_KEY=key,
-            **auth,
+            headers=auth,
         )
 
     removed_password = mutate(
@@ -211,12 +222,12 @@ def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
         headers,
     )
     assert revoked.status_code == 200, revoked.content
-    assert client.get("/api/v1/admin/me", **headers).status_code == 401
+    assert client.get("/api/v1/admin/me", headers=headers).status_code == 401
 
     recovery_file = tmp_path / "recovered.key"
     call_command("recover_instance_admin", actor.username, key_file=str(recovery_file))
-    recovered_headers = {"HTTP_AUTHORIZATION": "Bearer " + recovery_file.read_text().strip()}
-    assert client.get("/api/v1/admin/me", **recovered_headers).status_code == 200
+    recovered_headers = {"Authorization": "Bearer " + recovery_file.read_text().strip()}
+    assert client.get("/api/v1/admin/me", headers=recovered_headers).status_code == 200
     deactivated = mutate(
         "/api/v1/admin/accounts/state",
         {"admin_id": str(actor.pk), "active": False, "expected_active": True},
@@ -224,23 +235,26 @@ def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
         recovered_headers,
     )
     assert deactivated.status_code == 200, deactivated.content
-    assert client.get("/api/v1/admin/me", **recovered_headers).status_code == 401
+    assert client.get("/api/v1/admin/me", headers=recovered_headers).status_code == 401
 
     second_recovery_file = tmp_path / "recovered-again.key"
     call_command("recover_instance_admin", actor.username, key_file=str(second_recovery_file))
-    final_headers = {"HTTP_AUTHORIZATION": "Bearer " + second_recovery_file.read_text().strip()}
-    assert client.get("/api/v1/admin/me", **final_headers).status_code == 200
+    final_headers = {"Authorization": "Bearer " + second_recovery_file.read_text().strip()}
+    assert client.get("/api/v1/admin/me", headers=final_headers).status_code == 200
 
 
-def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: Any) -> None:
+def test_admin_api_discovery_mutation_and_receipts(
+    client: Client, user_factory: UserFactory
+) -> None:
     actor = user_factory()
     credential, secret = issue_admin_key(owner=actor, name="automation")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
-    assert client.get("/api/v1/admin/me", **headers).json()["admin"]["id"] == str(actor.id)
+    headers = {"Authorization": "Bearer " + secret}
+    assert client.get("/api/v1/admin/me", headers=headers).json()["admin"]["id"] == str(actor.id)
     assert (
-        client.get("/api/v1/admin/capabilities", **headers).json()["authority"] == "instance_admin"
+        client.get("/api/v1/admin/capabilities", headers=headers).json()["authority"]
+        == "instance_admin"
     )
-    status = client.get("/api/v1/admin/status", **headers)
+    status = client.get("/api/v1/admin/status", headers=headers)
     assert status.status_code == 200
     assert status.json()["database"]["healthy"]
     key = str(uuid4())
@@ -250,7 +264,7 @@ def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: An
         data=json.dumps(body),
         content_type="application/json",
         HTTP_IDEMPOTENCY_KEY=key,
-        **headers,
+        headers=headers,
     )
     assert result.status_code == 200
     created = result.json()
@@ -263,47 +277,51 @@ def test_admin_api_discovery_mutation_and_receipts(client: Any, user_factory: An
         data=json.dumps(body),
         content_type="application/json",
         HTTP_IDEMPOTENCY_KEY=key,
-        **headers,
+        headers=headers,
     )
     assert replay.json() == created
-    inspect = client.get("/api/v1/admin/operations/" + created["operation"]["id"], **headers)
+    inspect = client.get("/api/v1/admin/operations/" + created["operation"]["id"], headers=headers)
     assert "secret" not in inspect.content.decode()
     assert AdminReceipt.objects.count() == 1
     assert (
-        client.get("/api/v1/admin/accounts/" + created["resource"]["id"], **headers).status_code
+        client.get(
+            "/api/v1/admin/accounts/" + created["resource"]["id"], headers=headers
+        ).status_code
         == 200
     )
-    assert client.get("/api/v1/admin/accounts?limit=1", **headers).json()["next_cursor"]
-    assert client.get("/api/v1/admin/keys", **headers).json()["items"]
-    assert client.get("/api/v1/admin/agents", **headers).status_code == 200
-    assert client.get("/api/v1/admin/tunnels", **headers).status_code == 200
-    assert client.get("/api/v1/admin/audit", **headers).json()["items"]
+    assert client.get("/api/v1/admin/accounts?limit=1", headers=headers).json()["next_cursor"]
+    assert client.get("/api/v1/admin/keys", headers=headers).json()["items"]
+    assert client.get("/api/v1/admin/agents", headers=headers).status_code == 200
+    assert client.get("/api/v1/admin/tunnels", headers=headers).status_code == 200
+    assert client.get("/api/v1/admin/audit", headers=headers).json()["items"]
     other = user_factory()
     _, other_secret = issue_admin_key(owner=other, name="other")
-    other_headers = {"HTTP_AUTHORIZATION": "Bearer " + other_secret}
+    other_headers = {"Authorization": "Bearer " + other_secret}
     other_inspect = client.get(
-        "/api/v1/admin/operations/" + created["operation"]["id"], **other_headers
+        "/api/v1/admin/operations/" + created["operation"]["id"], headers=other_headers
     )
     assert other_inspect.status_code == 200
     assert other_inspect.json() == inspect.json()
-    first_page = client.get("/api/v1/admin/accounts", {"limit": 1}, **headers).json()
+    first_page = client.get("/api/v1/admin/accounts", {"limit": 1}, headers=headers).json()
     query = {"limit": 1, "cursor": first_page["next_cursor"]}
-    original_page = client.get("/api/v1/admin/accounts", query, **headers)
-    handed_over_page = client.get("/api/v1/admin/accounts", query, **other_headers)
+    original_page = client.get("/api/v1/admin/accounts", query, headers=headers)
+    handed_over_page = client.get("/api/v1/admin/accounts", query, headers=other_headers)
     assert handed_over_page.status_code == 200
     assert handed_over_page.json() == original_page.json()
 
 
-def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory: Any) -> None:
+def test_admin_receipt_expires_before_physical_cleanup(
+    client: Client, user_factory: UserFactory
+) -> None:
     actor = user_factory()
     _, secret = issue_admin_key(owner=actor, name="receipt inspection")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    headers = {"Authorization": "Bearer " + secret}
     response = client.post(
         "/api/v1/admin/accounts/create",
         data=json.dumps({"username": "receipt-expiry"}),
         content_type="application/json",
         HTTP_IDEMPOTENCY_KEY="receipt-expiry-create",
-        **headers,
+        headers=headers,
     )
     assert response.status_code == 200
     result = response.json()
@@ -315,23 +333,23 @@ def test_admin_receipt_expires_before_physical_cleanup(client: Any, user_factory
     )
     path = f"/api/v1/admin/operations/{receipt.pk}"
     with time_machine.travel(receipt.expires_at - timedelta(microseconds=1), tick=False):
-        assert client.get(path, **headers).status_code == 200
+        assert client.get(path, headers=headers).status_code == 200
     with time_machine.travel(receipt.expires_at, tick=False):
-        expired = client.get(path, **headers)
+        expired = client.get(path, headers=headers)
         assert expired.status_code == 400
         assert expired.json()["error"]["code"] == "invalid_request"
         assert AdminReceipt.objects.filter(pk=receipt.pk).exists()
         assert cleanup_once()["admin_operations_purged"] == 1
         assert not AdminReceipt.objects.filter(pk=receipt.pk).exists()
-        missing = client.get(path, **headers)
+        missing = client.get(path, headers=headers)
         assert missing.status_code == 404
         assert missing.json()["error"]["code"] == "invalid_request"
         assert AuditEvent.objects.filter(pk=result["operation"]["audit_event_id"]).exists()
-        assert client.get("/api/v1/admin/me", **headers).status_code == 200
+        assert client.get("/api/v1/admin/me", headers=headers).status_code == 200
 
 
 def test_admin_api_rejects_agent_keys_and_missing_idempotency(
-    client: Any, credential_factory: Any, user_factory: Any
+    client: Client, credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     _, agent_secret = credential_factory()
     assert (
@@ -361,7 +379,7 @@ def test_admin_api_rejects_agent_keys_and_missing_idempotency(
     ],
 )
 def test_missing_admin_resources_return_404_without_operation_writes(
-    client: Any, user_factory: Any, path: str
+    client: Client, user_factory: UserFactory, path: str
 ) -> None:
     actor = user_factory()
     _, key = issue_admin_key(owner=actor, name="Resource reader")
@@ -388,7 +406,7 @@ def test_missing_admin_resources_return_404_without_operation_writes(
     ],
 )
 def test_admin_list_filters_with_missing_ids_keep_empty_pages(
-    client: Any, user_factory: Any, path: str, field: str
+    client: Client, user_factory: UserFactory, path: str, field: str
 ) -> None:
     _, key = issue_admin_key(owner=user_factory(), name="Filtered reader")
     response = client.get(
@@ -405,7 +423,11 @@ def test_admin_list_filters_with_missing_ids_keep_empty_pages(
     [({"limit": 0}, "invalid_request"), ({"cursor": "invalid-cursor"}, "invalid_cursor")],
 )
 def test_existing_tunnel_cycle_list_keeps_validation_and_cursor_errors(
-    client: Any, user_factory: Any, credential_factory: Any, query: dict[str, Any], code: str
+    client: Client,
+    user_factory: UserFactory,
+    credential_factory: CredentialFactory,
+    query: dict[str, str | int],
+    code: str,
 ) -> None:
     from tunnels.cycles import create_tunnel
 
@@ -418,11 +440,11 @@ def test_existing_tunnel_cycle_list_keeps_validation_and_cursor_errors(
     audit_ids = set(AuditEvent.objects.values_list("id", flat=True))
     _, key = issue_admin_key(owner=user_factory(), name="Cycle reader")
     path = f"/api/v1/admin/tunnels/{created.tunnel.id}/cycles"
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
-    page = client.get(path, **headers)
+    headers = {"Authorization": "Bearer " + key}
+    page = client.get(path, headers=headers)
     assert page.status_code == 200
     assert [cycle["id"] for cycle in page.json()["items"]] == [str(created.cycle.id)]
-    response = client.get(path, query, **headers)
+    response = client.get(path, query, headers=headers)
     assert response.status_code == 400
     assert response.json()["error"]["code"] == code
     assert not AdminReceipt.objects.exists()
@@ -440,11 +462,11 @@ def test_existing_tunnel_cycle_list_keeps_validation_and_cursor_errors(
     ],
 )
 def test_missing_admin_mutation_targets_return_404_and_failure_audit(
-    client: Any,
-    user_factory: Any,
+    client: Client,
+    user_factory: UserFactory,
     operation: str,
     target_field: str,
-    data: dict[str, Any],
+    data: Mapping[str, object],
 ) -> None:
     actor = user_factory()
     credential, key = issue_admin_key(owner=actor, name="Resource writer")
@@ -474,7 +496,7 @@ def test_missing_admin_mutation_targets_return_404_and_failure_audit(
 
 
 def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
-    client: Any, user_factory: Any, monkeypatch: Any
+    client: Client, user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from dataclasses import replace
 
@@ -532,7 +554,11 @@ def test_admin_reads_do_not_consume_the_owner_shared_write_limit(
     ],
 )
 def test_missing_tunnel_and_beacon_admin_mutations_keep_domain_404(
-    client: Any, user_factory: Any, operation: str, target_field: str, data: dict[str, Any]
+    client: Client,
+    user_factory: UserFactory,
+    operation: str,
+    target_field: str,
+    data: Mapping[str, object],
 ) -> None:
     credential, key = issue_admin_key(owner=user_factory(), name="Missing tunnel")
     target_id = uuid4()

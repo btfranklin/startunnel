@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
 
 import pytest
 from django.utils import timezone
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory, UserFactory
 
 from agents.models import AgentCredential
 from agents.services import (
@@ -22,7 +23,7 @@ from core.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 pytestmark = pytest.mark.django_db
 
 
-def test_create_authenticate_and_revoke_instance_credential(user_factory: Any) -> None:
+def test_create_authenticate_and_revoke_instance_credential(user_factory: UserFactory) -> None:
     actor = user_factory()
     issued = create_credential(actor=actor, name="  Build agent  ")
     assert issued.key.startswith("st_") and len(issued.key) == 46
@@ -52,7 +53,9 @@ def test_decoder_length_and_unknown_key_are_rejected(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize("state", ["revoked", "expired"])
-def test_unavailable_keys_cannot_authenticate(credential_factory: Any, state: str) -> None:
+def test_unavailable_keys_cannot_authenticate(
+    credential_factory: CredentialFactory, state: str
+) -> None:
     credential, key = credential_factory()
     if state == "revoked":
         credential.revoked_at = timezone.now()
@@ -63,7 +66,9 @@ def test_unavailable_keys_cannot_authenticate(credential_factory: Any, state: st
         authenticate_key(key)
 
 
-def test_admin_deactivation_does_not_disable_agent_key(credential_factory: Any) -> None:
+def test_admin_deactivation_does_not_disable_agent_key(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, key = credential_factory()
     assert credential.created_by is not None
     credential.created_by.is_active = False
@@ -72,12 +77,14 @@ def test_admin_deactivation_does_not_disable_agent_key(credential_factory: Any) 
 
 
 @pytest.mark.parametrize("name", ["", "   ", "x" * 101])
-def test_credential_names_are_bounded(user_factory: Any, name: str) -> None:
+def test_credential_names_are_bounded(user_factory: UserFactory, name: str) -> None:
     with pytest.raises(InvalidRequest, match="1 to 100"):
         create_credential(actor=user_factory(), name=name)
 
 
-def test_inactive_admin_cannot_create_or_revoke(user_factory: Any, credential_factory: Any) -> None:
+def test_inactive_admin_cannot_create_or_revoke(
+    user_factory: UserFactory, credential_factory: CredentialFactory
+) -> None:
     actor = user_factory()
     actor.is_active = False
     actor.save(update_fields=["is_active"])
@@ -88,7 +95,9 @@ def test_inactive_admin_cannot_create_or_revoke(user_factory: Any, credential_fa
         revoke_credential(actor=actor, credential=credential)
 
 
-def test_instance_credential_limit_blocks_new_keys(user_factory: Any, settings: Any) -> None:
+def test_instance_credential_limit_blocks_new_keys(
+    user_factory: UserFactory, settings: Settings
+) -> None:
     actor = user_factory()
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 1
     create_credential(actor=actor, name="First")
@@ -98,8 +107,8 @@ def test_instance_credential_limit_blocks_new_keys(user_factory: Any, settings: 
 
 @pytest.mark.parametrize("state", ["expired", "revoked"])
 def test_unavailable_credential_does_not_consume_quota(
-    user_factory: Any,
-    settings: Any,
+    user_factory: UserFactory,
+    settings: Settings,
     state: str,
 ) -> None:
     actor = user_factory()
@@ -114,7 +123,9 @@ def test_unavailable_credential_does_not_consume_quota(
     assert create_credential(actor=actor, name="Replacement").credential.is_available
 
 
-def test_revoke_is_idempotent(user_factory: Any, credential_factory: Any) -> None:
+def test_revoke_is_idempotent(
+    user_factory: UserFactory, credential_factory: CredentialFactory
+) -> None:
     actor = user_factory()
     credential, _ = credential_factory()
     revoke_credential(actor=actor, credential=credential)
@@ -123,7 +134,7 @@ def test_revoke_is_idempotent(user_factory: Any, credential_factory: Any) -> Non
 
 
 def test_only_activity_authentication_releases_postgres_connection(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     closed: list[bool] = []
@@ -139,7 +150,7 @@ def test_only_activity_authentication_releases_postgres_connection(
 
 
 def test_api_authentication_maps_bad_key_and_preserves_outer_transaction(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "api.auth.authenticate_key", lambda token: (_ for _ in ()).throw(CredentialError())

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Protocol, cast
 
 from django.conf import settings
 from django.db import connections
@@ -34,14 +34,18 @@ _POOL_STAT_KEYS = {
 _POOL_ERROR_KEYS = ("requests_errors", "connections_errors", "connections_lost")
 
 
-def _initialized_default_pool() -> Any | None:
+class _PoolStats(Protocol):
+    def get_stats(self) -> dict[str, int]: ...
+
+
+def _initialized_default_pool() -> _PoolStats | None:
     """Return an existing pool without invoking Django's lazy pool property."""
 
     wrapper = connections["default"]
     # Django's ``pool`` property constructs an unopened pool when first read.
     # The class cache lets this sampler observe only pools already used by the app.
     pools = getattr(type(wrapper), "_connection_pools", {})
-    return pools.get(wrapper.alias)
+    return cast(_PoolStats | None, pools.get(wrapper.alias))
 
 
 def sample_pool_stats(stats: Mapping[str, int] | None) -> str:
@@ -111,6 +115,7 @@ class PoolMetricsSampler:
             finally:
                 self._task = None
                 if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+                    # The Prometheus process cleanup function has no type annotations.
                     multiprocess.mark_process_dead(os.getpid())  # type: ignore[no-untyped-call]
 
 

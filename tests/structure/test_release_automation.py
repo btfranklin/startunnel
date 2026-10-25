@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from http.client import HTTPMessage
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 
 import pytest
 import yaml
@@ -26,13 +26,24 @@ from scripts import run_full_load_profile as load_runner
 from scripts import run_isolated_test_lane as lane_runner
 from scripts import run_resource_measurement as resource_runner
 from scripts import system_proof
+from scripts.json_data import JsonObject, json_array, json_object, json_string
 from tests.structure.workflows import load_workflow
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _assert_postgres_permission_tools_are_mounted(services: dict[str, Any]) -> None:
-    volumes = {volume["target"]: volume for volume in services["postgres"]["volumes"]}
+class RunCall(NamedTuple):
+    step: str
+    arguments: tuple[str, ...]
+    environment: dict[str, str]
+
+
+def _assert_postgres_permission_tools_are_mounted(services: JsonObject) -> None:
+    postgres = json_object(services["postgres"])
+    volumes = {
+        json_string(volume["target"]): volume
+        for volume in (json_object(item) for item in json_array(postgres["volumes"]))
+    }
     for target, source in (
         (
             "/usr/local/share/startunnel/history-grants.sql",
@@ -59,6 +70,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
 ) -> None:
     class Stack:
         project_name = "stproof-online-backup"
+        candidate_image: str | None = None
         environment: dict[str, str] = {}
         running = False
         runtime_contents_checked = False
@@ -82,7 +94,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
             self.builds.append(("build", *(("--no-cache",) if no_cache else ()), *services))
             return {"services": list(services)}
 
-        def run(self, label: str, *args: str, **kwargs: Any) -> None:
+        def run(self, label: str, *args: str, **kwargs: object) -> None:
             del label, kwargs
             if args[0] == "build":
                 self.builds.append(args)
@@ -106,13 +118,13 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
             if args[-1].startswith("health-proof-"):
                 assert self.running
 
-        def capture(self, *args: str, **kwargs: Any) -> str:
+        def capture(self, *args: str, **kwargs: object) -> str:
             return "Application service started."
 
-    stack: Any = Stack()
+    stack = Stack()
     stack.candidate_image = candidate_image
 
-    def online_backup(value: Any) -> None:
+    def online_backup(value: Stack) -> None:
         value.backup_finished = True
 
     monkeypatch.setattr(system_proof, "_coordinated_restore_proof", online_backup)
@@ -128,7 +140,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     monkeypatch.setattr(system_proof, "_system_image_ids", lambda value: {})
     monkeypatch.setattr(system_proof, "required_output", lambda *args, **kwargs: "28.4.0")
 
-    report = system_proof.run_system_proof(stack, build_images=build_images)
+    report = system_proof.run_system_proof(stack, build_images=build_images)  # type: ignore[arg-type]  # The double supplies only this proof path.
     assert report["status"] == "passed"
     assert stack.runtime_contents_checked
     assert stack.availability_checked
@@ -169,7 +181,7 @@ def test_system_proof_stops_after_candidate_identity_mismatch(
             events.append("identity")
             raise isolation.LaneError("candidate image proof", "proxy-web image mismatch")
 
-        def run(self, label: str, *args: str, **kwargs: Any) -> None:
+        def run(self, label: str, *args: str, **kwargs: object) -> None:
             del label, kwargs
             events.append("create" if args[0] == "create" else "long-step")
 
@@ -180,7 +192,7 @@ def test_system_proof_stops_after_candidate_identity_mismatch(
 
 
 def test_system_step_reports_fractional_seconds_even_when_it_fails() -> None:
-    evidence: list[dict[str, Any]] = []
+    evidence: list[system_proof.SystemStep] = []
 
     def fail() -> None:
         raise RuntimeError("expected failure")
@@ -376,7 +388,7 @@ def test_system_health_probe_outlasts_database_pool_acquisition(
 ) -> None:
     calls: list[tuple[str, float]] = []
 
-    def unavailable(request: urllib.request.Request, timeout: float) -> Any:
+    def unavailable(request: urllib.request.Request, timeout: float) -> object:
         calls.append((request.full_url, timeout))
         raise urllib.error.HTTPError(request.full_url, 503, "Unavailable", HTTPMessage(), None)
 
@@ -676,7 +688,7 @@ def test_lane_dispatch_keeps_the_fixed_compose_contract(
 
 def test_lane_build_targets_include_active_buildable_dependencies() -> None:
     class FakeStack:
-        def capture(self, *arguments: str, **kwargs: Any) -> str:
+        def capture(self, *arguments: str, **kwargs: object) -> str:
             del arguments, kwargs
             return json.dumps(
                 {
@@ -690,8 +702,8 @@ def test_lane_build_targets_include_active_buildable_dependencies() -> None:
                 }
             )
 
-    stack: Any = FakeStack()
-    assert lane_runner._lane_build_targets(stack, "tests") == (
+    stack = FakeStack()
+    assert lane_runner._lane_build_targets(stack, "tests") == (  # type: ignore[arg-type]  # The double supplies only Compose capture.
         "migrate",
         "tests",
         "web",
@@ -702,7 +714,7 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    events: list[tuple[str, Any]] = []
+    events: list[tuple[str, object]] = []
 
     class FakeStack:
         cleanup_complete = False
@@ -716,12 +728,12 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
             events.append(("enter", None))
             return self
 
-        def __exit__(self, *arguments: Any) -> None:
+        def __exit__(self, *arguments: object) -> None:
             del arguments
             self.cleanup_complete = True
             events.append(("exit", None))
 
-        def build_services(self, services: Sequence[str], **kwargs: Any) -> dict[str, object]:
+        def build_services(self, services: Sequence[str], **kwargs: object) -> dict[str, object]:
             events.append(("build", (tuple(services), kwargs)))
             return {"services": list(services)}
 
@@ -733,7 +745,7 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
             environment: Mapping[str, str] | None = None,
         ) -> None:
             del timeout_seconds
-            events.append(("run", (step, arguments, dict(environment or {}))))
+            events.append(("run", RunCall(step, arguments, dict(environment or {}))))
             if arguments == ("run", "--rm", "--no-deps", "load-profile"):
                 assert environment is not None
                 artifact_path = tmp_path / "artifacts"
@@ -783,16 +795,16 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     class CompleteObservations:
         failed = False
 
-        def __init__(self, *args: Any) -> None:
+        def __init__(self, *args: object) -> None:
             del args
 
         def __enter__(self) -> CompleteObservations:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        def __exit__(self, *args: object) -> None:
             del args
 
-        def summary(self) -> dict[str, Any]:
+        def summary(self) -> JsonObject:
             return {"samples": 1, "complete": True}
 
     monkeypatch.setattr(load_runner, "IsolatedComposeProject", FakeStack)
@@ -809,10 +821,12 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
     load_calls = [
         event
         for name, event in events
-        if name == "run" and event[1] == ("run", "--rm", "--no-deps", "load-profile")
+        if name == "run"
+        and isinstance(event, RunCall)
+        and event.arguments == ("run", "--rm", "--no-deps", "load-profile")
     ]
     assert len(load_calls) == 1
-    load_environment = load_calls[0][2]
+    load_environment = load_calls[0].environment
     assert load_environment["STARTUNNEL_LOAD_DOCKER_VERSION"] == "29.0.0"
     assert load_environment["STARTUNNEL_LOAD_BUILD_MODE"] == "built-current-run"
     assert load_environment["STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE"] == "18"
@@ -837,11 +851,11 @@ def test_load_runner_can_reuse_verified_current_images(
         def __enter__(self) -> FakeStack:
             return self
 
-        def __exit__(self, *arguments: Any) -> None:
+        def __exit__(self, *arguments: object) -> None:
             del arguments
             self.cleanup_complete = True
 
-        def build_services(self, services: Sequence[str], **kwargs: Any) -> dict[str, object]:
+        def build_services(self, services: Sequence[str], **kwargs: object) -> dict[str, object]:
             del services, kwargs
             raise AssertionError("reuse mode must not build images")
 
@@ -893,16 +907,16 @@ def test_load_runner_can_reuse_verified_current_images(
     class CompleteObservations:
         failed = False
 
-        def __init__(self, *args: Any) -> None:
+        def __init__(self, *args: object) -> None:
             del args
 
         def __enter__(self) -> CompleteObservations:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        def __exit__(self, *args: object) -> None:
             del args
 
-        def summary(self) -> dict[str, Any]:
+        def summary(self) -> JsonObject:
             return {"samples": 1, "complete": True}
 
     monkeypatch.setattr(load_runner, "IsolatedComposeProject", FakeStack)
@@ -1005,7 +1019,7 @@ def test_system_report_is_written_only_after_volume_cleanup(
             events.append("enter")
             return self
 
-        def __exit__(self, *arguments: Any) -> None:
+        def __exit__(self, *arguments: object) -> None:
             del arguments
             self.cleanup_complete = True
             events.append("cleanup")
@@ -1015,7 +1029,7 @@ def test_system_report_is_written_only_after_volume_cleanup(
         yield
 
     def fake_proof(
-        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
+        stack: FakeStack, *, build_images: bool, report: dict[str, object]
     ) -> dict[str, object]:
         del stack
         assert build_images is True
@@ -1060,7 +1074,7 @@ def test_system_failure_writes_partial_report_after_failed_cleanup(
         def __enter__(self) -> FakeStack:
             return self
 
-        def __exit__(self, *arguments: Any) -> None:
+        def __exit__(self, *arguments: object) -> None:
             del arguments
             self.cleanup_complete = False
 
@@ -1069,8 +1083,8 @@ def test_system_failure_writes_partial_report_after_failed_cleanup(
         yield
 
     def failing_proof(
-        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
-    ) -> dict[str, Any]:
+        stack: FakeStack, *, build_images: bool, report: dict[str, object]
+    ) -> JsonObject:
         del stack, build_images
         report.update(
             status="failed",
@@ -1127,7 +1141,7 @@ def test_system_reuse_mode_is_explicit_and_not_release_evidence(
         def __enter__(self) -> FakeStack:
             return self
 
-        def __exit__(self, *arguments: Any) -> None:
+        def __exit__(self, *arguments: object) -> None:
             del arguments
             self.cleanup_complete = True
 
@@ -1136,7 +1150,7 @@ def test_system_reuse_mode_is_explicit_and_not_release_evidence(
         yield
 
     def fake_proof(
-        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
+        stack: FakeStack, *, build_images: bool, report: dict[str, object]
     ) -> dict[str, object]:
         del stack
         proof_arguments.append(build_images)
@@ -1623,7 +1637,7 @@ def test_resource_measurement_runs_only_requested_stacks(
 ) -> None:
     measured: list[str] = []
     baseline_events: list[str] = []
-    reports: list[dict[str, Any]] = []
+    reports: list[resource_runner.ResourceReport] = []
 
     @contextmanager
     def baseline_checkout(ref: str) -> Iterator[Path]:
@@ -1634,7 +1648,7 @@ def test_resource_measurement_runs_only_requested_stacks(
         finally:
             baseline_events.append("close")
 
-    def measure(root: Path, project: str, label: str, **kwargs: Any) -> dict[str, Any]:
+    def measure(root: Path, project: str, label: str, **kwargs: object) -> JsonObject:
         measured.append(label)
         assert root == (tmp_path / "baseline" if label == "baseline" else resource_runner.ROOT)
         if label == "candidate" and baseline_ref:
@@ -1651,7 +1665,7 @@ def test_resource_measurement_runs_only_requested_stacks(
             "ready_seconds": 5,
         }
 
-    def report(document: dict[str, Any]) -> Path:
+    def report(document: resource_runner.ResourceReport) -> Path:
         reports.append(document)
         return tmp_path / "report.json"
 

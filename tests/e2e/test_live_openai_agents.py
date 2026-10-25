@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -57,7 +56,7 @@ def _unique_tmpfs_path(label: str, suffix: str) -> Path:
     return path
 
 
-def _load_safe_evidence(path: Path) -> dict[str, Any]:
+def _load_safe_evidence(path: Path) -> dict[str, object]:
     raw: object = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(raw, dict)
     assert set(raw) == {"scenarios"}
@@ -86,7 +85,7 @@ def _load_safe_evidence(path: Path) -> dict[str, Any]:
 
 def _assert_database_evidence(
     database_url: str,
-    scenario: dict[str, Any],
+    scenario: dict[str, object],
 ) -> None:
     with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
         cursor.execute(

@@ -93,7 +93,7 @@ def _consume(
                 error = RateLimited(
                     f"The {rule} limit was reached. Try again in {retry_after} seconds."
                 )
-                error.retry_after = retry_after  # type: ignore[attr-defined]
+                error.retry_after = retry_after
                 raise error
 
             accepted.append(now_ms)

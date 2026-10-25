@@ -27,8 +27,11 @@ def test_alphabet_is_exact_alchemical_unicode_range() -> None:
     assert [ord(glyph) for glyph in GLYPH_ALPHABET] == list(range(0x1F700, 0x1F740))
 
 
+# Hypothesis exposes a generated Callable[..., None]; the test body remains typed.
 @given(st.binary(min_size=16, max_size=16))
-def test_round_trip_for_each_token(token: bytes) -> None:
+def test_round_trip_for_each_token(  # type: ignore[misc]
+    token: bytes,
+) -> None:
     address = encode_token(token)
     assert len(address) == ADDRESS_GLYPHS
     assert parse_address(address) == token
@@ -41,12 +44,13 @@ def test_unicode_whitespace_is_accepted() -> None:
     assert parse_address(spaced) == bytes(range(16))
 
 
+# Hypothesis exposes a generated Callable[..., None]; the test body remains typed.
 @given(
     st.binary(min_size=16, max_size=16),
     st.sampled_from([" ", "\t", "\n", "\r", "\u00a0", "\u2003", "\u2028", "\u3000"]),
     st.integers(min_value=0, max_value=24),
 )
-def test_unicode_whitespace_is_accepted_at_each_position(
+def test_unicode_whitespace_is_accepted_at_each_position(  # type: ignore[misc]
     token: bytes, whitespace: str, position: int
 ) -> None:
     address = encode_token(token)

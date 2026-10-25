@@ -7,7 +7,27 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
+
+if __package__:
+    from .json_data import JsonObject, JsonValue, json_object
+else:
+    from json_data import (  # type: ignore[import-not-found,no-redef]
+        JsonObject,
+        JsonValue,
+        json_object,
+    )
+
+
+class FactoredResponses(TypedDict):
+    common_headers: JsonObject
+    error_responses: JsonObject
+    operations: dict[str, JsonObject]
+
+
+class ResponseContract(FactoredResponses):
+    components: dict[str, JsonObject]
+
 
 ROOT = Path(__file__).resolve().parents[1]
 OPENAPI = ROOT / "generated" / "openapi.json"
@@ -37,7 +57,7 @@ def _component_reference(reference: str) -> tuple[str, str]:
     return group, name
 
 
-def _references(value: Any) -> list[str]:
+def _references(value: JsonValue) -> list[str]:
     found: list[str] = []
     if isinstance(value, dict):
         reference = value.get("$ref")
@@ -53,21 +73,21 @@ def _references(value: Any) -> list[str]:
     return found
 
 
-def _factor_responses(operations: dict[str, Any]) -> dict[str, Any]:
+def _factor_responses(operations: dict[str, dict[str, JsonObject]]) -> FactoredResponses:
     """Share identical response headers and error definitions."""
 
     responses = [response for operation in operations.values() for response in operation.values()]
-    common_headers = dict(responses[0].get("headers", {})) if responses else {}
+    common_headers = dict(json_object(responses[0].get("headers", {}))) if responses else {}
     for response in responses[1:]:
-        headers = response.get("headers", {})
+        headers = json_object(response.get("headers", {}))
         common_headers = {
             name: value
             for name, value in common_headers.items()
             if name in headers and headers[name] == value
         }
 
-    errors: dict[str, Any] = {}
-    compact: dict[str, Any] = {}
+    errors: JsonObject = {}
+    compact: dict[str, JsonObject] = {}
     for operation, definitions in sorted(operations.items()):
         compact[operation] = {}
         for status, response in sorted(definitions.items()):
@@ -75,7 +95,7 @@ def _factor_responses(operations: dict[str, Any]) -> dict[str, Any]:
             if common_headers:
                 headers = {
                     name: value
-                    for name, value in response["headers"].items()
+                    for name, value in json_object(response["headers"]).items()
                     if name not in common_headers
                 }
                 if headers:
@@ -90,20 +110,22 @@ def _factor_responses(operations: dict[str, Any]) -> dict[str, Any]:
     return {"common_headers": common_headers, "error_responses": errors, "operations": compact}
 
 
-def build_contract(document: dict[str, Any]) -> dict[str, Any]:
+def build_contract(document: JsonObject) -> ResponseContract:
     """Factor public responses and keep their referenced schemas and headers."""
     paths = document.get("paths")
     components = document.get("components", {})
     if not isinstance(components, dict):
         raise ValueError("OpenAPI document components must be an object")
-    source_components = {group: components.get(group, {}) for group in SUPPORTED_COMPONENT_GROUPS}
+    source_components = {
+        group: json_object(components.get(group, {})) for group in SUPPORTED_COMPONENT_GROUPS
+    }
     if not isinstance(paths, dict):
         raise ValueError("OpenAPI document must contain a paths object")
     for group, definitions in source_components.items():
         if not isinstance(definitions, dict):
             raise ValueError(f"OpenAPI document components.{group} must be an object")
 
-    operations: dict[str, Any] = {}
+    operations: dict[str, dict[str, JsonObject]] = {}
     selected_names: dict[str, set[str]] = {group: set() for group in source_components}
     pending: list[tuple[str, str]] = []
     for path, path_item in paths.items():
@@ -118,15 +140,20 @@ def build_contract(document: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"OpenAPI operation {method.upper()} {path} must be an object")
             if "responses" not in operation:
                 raise ValueError(f"OpenAPI operation {method.upper()} {path} has no responses")
-            responses = operation["responses"]
+            responses = {
+                status: json_object(response)
+                for status, response in json_object(operation["responses"]).items()
+            }
             command_path = re.sub(r"\{[^{}]+\}", "{id}", path)
             key = f"{method.upper()} {command_path}"
             if key in operations:
                 raise ValueError(f"OpenAPI response paths overlap at {key}")
             operations[key] = responses
-            pending.extend(_component_reference(reference) for reference in _references(responses))
+            pending.extend(
+                _component_reference(reference) for reference in _references(json_object(responses))
+            )
 
-    selected_components: dict[str, dict[str, Any]] = {group: {} for group in source_components}
+    selected_components: dict[str, JsonObject] = {group: {} for group in source_components}
     while pending:
         group, name = pending.pop()
         if name in selected_names[group]:
@@ -145,7 +172,7 @@ def build_contract(document: dict[str, Any]) -> dict[str, Any]:
     return {**_factor_responses(operations), "components": selected_components}
 
 
-def render_contract(document: dict[str, Any]) -> str:
+def render_contract(document: JsonObject) -> str:
     """Render the generated Python assignment block."""
     rendered_json = json.dumps(
         build_contract(document),
@@ -154,7 +181,9 @@ def render_contract(document: dict[str, Any]) -> str:
         sort_keys=True,
     )
     return (
-        f'CLIENT_RESPONSE_CONTRACT = json.loads(\n    r"""\n{rendered_json}\n"""  # noqa: E501\n)\n'
+        'CLIENT_RESPONSE_CONTRACT = _contract(\n    json.loads(\n        r"""\n'
+        + rendered_json
+        + '\n"""  # noqa: E501\n    )\n)\n'
     )
 
 
@@ -179,7 +208,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     try:
-        document = json.loads(OPENAPI.read_text(encoding="utf-8"))
+        document = json_object(json.loads(OPENAPI.read_text(encoding="utf-8")))
         source = CLIENT.read_text(encoding="utf-8")
         block = render_contract(document)
         desired = _replace_generated_block(source, block)

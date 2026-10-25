@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from asgiref.sync import async_to_sync
 from bs4 import BeautifulSoup
 from django.forms import IntegerField
 from django.test import AsyncClient, Client
+from tests.factories import CredentialFactory
 
 from api.router import api
 from core.models import RateLimitBucket
@@ -21,7 +21,7 @@ from tunnels.models import Cycle
 
 @pytest.mark.django_db(transaction=True)
 def test_async_activity_missing_address_preserves_error_and_primary_charge(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     _, key = credential_factory()
     client = AsyncClient(raise_request_exception=False)
@@ -40,9 +40,10 @@ def test_async_activity_missing_address_preserves_error_and_primary_charge(
 @pytest.mark.django_db
 @pytest.mark.parametrize("action", ["start", "rollover"])
 def test_browser_cycle_lifetime_matches_supported_server_limit(
-    action: str, client: Client, credential_factory: Any
+    action: str, client: Client, credential_factory: CredentialFactory
 ) -> None:
     credential, _ = credential_factory()
+    assert credential.created_by is not None
     created = create_tunnel(
         credential=credential,
         idempotency_key=f"browser-{action}-create",
@@ -91,7 +92,9 @@ def test_browser_cycle_lifetime_matches_supported_server_limit(
 
 
 @pytest.mark.django_db
-def test_create_payload_error_is_in_openapi(client: Client, credential_factory: Any) -> None:
+def test_create_payload_error_is_in_openapi(
+    client: Client, credential_factory: CredentialFactory
+) -> None:
     _, key = credential_factory()
     response = client.post(
         "/api/v1/tunnels",

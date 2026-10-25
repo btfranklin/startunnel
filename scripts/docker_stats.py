@@ -8,8 +8,22 @@ import re
 import socket
 import struct
 import time
-from typing import Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonObject,
+        json_object,
+        object_array,
+    )
+else:
+    from json_data import (
+        JsonObject,
+        json_object,
+        object_array,
+    )
+
 
 MAX_RESPONSE_BYTES = 1_048_576
 
@@ -92,17 +106,17 @@ class DockerStats:
         finally:
             connection.close()
 
-    def get(self, path: str) -> dict[str, Any]:
+    def get(self, path: str) -> JsonObject:
         data = json.loads(self._request(path))
         if not isinstance(data, dict):
             raise ValueError("Docker returned invalid resource data.")
-        return data
+        return json_object(data)
 
-    def get_list(self, path: str) -> list[dict[str, Any]]:
+    def get_list(self, path: str) -> list[JsonObject]:
         data = json.loads(self._request(path))
         if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
             raise ValueError("Docker returned invalid container inventory.")
-        return data
+        return object_array(data)
 
     def exec(
         self, identifier: str, command: tuple[str, ...], *, environment: tuple[str, ...] = ()

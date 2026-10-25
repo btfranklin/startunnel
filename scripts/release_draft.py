@@ -7,11 +7,23 @@ import json
 import os
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_object,
+        object_array,
+    )
+else:
+    from json_data import (
+        json_object,
+        object_array,
+    )
 
 
-def check_existing_record(old: dict[str, Any], new: dict[str, Any]) -> None:
+def check_existing_record(old: Mapping[str, object], new: Mapping[str, object]) -> None:
     for name in ("version", "source_commit", "image", "platform"):
         if old.get(name) != new.get(name):
             raise ValueError(
@@ -19,7 +31,7 @@ def check_existing_record(old: dict[str, Any], new: dict[str, Any]) -> None:
             )
 
 
-def existing_draft(tag: str, record: dict[str, Any]) -> bool:
+def existing_draft(tag: str, record: Mapping[str, object]) -> bool:
     repository = os.environ["GH_REPO"]
     result = subprocess.run(
         ["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
@@ -31,16 +43,16 @@ def existing_draft(tag: str, record: dict[str, Any]) -> bool:
         if "(HTTP 404)" in result.stderr:
             return False
         raise ValueError("Could not inspect the existing release; refusing to proceed.")
-    release = json.loads(result.stdout)
+    release = json_object(json.loads(result.stdout))
     if release.get("draft") is not True:
         raise ValueError("A published release must not be changed.")
-    if any(asset["name"] == "release.json" for asset in release.get("assets", [])):
+    if any(asset["name"] == "release.json" for asset in object_array(release.get("assets", []))):
         with tempfile.TemporaryDirectory(prefix="startunnel-draft-") as directory:
             subprocess.run(
                 ["gh", "release", "download", tag, "--pattern", "release.json", "--dir", directory],
                 check=True,
             )
-            old = json.loads((Path(directory) / "release.json").read_text())
+            old = json_object(json.loads((Path(directory) / "release.json").read_text()))
             check_existing_record(old, record)
     return True
 
@@ -53,7 +65,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        record = json.loads(Path("release.json").read_text())
+        record = json_object(json.loads(Path("release.json").read_text()))
         if args.tag != record.get("version"):
             raise ValueError("Draft tag must match the deployment record.")
         exists = existing_draft(args.tag, record)

@@ -14,8 +14,26 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, NotRequired, TextIO, TypedDict
 from urllib.parse import quote, urlencode
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonObject,
+        JsonValue,
+        json_object,
+        json_string,
+        json_value,
+    )
+else:
+    from json_data import (
+        JsonObject,
+        JsonValue,
+        json_object,
+        json_string,
+        json_value,
+    )
+
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import IsolatedComposeProject, assert_local_docker
@@ -77,6 +95,65 @@ POSTGRES_ENVIRONMENT = (
 )
 
 
+NumericFields = dict[str, int | float | None]
+
+
+class ContainerCounters(TypedDict):
+    cpu_usage_ns: int | float | None
+    cpu_throttling: NumericFields
+    memory: NumericFields
+    memory_pressure: NumericFields
+
+
+class PoolSnapshot(TypedDict):
+    pool: NumericFields
+    monotonic_seconds: int | float | None
+    cpu_seconds: int | float | None
+    peak_memory_bytes: int | float | None
+
+
+class CollectorCounters(TypedDict):
+    thread_cpu_seconds: float
+    process_cpu_seconds: float
+    child_cpu_seconds: float
+    peak_memory_bytes: int
+    sample_overhead_seconds: float
+    pool_reader_cpu_seconds: int | float | None
+    pool_reader_peak_memory_bytes: int | float | None
+    scheduling_lag_seconds: NotRequired[float]
+
+
+class ObservationSample(TypedDict):
+    captured_at: str
+    monotonic_seconds: float
+    services: dict[str, ContainerCounters | None]
+    postgres: NumericFields
+    pool: NumericFields
+    errors: list[str]
+    collector: NotRequired[CollectorCounters]
+
+
+class ObservationSummary(TypedDict):
+    samples: int
+    complete: bool
+    services_seen: list[str]
+    postgres_samples: int
+    pool_samples: int
+    expected_pool_workers: int
+    pool_missing_samples: int
+    pool_error_samples: int
+    first_monotonic_seconds: float | None
+    last_monotonic_seconds: float | None
+    max_sample_gap_seconds: float
+    max_sample_overhead_seconds: float
+    errors: int
+    collector_failed: bool
+    sample_interval_seconds: int
+    host_capacity: dict[str, int | float | None]
+    missing_values: str
+    wait_estimate: str
+
+
 def numeric(value: object) -> int | float | None:
     """Discard all text and non-finite numbers at the output boundary."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -89,11 +166,11 @@ def numeric_fields(source: object, names: tuple[str, ...]) -> dict[str, int | fl
     return {name: numeric(values.get(name)) for name in names}
 
 
-def container_counters(raw: dict[str, Any]) -> dict[str, object]:
-    cpu = raw.get("cpu_stats") or {}
-    memory = raw.get("memory_stats") or {}
+def container_counters(raw: JsonObject) -> ContainerCounters:
+    cpu = json_object(raw.get("cpu_stats") or {})
+    memory = json_object(raw.get("memory_stats") or {})
     return {
-        "cpu_usage_ns": numeric((cpu.get("cpu_usage") or {}).get("total_usage")),
+        "cpu_usage_ns": numeric(json_object(cpu.get("cpu_usage") or {}).get("total_usage")),
         "cpu_throttling": numeric_fields(
             cpu.get("throttling_data"), ("periods", "throttled_periods", "throttled_time")
         ),
@@ -132,7 +209,7 @@ class PoolReader:
         self.failed = False
         self.stopping = False
         self.closed = False
-        self.latest: dict[str, Any] | None = None
+        self.latest: PoolSnapshot | None = None
         self.received_at: float | None = None
         self.thread = threading.Thread(target=self._read, name="pool-reader", daemon=True)
 
@@ -182,11 +259,11 @@ class PoolReader:
                 pool = numeric_fields(
                     raw["pool"], (*POOL_FIELDS, *(f"sampler_{status}" for status in POOL_STATUSES))
                 )
-                snapshot = {
+                snapshot: PoolSnapshot = {
                     "pool": pool,
-                    **numeric_fields(
-                        raw, ("monotonic_seconds", "cpu_seconds", "peak_memory_bytes")
-                    ),
+                    "monotonic_seconds": numeric(raw.get("monotonic_seconds")),
+                    "cpu_seconds": numeric(raw.get("cpu_seconds")),
+                    "peak_memory_bytes": numeric(raw.get("peak_memory_bytes")),
                 }
                 if any(
                     snapshot[name] is None
@@ -201,7 +278,7 @@ class PoolReader:
         finally:
             self.ready.set()
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> PoolSnapshot:
         with self.lock:
             if (
                 self.failed
@@ -210,7 +287,7 @@ class PoolReader:
                 or time.monotonic() - self.received_at > 2
             ):
                 raise ValueError("The pool reader snapshot is missing or stale.")
-            return dict(self.latest)
+            return self.latest.copy()
 
     def close(self) -> None:
         if self.closed:
@@ -260,8 +337,8 @@ class LoadObservations:
         self.last_monotonic: float | None = None
         self.max_gap_seconds = 0.0
         self.identifiers: dict[str, str] = {}
-        self.capacity: dict[str, object] = {"host_cpu_count": os.cpu_count()}
-        self._output: Any = None
+        self.capacity: NumericFields = {"host_cpu_count": os.cpu_count()}
+        self._output: TextIO | None = None
         self.executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="load-counter")
         self.max_sample_overhead_seconds = 0.0
         self.pool_reader: PoolReader | None = None
@@ -310,7 +387,7 @@ class LoadObservations:
         if self._output is not None:
             self._output.close()
 
-    def summary(self) -> dict[str, object]:
+    def summary(self) -> ObservationSummary:
         return {
             "samples": self.samples,
             "complete": (
@@ -349,20 +426,29 @@ class LoadObservations:
             }
         )
         for row in self.stats.get_list(f"/containers/json?{query}"):
-            name = (row.get("Labels") or {}).get("com.docker.compose.service")
-            identifier = row.get("Id", "")
+            name = json_object(row.get("Labels") or {}).get("com.docker.compose.service")
+            identifier = json_string(row.get("Id", ""))
             if (
-                name in SERVICES
+                isinstance(name, str)
+                and name in SERVICES
                 and row.get("State") == "running"
                 and re.fullmatch(r"[a-f0-9]{12,64}", identifier)
             ):
                 self.identifiers[name] = identifier
 
-    def _sample(self) -> dict[str, object]:
+    def _service_value(self, identifier: str) -> JsonValue:
+        return json_value(
+            self.stats.get(f"/containers/{quote(identifier)}/stats?stream=false&one-shot=true")
+        )
+
+    def _postgres_value(self, identifier: str) -> JsonValue:
+        return self.stats.exec(identifier, POSTGRES_COMMAND, environment=POSTGRES_ENVIRONMENT)
+
+    def _sample(self) -> ObservationSample:
         started = time.monotonic()
         usage = resource.getrusage(resource.RUSAGE_SELF)
         children = resource.getrusage(resource.RUSAGE_CHILDREN)
-        sample: dict[str, object] = {
+        sample: ObservationSample = {
             "captured_at": datetime.now(UTC).isoformat(),
             "monotonic_seconds": started,
             "services": {name: None for name in SERVICES},
@@ -379,18 +465,13 @@ class LoadObservations:
                 self._inventory()
         except (ValueError, OSError, KeyError, TypeError):
             errors.append("container_inventory_unavailable")
-        jobs: dict[str, Future[Any]] = {
-            name: self.executor.submit(
-                self.stats.get, f"/containers/{quote(identifier)}/stats?stream=false&one-shot=true"
-            )
+        jobs: dict[str, Future[JsonValue]] = {
+            name: self.executor.submit(self._service_value, identifier)
             for name, identifier in self.identifiers.items()
         }
         if "postgres" in self.identifiers:
             jobs["postgres_aggregate"] = self.executor.submit(
-                self.stats.exec,
-                self.identifiers["postgres"],
-                POSTGRES_COMMAND,
-                environment=POSTGRES_ENVIRONMENT,
+                self._postgres_value, self.identifiers["postgres"]
             )
         _, pending = wait(jobs.values(), timeout=max(0.0, started + 1 - time.monotonic()))
         if pending:
@@ -400,7 +481,7 @@ class LoadObservations:
             errors.append("sample_deadline_exceeded")
             for future in pending:
                 future.cancel()
-        services: dict[str, object] = {name: None for name in SERVICES}
+        services: dict[str, ContainerCounters | None] = {name: None for name in SERVICES}
         for name, future in jobs.items():
             if future in pending:
                 errors.append(f"{name}_counters_unavailable")
@@ -408,16 +489,16 @@ class LoadObservations:
             try:
                 value = future.result()
                 if name in SERVICES:
-                    services[name] = container_counters(value)
+                    services[name] = container_counters(json_object(value))
                     self.services_seen.add(name)
                 elif name == "postgres_aggregate":
-                    postgres = numeric_fields(json.loads(value), DATABASE_FIELDS)
+                    postgres = numeric_fields(json.loads(json_string(value)), DATABASE_FIELDS)
                     sample["postgres"] = postgres
                     if all(item is not None for item in postgres.values()):
                         self.postgres_samples += 1
             except (ValueError, OSError, KeyError, TypeError):
                 errors.append(f"{name}_counters_unavailable")
-        reader: dict[str, Any] = {}
+        reader: PoolSnapshot | None = None
         try:
             if self.pool_reader is None:
                 raise ValueError("The pool reader is missing.")
@@ -449,13 +530,16 @@ class LoadObservations:
             "child_cpu_seconds": children.ru_utime + children.ru_stime,
             "peak_memory_bytes": usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024),
             "sample_overhead_seconds": overhead,
-            "pool_reader_cpu_seconds": reader.get("cpu_seconds"),
-            "pool_reader_peak_memory_bytes": reader.get("peak_memory_bytes"),
+            "pool_reader_cpu_seconds": reader.get("cpu_seconds") if reader is not None else None,
+            "pool_reader_peak_memory_bytes": reader.get("peak_memory_bytes")
+            if reader is not None
+            else None,
         }
         return sample
 
     def _run(self) -> None:
         due = time.monotonic()
+        assert self._output is not None
         try:
             while not self.stop_event.is_set():
                 sample = self._sample()
@@ -465,9 +549,9 @@ class LoadObservations:
                 if self.last_monotonic is not None:
                     self.max_gap_seconds = max(self.max_gap_seconds, captured - self.last_monotonic)
                 self.last_monotonic = captured
-                sample["collector"]["scheduling_lag_seconds"] = max(  # type: ignore[index]
+                sample["collector"]["scheduling_lag_seconds"] = max(
                     0.0,
-                    sample["monotonic_seconds"] - due,  # type: ignore[operator]
+                    sample["monotonic_seconds"] - due,
                 )
                 self._output.write(json.dumps(sample, sort_keys=True) + "\n")
                 self._output.flush()

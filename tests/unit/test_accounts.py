@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from io import StringIO
-from typing import Any
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.core.management import CommandError, call_command
-from django.test import Client
+from django.test import Client, RequestFactory
+from tests.factories import UserFactory
 
 from accounts.forms import InstanceAdminCreationForm, ThrottledAuthenticationForm
 from accounts.models import User
@@ -34,7 +34,9 @@ def test_user_manager_rejects_invalid_creation() -> None:
         User.objects.create_superuser(username="root", is_superuser=False)
 
 
-def test_case_only_usernames_are_rejected_by_manager_model_and_form(user_factory: Any) -> None:
+def test_case_only_usernames_are_rejected_by_manager_model_and_form(
+    user_factory: UserFactory,
+) -> None:
     existing = user_factory(username="Operator")
     with pytest.raises(ValidationError):
         User.objects.create_user(username="operator")
@@ -51,7 +53,7 @@ def test_case_only_usernames_are_rejected_by_manager_model_and_form(user_factory
     assert User.objects.count() == 1
 
 
-def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any) -> None:
+def test_local_login_logout_and_safe_redirects(client: Client, user_factory: UserFactory) -> None:
     user_factory(username="operator", password="test-password-42")
     response = client.post(
         "/accounts/login/?next=https://attacker.invalid/",
@@ -66,11 +68,11 @@ def test_local_login_logout_and_safe_redirects(client: Client, user_factory: Any
 
 
 def test_login_form_maps_rate_limit_to_generic_authentication_error(
-    rf: Any, monkeypatch: pytest.MonkeyPatch
+    rf: RequestFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core.errors import RateLimited
 
-    def limited(**kwargs: Any) -> None:
+    def limited(**kwargs: object) -> None:
         assert kwargs == {"source_ip": "192.0.2.4", "username": "Someone"}
         raise RateLimited()
 
@@ -122,7 +124,7 @@ def test_instance_admin_command_rejects_bad_input(
 
 
 def test_instance_admin_command_rejects_duplicate(
-    user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user_factory(username="operator")
     monkeypatch.setattr(
@@ -132,7 +134,7 @@ def test_instance_admin_command_rejects_duplicate(
         call_command("create_instance_admin", "OPERATOR")
 
 
-def test_admin_pages_create_and_change_accounts(client: Client, user_factory: Any) -> None:
+def test_admin_pages_create_and_change_accounts(client: Client, user_factory: UserFactory) -> None:
     actor = user_factory(username="operator")
     client.force_login(actor)
     assert client.get("/app/admins/").status_code == 200
@@ -164,7 +166,7 @@ def test_admin_pages_create_and_change_accounts(client: Client, user_factory: An
     assert client.post("/app/admins/state/", {"admin_id": "bad"}).status_code == 404
 
 
-def test_admin_create_page_returns_form_errors(client: Client, user_factory: Any) -> None:
+def test_admin_create_page_returns_form_errors(client: Client, user_factory: UserFactory) -> None:
     client.force_login(user_factory())
     response = client.post(
         "/app/admins/create/",
@@ -176,7 +178,7 @@ def test_admin_create_page_returns_form_errors(client: Client, user_factory: Any
 
 @pytest.mark.parametrize("login_path", ["/accounts/login/", "/admin/login/"])
 def test_each_login_path_rejects_valid_credentials_after_the_limit(
-    client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch, login_path: str
+    client: Client, user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch, login_path: str
 ) -> None:
     from core.errors import RateLimited
 
@@ -184,7 +186,7 @@ def test_each_login_path_rejects_valid_credentials_after_the_limit(
     user.is_staff = True
     user.save(update_fields=["is_staff"])
 
-    def limited(**kwargs: Any) -> None:
+    def limited(**kwargs: object) -> None:
         raise RateLimited()
 
     monkeypatch.setattr("core.rate_limits.consume_login_attempt", limited)
@@ -195,7 +197,7 @@ def test_each_login_path_rejects_valid_credentials_after_the_limit(
 
 @pytest.mark.parametrize("is_staff", [False, True])
 def test_admin_login_keeps_the_staff_requirement(
-    client: Client, user_factory: Any, is_staff: bool
+    client: Client, user_factory: UserFactory, is_staff: bool
 ) -> None:
     user = user_factory(username="staff-check")
     user.is_staff = is_staff

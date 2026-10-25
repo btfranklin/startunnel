@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
+from tests.factories import CredentialFactory, UserFactory
 
 from core.notifications import ACTIVITY_CHANNEL
 from tunnels.admin_actions import (
@@ -21,7 +20,9 @@ pytestmark = pytest.mark.django_db
 
 
 def test_event_batches_keep_lifecycle_order_and_the_next_position(
-    credential_factory: Any, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     notifications: list[tuple[str, str]] = []
     monkeypatch.setattr(

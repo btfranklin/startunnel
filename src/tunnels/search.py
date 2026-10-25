@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TypedDict
 from uuid import UUID
 
 from django.contrib.postgres.search import SearchHeadline, SearchQuery, SearchRank, SearchVector
@@ -20,6 +20,7 @@ from core.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
 from core.limits import MAX_CORRELATION_ID_CHARACTERS
 
 from .access import resolve_tunnel, select_cycle
+from .message_data import SenderData
 from .models import Cycle, Message, Tunnel
 from .payloads import validate_storable_text
 
@@ -33,7 +34,21 @@ class SearchHit:
     rank: int
 
 
-def search_hit_payload(hit: SearchHit) -> dict[str, Any]:
+class SearchHitData(TypedDict):
+    message_id: str
+    cycle_id: str
+    parent_id: str | None
+    sender: SenderData
+    mention_ids: list[str]
+    correlation_id: str | None
+    sequence: int
+    depth: int
+    created_at: str
+    rank: int
+    snippet: str
+
+
+def search_hit_payload(hit: SearchHit) -> SearchHitData:
     """Return the public search result fields for one hit."""
 
     message = hit.message

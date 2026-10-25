@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import release_record
@@ -15,13 +14,14 @@ from scripts import upgrade_production as upgrade
 from tests.structure.workflows import load_workflow
 
 
-def record() -> dict[str, Any]:
+def record() -> release_record.ReleaseRecord:
     return {
         **release_record.specification("v0.1.0"),
         "schema": 1,
         "platform": "linux/amd64",
         "source_commit": "a" * 40,
         "image": "ghcr.io/btfranklin/startunnel@sha256:" + "b" * 64,
+        "validation_run_id": 1,
     }
 
 
@@ -83,7 +83,7 @@ def test_unversioned_upgrade_requires_ancestor_and_unchanged_applied_migrations(
 ) -> None:
     commands: list[list[str]] = []
 
-    def run(command: list[str], **kwargs: Any) -> str:
+    def run(command: list[str], **kwargs: object) -> str:
         commands.append(command)
         return ""
 
@@ -119,7 +119,7 @@ def test_wrong_checkout_never_mutates_services_or_configuration(
     candidate.write_text(json.dumps(record()))
     commands: list[list[str]] = []
 
-    def run(command: list[str], **kwargs: Any) -> str:
+    def run(command: list[str], **kwargs: object) -> str:
         commands.append(command)
         return "d" * 40
 
@@ -216,7 +216,7 @@ def test_release_summary_step_is_optional_and_uses_only_successful_output() -> N
 
 
 def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(command: list[str], **kwargs: Any) -> str:
+    def fail(command: list[str], **kwargs: object) -> str:
         raise subprocess.CalledProcessError(1, command)
 
     monkeypatch.setattr(upgrade, "run", fail)
@@ -277,7 +277,7 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
     monkeypatch.setattr(upgrade, "rendered_images", lambda command: [candidate["image"]])
     commands: list[list[str]] = []
 
-    def run(command: list[str], **kwargs: Any) -> str:
+    def run(command: list[str], **kwargs: object) -> str:
         commands.append(command)
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return str(candidate["source_commit"])
@@ -416,7 +416,7 @@ def test_interrupted_upgrade_retry_preserves_snapshots_and_replaces_configuratio
     commands: list[list[str]] = []
     fail_stop = interrupt_at == "after-candidate"
 
-    def run(command: list[str], **kwargs: Any) -> str:
+    def run(command: list[str], **kwargs: object) -> str:
         commands.append(command)
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return str(candidate["source_commit"])

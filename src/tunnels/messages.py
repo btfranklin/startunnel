@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 from django.db import connection, transaction
@@ -121,7 +121,7 @@ def _validate_session(value: str | None) -> str | None:
     return value
 
 
-def _add_session_request_data(request_data: dict[str, Any], session: str | None) -> None:
+def _add_session_request_data(request_data: dict[str, object], session: str | None) -> None:
     # Preserve fingerprints from requests stored before sessions existed.
     if session is not None:
         request_data["session"] = session
@@ -188,7 +188,7 @@ def post_reply(
     idempotency_key: str,
     address: str,
     parent_id: UUID,
-    content: dict[str, Any],
+    content: Mapping[str, object],
     mentions: list[UUID] | None = None,
     correlation_id: str | None = None,
     session: str | None = None,
@@ -199,7 +199,7 @@ def post_reply(
     session = _validate_session(session)
     canonical = canonical_address(address)
     mention_ids = mentions or []
-    request_data = {
+    request_data: dict[str, object] = {
         "address": canonical,
         "parent_id": str(parent_id),
         "content": content,
@@ -556,7 +556,7 @@ def _postgresql_subtree_page(
         FROM selected
         ORDER BY 5 DESC, 6 NULLS FIRST
     """
-    parameters: list[Any] = [
+    parameters: list[UUID | int] = [
         root.id,
         cycle.id,
         high_water,

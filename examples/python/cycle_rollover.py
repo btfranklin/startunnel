@@ -53,14 +53,16 @@ async def run() -> None:
             )
             active_cycle_id = str(rolled["cycle"]["id"])
             cycles = await reader.list_cycles(address=address)
-            numbers = [item["number"] for item in cycles["items"]]  # type: ignore[index]
+            numbers = [item["number"] for item in cycles["items"]]
             if numbers != [2, 1]:
                 raise RuntimeError("The cycle directory did not contain cycles 2 and 1.")
             current = await reader.read_tree(address=address, cycle_id=active_cycle_id)
             history = await reader.read_tree(address=address, cycle_id=first_cycle_id)
-            if current["nodes"][0]["content"]["text"] != "Review release 43.":  # type: ignore[index]
+            current_content = current["nodes"][0]["content"]
+            if current_content["type"] != "text" or current_content["text"] != "Review release 43.":
                 raise RuntimeError("The active tree did not contain the second root.")
-            if history["nodes"][0]["content"]["text"] != "Review release 42.":  # type: ignore[index]
+            history_content = history["nodes"][0]["content"]
+            if history_content["type"] != "text" or history_content["text"] != "Review release 42.":
                 raise RuntimeError("The closed tree did not preserve the first root.")
             print("One stable address now contains two bounded cycles.")
         finally:

@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import pytest
 from django.test import Client
+from tests.factories import CredentialFactory
 
 from tunnels.models import Message
 from tunnels.search import SearchHit, SearchPage
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -20,8 +25,8 @@ def isolate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _post(
-    client: Client, path: str, body: dict[str, Any], key: str, retry_key: str | None = None
-) -> Any:
+    client: Client, path: str, body: Mapping[str, object], key: str, retry_key: str | None = None
+) -> _MonkeyPatchedWSGIResponse:
     headers = {"Authorization": f"Bearer {key}"}
     if retry_key:
         headers["Idempotency-Key"] = retry_key
@@ -32,7 +37,7 @@ def _post(
 
 @pytest.mark.django_db(transaction=True)
 def test_labeled_root_and_reply_appear_in_public_reads(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, key = credential_factory(name="Shared agent")
     creation = {
@@ -105,7 +110,7 @@ def test_labeled_root_and_reply_appear_in_public_reads(
 
 @pytest.mark.parametrize("label", ["", " outer", "inner ", "a\u0085", "a\u202e", "a" * 33])
 def test_api_rejects_invalid_session_labels(
-    client: Client, credential_factory: Any, label: str
+    client: Client, credential_factory: CredentialFactory, label: str
 ) -> None:
     _, key = credential_factory()
     body = {"cycle": {"root": {"content": {"type": "text", "text": "Root"}, "session": label}}}

@@ -14,7 +14,18 @@ import sys
 import tempfile
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Protocol
+from uuid import UUID
+
+if TYPE_CHECKING:
+    from django.db.migrations.executor import MigrationExecutor
+
+
+class HistoricalMessage(Protocol):
+    pk: UUID
+    parent_id: UUID | None
+    byte_count: int
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = [(name, "0001_initial") for name in ("accounts", "agents", "core", "tunnels")]
@@ -22,7 +33,9 @@ SESSION_MIGRATION = ("tunnels", "0003_message_session")
 PRE_BEACON_MIGRATION = ("tunnels", "0007_limit_cycle_root_checks_to_root_changes")
 
 
-def targets_through(executor: Any, tunnel_migration: tuple[str, str]) -> list[tuple[str, str]]:
+def targets_through(
+    executor: MigrationExecutor, tunnel_migration: tuple[str, str]
+) -> list[tuple[str, str]]:
     owned = {"accounts", "agents", "core", "tunnels"}
     return [node for node in executor.loader.graph.leaf_nodes() if node[0] not in owned] + [
         ("accounts", "0002_admincredential_adminoperation"),
@@ -93,7 +106,7 @@ def baseline(snapshot_path: Path) -> None:
             expires_at=timezone.now() + timedelta(days=1),
             retention_seconds=2592000,
         )
-        messages: list[Any] = []
+        messages: list[HistoricalMessage] = []
         for sequence, content in enumerate(("Root retained", "Reply retained"), start=1):
             message = message_model.objects.create(
                 tunnel=tunnel,
@@ -320,7 +333,7 @@ def upgraded(snapshot_path: Path) -> None:
         root_session="proof-root-session",
     )
     inspected = list_admin_resources("tunnels", actor=user)["items"]
-    assert len(inspected) == 1 and inspected[0]["address"] == created.address
+    assert len(inspected) == 1 and inspected[0].get("address") == created.address
     assert resolve_tunnel(credential=credential, address=created.address).pk == created.tunnel.pk
     historical_apps = executor.loader.project_state(targets).apps
     historical_cycle = historical_apps.get_model("tunnels", "Cycle")
@@ -469,7 +482,7 @@ def beacon_upgraded(snapshot_path: Path) -> None:
         tunnel=tunnel, event_type=TunnelEvent.Type.BEACON_LIT
     ).exists()
 
-    admin_request: dict[str, Any] = {
+    admin_request: dict[str, object] = {
         "admin_id": str(user.pk),
         "active": True,
         "expected_active": True,

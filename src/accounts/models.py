@@ -20,6 +20,7 @@ from .managers import UserManager
 
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Django removes an inherited model field when its class value is None.
     email: None = None  # type: ignore[assignment]
     REQUIRED_FIELDS: ClassVar[list[str]] = []
     objects: ClassVar[UserManager] = UserManager()

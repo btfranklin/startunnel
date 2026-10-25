@@ -7,17 +7,21 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, cast
 from uuid import uuid4
 
 import httpx
 import pytest
 from playwright.sync_api import Browser, expect
+from pydantic import TypeAdapter
 from tests.browser.test_browser_experience import (  # noqa: F401
     _database_shell,
     _download_key,
     browser,
 )
+from tests.json_values import json_array, json_at, json_integer, json_members, json_text
+
+from accounts.admin_data import OperationReference
+from core.json_types import JsonObject, json_object
 
 ROOT = Path(__file__).resolve().parents[2]
 ENABLED = os.getenv("STARTUNNEL_BROWSER_TESTS") == "1"
@@ -34,16 +38,16 @@ class UnattendedClient:
         self.path = path
         self.base_url = base_url
         self.admin_key_file = admin_key_file
-        self.receipts: list[dict[str, str]] = []
+        self.receipts: list[OperationReference] = []
 
     def command(
         self,
         *arguments: str,
-        body: dict[str, Any] | None = None,
+        body: JsonObject | None = None,
         agent_key_file: Path | None = None,
         admin_key_file: Path | None = None,
         success: bool = True,
-    ) -> dict[str, Any]:
+    ) -> JsonObject:
         environment = os.environ.copy()
         environment.pop("PYTHONPATH", None)
         for name in ("STARTUNNEL_ADMIN_KEY", "STARTUNNEL_ADMIN_KEY_FILE", "STARTUNNEL_AGENT_KEY"):
@@ -71,22 +75,24 @@ class UnattendedClient:
                 # Admin stdout can contain file paths and metadata, but no raw secret.
                 safe_result = "secret" not in result
                 assert safe_result, "Admin output must contain only secret-free metadata."
-            return cast(dict[str, Any], result)
+            return json_object(result)
         assert completed.returncode == 1
         assert completed.stdout == ""
-        return cast(dict[str, Any], json.loads(completed.stderr))
+        return json_object(json.loads(completed.stderr))
 
     def mutation(
-        self, group: str, action: str, body: dict[str, Any], *, secret_output: Path | None = None
-    ) -> dict[str, Any]:
+        self, group: str, action: str, body: JsonObject, *, secret_output: Path | None = None
+    ) -> JsonObject:
         arguments = ["admin", group, action, "--idempotency-key", uuid4().hex]
         if secret_output is not None:
             arguments.extend(("--secret-output", str(secret_output)))
         result = self.command(*arguments, body=body)
-        self.receipts.append(result["operation"])
+        self.receipts.append(
+            TypeAdapter(OperationReference).validate_python(result["operation"], strict=True)
+        )
         if secret_output is not None:
             assert secret_output.stat().st_mode & 0o777 == 0o600
-        return cast(dict[str, Any], result["resource"])
+        return json_members(result["resource"])
 
 
 def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
@@ -120,12 +126,12 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
     cli_path.write_bytes(download.content)
     client = UnattendedClient(cli_path, base_url, bootstrap_file)
     identity = client.command("admin", "me")
-    admin_id = identity["admin"]["id"]
+    admin_id = json_text(json_at(identity, "admin", "id"))
     old_key_id = identity["credential_id"]
-    assert identity["admin"]["browser_access"] is False
+    assert json_at(identity, "admin", "browser_access") is False
     assert identity["authority"] == "instance_admin"
     assert client.command("admin", "doctor")["healthy"] is True
-    assert "keys.create" in client.command("admin", "capabilities")["operations"]
+    assert "keys.create" in json_array(client.command("admin", "capabilities")["operations"])
 
     second_file = tmp_path / "second-admin.key"
     second = client.mutation(
@@ -138,7 +144,10 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         secret_output=second_file,
     )
     assert second["browser_access"] is False
-    assert client.command("admin", "me", admin_key_file=second_file)["admin"]["id"] == second["id"]
+    assert (
+        json_at(client.command("admin", "me", admin_key_file=second_file), "admin", "id")
+        == second["id"]
+    )
     password_account = client.mutation(
         "accounts",
         "create",
@@ -148,13 +157,13 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         },
     )
     assert password_account["browser_access"] is True
-    assert client.command("admin", "accounts", "get", second["id"])["active"] is True
+    assert client.command("admin", "accounts", "get", json_text(second["id"]))["active"] is True
 
     agent_file = tmp_path / "worker.key"
     agent = client.mutation(
         "agents", "create", {"name": "Unattended worker"}, secret_output=agent_file
     )
-    assert client.command("me", agent_key_file=agent_file)["agent"]["id"] == agent["id"]
+    assert json_at(client.command("me", agent_key_file=agent_file), "agent", "id") == agent["id"]
     created_tunnel = client.command(
         "create",
         "--idempotency-key",
@@ -165,10 +174,10 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
             "cycle": {"root": {"content": {"type": "text", "text": "Review this note."}}},
         },
     )
-    tunnel_id = created_tunnel["tunnel"]["id"]
-    address = created_tunnel["tunnel"]["address"]
-    cycle_id = created_tunnel["cycle"]["id"]
-    root_id = created_tunnel["cycle"]["root"]["id"]
+    tunnel_id = json_text(json_at(created_tunnel, "tunnel", "id"))
+    address = json_text(json_at(created_tunnel, "tunnel", "address"))
+    cycle_id = json_text(json_at(created_tunnel, "cycle", "id"))
+    root_id = json_text(json_at(created_tunnel, "cycle", "root", "id"))
     reply = client.command(
         "reply",
         "--idempotency-key",
@@ -186,16 +195,16 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         body={
             "address": address,
             "cycle_id": cycle_id,
-            "focus_message_id": reply["message"]["id"],
+            "focus_message_id": json_at(reply, "message", "id"),
             "max_items": 10,
             "max_bytes": 32768,
         },
     )
-    assert {root_id, reply["message"]["id"]}.issubset(
-        {item["message"]["id"] for item in context["items"]}
+    assert {root_id, json_at(reply, "message", "id")}.issubset(
+        {json_at(item, "message", "id") for item in json_array(context["items"])}
     )
     tunnel = client.command("admin", "tunnels", "get", tunnel_id)
-    generation = tunnel["address_generation"]
+    generation = json_integer(tunnel["address_generation"])
     client.mutation(
         "tunnels",
         "close",
@@ -225,7 +234,7 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
     )
     assert rolled["active_cycle_id"] != started["active_cycle_id"]
     cycles = client.command("admin", "tunnels", "cycles", tunnel_id)
-    assert len(cycles["items"]) == 3
+    assert len(json_array(cycles["items"])) == 3
     rotated = client.mutation(
         "tunnels",
         "rotate",
@@ -265,17 +274,18 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
     revoked = client.mutation("keys", "revoke", {"key_id": old_key_id})
     assert revoked["available"] is False
     rejected = client.command("admin", "me", admin_key_file=bootstrap_file, success=False)
-    assert rejected["error"]["status"] == 401
+    assert json_at(rejected, "error", "status") == 401
     agent_revoked = client.mutation("agents", "revoke", {"credential_id": agent["id"]})
     assert agent_revoked["available"] is False
     rejected_agent = client.command("me", agent_key_file=agent_file, success=False)
-    assert rejected_agent["error"]["status"] == 401
+    assert json_at(rejected_agent, "error", "status") == 401
 
     audit = client.command("admin", "audit", "list", "--limit", "100")
-    by_id = {event["id"]: event for event in audit["items"]}
+    events = [json_members(value) for value in json_array(audit["items"])]
+    by_id = {json_text(event["id"]): event for event in events}
     for receipt in client.receipts:
         operation = client.command("admin", "operations", "get", receipt["id"])
-        assert operation["result"]["operation"] == receipt
+        assert json_at(operation, "result", "operation") == receipt
         event = by_id[receipt["audit_event_id"]]
         assert event["actor_id"] == admin_id
         assert event["channel"] == "admin_api"
@@ -284,7 +294,7 @@ def test_admin_cli_completes_unattended_administration(tmp_path: Path) -> None:
         event["action"] == "admin.bootstrap"
         and event["channel"] == "server"
         and event["actor_id"] == admin_id
-        for event in audit["items"]
+        for event in events
     )
 
 

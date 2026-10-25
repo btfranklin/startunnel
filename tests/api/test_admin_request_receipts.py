@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import hmac
 import json
+from collections.abc import Mapping
 from datetime import timedelta
-from typing import Any
 from uuid import uuid4
 
 import pytest
 from django.conf import settings
 from django.test import Client
 from django.utils import timezone
+from tests.factories import UserFactory
 
 from accounts.admin_access import issue_admin_key
 from accounts.admin_commands import derive_secret
-from accounts.admin_data import agent_resource, key_resource
+from accounts.admin_data import AgentResourceData, KeyResourceData, agent_resource, key_resource
 from accounts.models import AdminReceipt, User
 from agents.services import create_credential
 from core.models import AuditEvent
@@ -23,7 +24,7 @@ from core.models import AuditEvent
 pytestmark = pytest.mark.django_db
 
 
-def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) -> AdminReceipt:
+def _old_receipt(actor: User, operation: str, data: Mapping[str, object], key: str) -> AdminReceipt:
     canonical = json.dumps(
         {"operation": operation, "data": data},
         sort_keys=True,
@@ -41,7 +42,7 @@ def _old_receipt(actor: User, operation: str, data: dict[str, Any], key: str) ->
     )
 
 
-def _store_response(receipt: AdminReceipt, resource: dict[str, Any]) -> None:
+def _store_response(receipt: AdminReceipt, resource: AgentResourceData | KeyResourceData) -> None:
     receipt.response = {
         "resource": resource,
         "operation": {"id": str(receipt.id), "audit_event_id": str(uuid4())},
@@ -52,7 +53,7 @@ def _store_response(receipt: AdminReceipt, resource: dict[str, Any]) -> None:
 
 @pytest.mark.parametrize("channel", ["api", "browser"])
 def test_existing_key_receipt_keeps_uuid_and_datetime_spelling(
-    channel: str, client: Client, user_factory: Any
+    channel: str, client: Client, user_factory: UserFactory
 ) -> None:
     actor = user_factory()
     _, admin_key = issue_admin_key(owner=actor, name="API caller")
@@ -104,7 +105,7 @@ def test_existing_key_receipt_keeps_uuid_and_datetime_spelling(
 
 @pytest.mark.parametrize("channel", ["api", "browser"])
 def test_existing_agent_receipt_keeps_omitted_browser_defaults(
-    channel: str, client: Client, user_factory: Any
+    channel: str, client: Client, user_factory: UserFactory
 ) -> None:
     actor = user_factory()
     _, admin_key = issue_admin_key(owner=actor, name="API caller")
@@ -136,7 +137,7 @@ def test_existing_agent_receipt_keeps_omitted_browser_defaults(
     assert AdminReceipt.objects.count() == 1
 
 
-def test_cleared_operation_result_is_unavailable(client: Client, user_factory: Any) -> None:
+def test_cleared_operation_result_is_unavailable(client: Client, user_factory: UserFactory) -> None:
     actor = user_factory()
     _, key = issue_admin_key(owner=actor, name="Receipt reader")
     receipt = _old_receipt(actor, "agents.create", {"name": "Expired"}, "cleared-result")

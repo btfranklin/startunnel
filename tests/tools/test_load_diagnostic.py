@@ -6,7 +6,6 @@ import io
 import selectors
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import load_diagnostic
@@ -35,7 +34,7 @@ def test_diagnostic_lock_stops_child_on_normal_and_failed_workload(
     process = Process()
     commands: list[list[str]] = []
 
-    def popen(command: list[str], **kwargs: Any) -> Process:
+    def popen(command: list[str], **kwargs: object) -> Process:
         assert kwargs["stderr"] == subprocess.DEVNULL
         commands.append(command)
         return process

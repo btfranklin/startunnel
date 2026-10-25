@@ -8,7 +8,6 @@ import shutil
 import subprocess
 from ipaddress import ip_address, ip_network
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import compose_isolation
@@ -89,7 +88,7 @@ def test_production_proxy_has_one_reserved_peer_and_preserves_explicit_trust(
 def test_isolated_proxy_subnet_skips_occupied_docker_networks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def output(command: list[str], **kwargs: Any) -> str:
+    def output(command: list[str], **kwargs: object) -> str:
         if command[2] == "ls":
             return "first\nsecond"
         return json.dumps(

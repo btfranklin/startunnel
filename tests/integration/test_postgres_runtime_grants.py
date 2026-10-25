@@ -6,20 +6,24 @@ import importlib
 import os
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
+from uuid import UUID
 
 import psycopg
 import pytest
+from django.apps import apps
 from django.db import ProgrammingError, connection, transaction
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
-from accounts.admin_commands import AgentCreate
+from accounts.admin_commands import AdminCommand, AgentCreate
 from accounts.admin_services import execute_admin_operation
-from accounts.models import AdminReceipt
+from accounts.models import AdminReceipt, User
+from agents.models import AgentCredential
 from core.audit import record_event
 from core.models import AgentReceipt, AuditEvent
 from tunnels.beacons import publish_beacon, withdraw_beacon
@@ -43,6 +47,19 @@ ROOT = Path(__file__).resolve().parents[2]
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
+class CreateTunnelArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    root_content: Mapping[str, object]
+
+
+class AdminOperationArguments(TypedDict):
+    actor: User
+    command: AdminCommand
+    key: str
+    request_data: Mapping[str, object]
+
+
 @contextmanager
 def _runtime() -> Iterator[None]:
     with transaction.atomic():
@@ -53,7 +70,7 @@ def _runtime() -> Iterator[None]:
             cursor.execute("RESET ROLE")
 
 
-def _denied(sql: str, parameters: list[Any]) -> None:
+def _denied(sql: str, parameters: list[str | int | UUID]) -> None:
     with pytest.raises(ProgrammingError) as error, _runtime(), connection.cursor() as cursor:
         cursor.execute(sql, parameters)
     assert isinstance(error.value.__cause__, psycopg.errors.InsufficientPrivilege)
@@ -82,7 +99,7 @@ def test_production_grants_match_migrations_and_classify_every_table(tmp_path: P
     with connection.cursor() as cursor:
         cursor.execute(broad_grant)
     with connection.schema_editor() as schema_editor:
-        revoke_runtime_history_delete(None, schema_editor)
+        revoke_runtime_history_delete(apps, schema_editor)
         migration = importlib.import_module("tunnels.migrations.0011_protect_runtime_history")
         migration.protect_runtime_history(None, schema_editor)
     expected = _table_privileges()
@@ -178,8 +195,8 @@ def test_production_grants_match_migrations_and_classify_every_table(tmp_path: P
 
 
 def test_runtime_preserves_cycle_deadlines_beacons_and_audit(
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
 ) -> None:
     credential, _ = credential_factory()
     actor = user_factory()
@@ -214,7 +231,7 @@ def test_runtime_preserves_cycle_deadlines_beacons_and_audit(
         withdraw_beacon(
             credential=credential,
             address=created.address,
-            beacon_id=beacon["id"],
+            beacon_id=UUID(beacon["id"]),
             idempotency_key="runtime-history-withdraw",
         )
         close_cycle(
@@ -257,17 +274,17 @@ def test_runtime_preserves_cycle_deadlines_beacons_and_audit(
 
 
 def test_runtime_receipts_finish_replay_and_reuse_only_after_expiry(
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory()
-    create_arguments = {
+    create_arguments: CreateTunnelArguments = {
         "credential": credential,
         "idempotency_key": "runtime-receipt-create",
         "root_content": {"type": "text", "text": "Retry root"},
     }
-    admin_arguments = {
+    admin_arguments: AdminOperationArguments = {
         "actor": actor,
         "command": AgentCreate(name="Retry agent"),
         "key": "runtime-receipt-admin",

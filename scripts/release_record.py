@@ -7,22 +7,52 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
-if __package__:
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonValue,
+        json_object,
+        json_string,
+    )
+else:
+    from json_data import (
+        JsonValue,
+        json_object,
+        json_string,
+    )
+
+
+if TYPE_CHECKING or __package__:
     from .start_production import validate_image_reference
 else:
-    from start_production import validate_image_reference  # type: ignore[import-not-found,no-redef]
+    from start_production import validate_image_reference
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 PLATFORM = re.compile(r"linux/[a-z0-9_]+(?:/[a-z0-9_]+)?")
 
 
-def specification(version: str) -> dict[str, Any]:
+class ReleaseSpecification(TypedDict):
+    version: str
+    supported_from: list[str]
+    configuration_changes: list[JsonValue]
+    database: str
+    rollback: str
+
+
+class ReleaseRecord(ReleaseSpecification):
+    schema: int
+    source_commit: str
+    image: str
+    platform: str
+    validation_run_id: NotRequired[int]
+
+
+def specification(version: str) -> ReleaseSpecification:
     if not VERSION.fullmatch(version):
         raise ValueError("Release version must be vMAJOR.MINOR.PATCH.")
-    data = json.loads((ROOT / "releases" / f"{version}.json").read_text())
+    data = json_object(json.loads((ROOT / "releases" / f"{version}.json").read_text()))
     if not isinstance(data, dict):
         raise ValueError("Release specification must be an object.")
     if data.get("version") != version:
@@ -36,11 +66,12 @@ def specification(version: str) -> dict[str, Any]:
     if not isinstance(data.get("configuration_changes"), list):
         raise ValueError("configuration_changes must be a list.")
     for field in ("database", "rollback"):
-        if not isinstance(data.get(field), str) or not data[field].strip():
+        if not isinstance(data.get(field), str) or not json_string(data[field]).strip():
             raise ValueError(f"Release specification requires {field} instructions.")
     if not (ROOT / "releases" / f"{version}.md").read_text().strip():
         raise ValueError("Release notes must not be empty.")
-    return data
+    # All required fields and their element types were checked above.
+    return cast(ReleaseSpecification, data)
 
 
 def candidate_version() -> str:
@@ -72,12 +103,22 @@ def main() -> int:
             commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
             ).strip()
-            data.update(schema=1, source_commit=commit, image=image, platform=args.platform)
+            record: ReleaseRecord = {
+                "version": data["version"],
+                "supported_from": data["supported_from"],
+                "configuration_changes": data["configuration_changes"],
+                "database": data["database"],
+                "rollback": data["rollback"],
+                "schema": 1,
+                "source_commit": commit,
+                "image": image,
+                "platform": args.platform,
+            }
             if args.validation_run is not None:
                 if args.validation_run <= 0:
                     raise ValueError("Validation run ID must be positive.")
-                data["validation_run_id"] = args.validation_run
-            Path("release.json").write_text(json.dumps(data, indent=2) + "\n")
+                record["validation_run_id"] = args.validation_run
+            Path("release.json").write_text(json.dumps(record, indent=2) + "\n")
             notes = (ROOT / "releases" / f"{version}.md").read_text()
             notes += f"\n## Deployment record\n\nSource commit: `{commit}`\n\nImage: `{image}`\n"
             Path("release-notes.md").write_text(notes)

@@ -17,6 +17,7 @@ Compose proofs must use disposable projects through the isolated runner.
 | [check_secrets.py](check_secrets.py) | Scan the selected Git scope for secrets |
 | [check_structure.py](check_structure.py) | Check repository ownership and import direction |
 | [check_templates.py](check_templates.py) | Run template lint checks |
+| [check_types.py](check_types.py) | Check all Python source in its import context: `pdm run types` |
 
 ## Development and examples
 

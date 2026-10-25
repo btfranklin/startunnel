@@ -1,12 +1,13 @@
 """Protect stored history and retry receipts from runtime SQL changes."""
 
 from pathlib import Path
-from typing import Any
 
+from django.apps.registry import Apps
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 
-def protect_runtime_history(apps: Any, schema_editor: Any) -> None:
+def protect_runtime_history(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
         source = Path(__file__).with_name("sql") / "runtime-history-guards.sql"

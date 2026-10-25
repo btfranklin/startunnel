@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from typing import Any
 
 from prometheus_client import (
     CollectorRegistry,
@@ -93,17 +92,18 @@ def render_metrics() -> bytes:
     if not os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
         return generate_latest()
     registry = CollectorRegistry()
+    # The Prometheus multiprocess collector has no public type annotations.
     multiprocess.MultiProcessCollector(registry)  # type: ignore[no-untyped-call]
     return generate_latest(registry)
 
 
-def measure_database_query(
-    execute: Callable[..., Any],
+def measure_database_query[T](
+    execute: Callable[[str, object, bool, dict[str, object]], T],
     sql: str,
     params: object,
     many: bool,
-    context: object,
-) -> Any:
+    context: dict[str, object],
+) -> T:
     """Measure each query in the thread that owns its database connection."""
 
     first_word = sql.lstrip().split(None, 1)[0].lower() if sql.strip() else "other"

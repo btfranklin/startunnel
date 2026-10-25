@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
+from asgiref.typing import ASGIReceiveEvent, ASGISendEvent, Scope
+from tests.asgi import http_scope, response_body, response_start
 
-from core.asgi import ASGIReceive, ASGISend, StaticFilesMiddleware
+from core.asgi import ASGIReceive, ASGISend, StaticFilesMiddleware, StaticFinder
 
 
 async def _request(
@@ -17,24 +18,24 @@ async def _request(
     path: str,
     method: str = "GET",
     headers: list[tuple[bytes, bytes]] | None = None,
-    find_file: Any = None,
-) -> tuple[bool, list[dict[str, Any]]]:
+    find_file: StaticFinder | None = None,
+) -> tuple[bool, list[ASGISendEvent]]:
     downstream_called = False
-    sent: list[dict[str, Any]] = []
-    events: AsyncIterator[dict[str, Any]]
+    sent: list[ASGISendEvent] = []
+    events: AsyncIterator[ASGIReceiveEvent]
 
-    async def request_events() -> AsyncIterator[dict[str, Any]]:
+    async def request_events() -> AsyncIterator[ASGIReceiveEvent]:
         yield {"type": "http.request", "body": b"", "more_body": False}
 
     events = request_events()
 
-    async def receive() -> dict[str, Any]:
+    async def receive() -> ASGIReceiveEvent:
         return await anext(events)
 
-    async def send(message: Mapping[str, Any]) -> None:
-        sent.append(dict(message))
+    async def send(message: ASGISendEvent) -> None:
+        sent.append(message)
 
-    async def downstream(scope: dict[str, Any], receive: ASGIReceive, send: ASGISend) -> None:
+    async def downstream(scope: Scope, receive: ASGIReceive, send: ASGISend) -> None:
         nonlocal downstream_called
         del scope, receive, send
         downstream_called = True
@@ -45,12 +46,7 @@ async def _request(
         url_prefix="/static/",
         find_file=find_file,
     )
-    scope = {
-        "type": "http",
-        "method": method,
-        "path": path,
-        "headers": headers or [],
-    }
+    scope = http_scope(path=path, method=method, headers=headers or [])
     await middleware(scope, receive, send)
     return downstream_called, sent
 
@@ -64,15 +60,15 @@ async def test_static_file_has_type_length_cache_and_security_headers(tmp_path: 
     downstream_called, sent = await _request(tmp_path, path="/static/css/site.css")
 
     assert downstream_called is False
-    assert sent[0]["status"] == 200
-    headers = dict(sent[0]["headers"])
+    assert response_start(sent[0])["status"] == 200
+    headers = dict(response_start(sent[0])["headers"])
     assert headers[b"content-type"] == b"text/css"
     assert headers[b"content-length"] == str(asset.stat().st_size).encode()
     assert headers[b"cache-control"] == b"no-cache"
     assert headers[b"content-security-policy"]
     assert headers[b"permissions-policy"]
     assert headers[b"x-content-type-options"] == b"nosniff"
-    assert sent[1]["body"] == asset.read_bytes()
+    assert response_body(sent[1])["body"] == asset.read_bytes()
 
 
 @pytest.mark.asyncio
@@ -81,17 +77,17 @@ async def test_hashed_static_file_is_immutable_and_supports_head_and_etag(tmp_pa
     asset.write_bytes(b"export const ready = true;")
 
     _, first = await _request(tmp_path, path="/static/app.0123456789ab.js", method="HEAD")
-    first_headers = dict(first[0]["headers"])
+    first_headers = dict(response_start(first[0])["headers"])
     assert first_headers[b"cache-control"] == b"public, max-age=31536000, immutable"
-    assert first[1]["body"] == b""
+    assert response_body(first[1])["body"] == b""
 
     _, cached = await _request(
         tmp_path,
         path="/static/app.0123456789ab.js",
         headers=[(b"if-none-match", first_headers[b"etag"])],
     )
-    assert cached[0]["status"] == 304
-    assert cached[1]["body"] == b""
+    assert response_start(cached[0])["status"] == 304
+    assert response_body(cached[1])["body"] == b""
 
 
 @pytest.mark.asyncio
@@ -108,8 +104,8 @@ async def test_static_source_finder_is_a_development_fallback(tmp_path: Path) ->
     )
 
     assert downstream_called is False
-    assert sent[0]["status"] == 200
-    assert sent[1]["body"] == source.read_bytes()
+    assert response_start(sent[0])["status"] == 200
+    assert response_body(sent[1])["body"] == source.read_bytes()
 
 
 @pytest.mark.asyncio

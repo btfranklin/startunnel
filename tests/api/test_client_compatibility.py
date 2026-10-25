@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from django.db import connection
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory
 from django.test.utils import CaptureQueriesContext
+from tests.json_values import json_elements, json_members
 
 from api.client_compatibility import (
     CLIENT_VERSION_HEADER,
@@ -22,6 +22,7 @@ from api.client_compatibility import (
 from api.middleware import ApiErrorEnvelopeMiddleware
 from api.router import api
 from core.build import BUILD
+from core.json_types import json_object
 
 
 @pytest.mark.parametrize(
@@ -75,6 +76,7 @@ def test_sync_version_gate_and_headers(
     )
     request.request_id = "safe-request-id"  # type: ignore[attr-defined]
     response = ApiErrorEnvelopeMiddleware(endpoint)(request)
+    assert isinstance(response, HttpResponse)
     assert response.status_code == status
     assert calls == (0 if status == 400 else 1)
     assert response[MINIMUM_VERSION_HEADER] == MINIMUM_CLIENT_VERSION
@@ -102,7 +104,9 @@ async def test_async_gate_does_not_await_an_unsupported_request(version: str) ->
     request = RequestFactory().post(
         "/api/v1/beacons/wait", headers={CLIENT_VERSION_HEADER: version}
     )
-    response = await ApiErrorEnvelopeMiddleware(endpoint)(request)
+    pending = ApiErrorEnvelopeMiddleware(endpoint)(request)
+    assert not isinstance(pending, HttpResponse)
+    response = await pending
     assert response.status_code == (400 if version == "v0.2.0" else 200)
     assert calls == (0 if version == "v0.2.0" else 1)
 
@@ -114,6 +118,7 @@ def test_non_api_paths_remain_available_to_an_older_cli(path: str) -> None:
 
     request = RequestFactory().get(path, headers={"User-Agent": "startunnel-agent-cli"})
     response = ApiErrorEnvelopeMiddleware(endpoint)(request)
+    assert isinstance(response, HttpResponse)
     assert response.status_code == 200
     assert MINIMUM_VERSION_HEADER not in response
 
@@ -147,15 +152,20 @@ def test_legacy_client_is_rejected_without_database_work(path: str) -> None:
 
 
 def test_openapi_describes_version_headers_and_update_errors() -> None:
-    schema: Any = api.get_openapi_schema()
-    for methods in schema["paths"].values():
-        for method, operation in methods.items():
+    schema = json_object(json.loads(json.dumps(api.get_openapi_schema())))
+    for methods in json_members(schema["paths"]).values():
+        for method, operation_value in json_members(methods).items():
             if method not in {"get", "post"}:
                 continue
-            assert "400" in operation["responses"] or 400 in operation["responses"]
-            assert any(p["name"] == CLIENT_VERSION_HEADER for p in operation["parameters"])
-            for response in operation["responses"].values():
-                assert set(response["headers"]) >= {
+            operation = json_members(operation_value)
+            responses = json_members(operation["responses"])
+            assert "400" in responses
+            assert any(
+                json_members(p)["name"] == CLIENT_VERSION_HEADER
+                for p in json_elements(operation["parameters"])
+            )
+            for response in responses.values():
+                assert set(json_members(json_members(response)["headers"])) >= {
                     SERVER_VERSION_HEADER,
                     MINIMUM_VERSION_HEADER,
                     COMPATIBILITY_HEADER,

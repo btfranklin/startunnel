@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TypedDict
 from uuid import UUID
 
 import pytest
 from django.db import close_old_connections
+from tests.factories import CredentialFactory
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -21,11 +23,19 @@ from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
+class RolloverCycleArguments(TypedDict):
+    credential: AgentCredential
+    address: str
+    idempotency_key: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+
+
 def _thread_credential(credential_id: UUID) -> AgentCredential:
     return AgentCredential.objects.select_related("created_by").get(pk=credential_id)
 
 
-def test_two_starts_create_only_one_next_cycle(credential_factory: Any) -> None:
+def test_two_starts_create_only_one_next_cycle(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = create_tunnel(
         credential=creator,
@@ -71,7 +81,7 @@ def test_two_starts_create_only_one_next_cycle(credential_factory: Any) -> None:
     assert tunnel.next_cycle_number == 3
 
 
-def test_two_rollovers_close_once_and_start_once(credential_factory: Any) -> None:
+def test_two_rollovers_close_once_and_start_once(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = create_tunnel(
         credential=creator,
@@ -122,7 +132,9 @@ def test_two_rollovers_close_once_and_start_once(credential_factory: Any) -> Non
     ]
 
 
-def test_rollover_racing_close_has_one_coherent_final_state(credential_factory: Any) -> None:
+def test_rollover_racing_close_has_one_coherent_final_state(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = create_tunnel(
         credential=creator,
@@ -188,7 +200,7 @@ def test_rollover_racing_close_has_one_coherent_final_state(credential_factory: 
 
 
 def test_rotation_racing_post_commits_before_rotation_or_fails_cleanly(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     worker, _ = credential_factory()
@@ -202,6 +214,7 @@ def test_rotation_racing_post_commits_before_rotation_or_fails_cleanly(
     def rotate() -> str:
         close_old_connections()
         try:
+            assert creator.created_by_id is not None
             actor = User.objects.get(pk=creator.created_by_id)
             barrier.wait(timeout=15)
             rotate_address_as_admin(
@@ -248,7 +261,7 @@ def test_rotation_racing_post_commits_before_rotation_or_fails_cleanly(
     assert Message.objects.filter(cycle=cycle).count() == cycle.message_count
 
 
-def test_retirement_racing_start_always_ends_retired(credential_factory: Any) -> None:
+def test_retirement_racing_start_always_ends_retired(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = create_tunnel(
         credential=creator,
@@ -267,6 +280,7 @@ def test_retirement_racing_start_always_ends_retired(credential_factory: Any) ->
     def retire() -> str:
         close_old_connections()
         try:
+            assert creator.created_by_id is not None
             actor = User.objects.get(pk=creator.created_by_id)
             barrier.wait(timeout=15)
             retire_tunnel_as_admin(
@@ -316,7 +330,7 @@ def test_retirement_racing_start_always_ends_retired(credential_factory: Any) ->
 
 @pytest.mark.parametrize("operation", ["start", "close", "rollover"])
 def test_concurrent_identical_lifecycle_retries_replay_success(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, operation: str
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     from tunnels.access import resolve_tunnel
 
@@ -335,9 +349,11 @@ def test_concurrent_identical_lifecycle_retries_replay_success(
         )
     barrier = threading.Barrier(2)
 
-    def synchronized_resolution(**kwargs: Any) -> Any:
+    def synchronized_resolution(
+        *, credential: AgentCredential, address: str, for_update: bool = False
+    ) -> Tunnel:
         barrier.wait(timeout=15)
-        return resolve_tunnel(**kwargs)
+        return resolve_tunnel(credential=credential, address=address, for_update=for_update)
 
     monkeypatch.setattr("tunnels.cycles.resolve_tunnel", synchronized_resolution)
 
@@ -353,7 +369,7 @@ def test_concurrent_identical_lifecycle_retries_replay_success(
                     idempotency_key="pg-identical-lifecycle-retry",
                 )
                 return None
-            arguments: dict[str, Any] = dict(
+            arguments: RolloverCycleArguments = dict(
                 credential=credential,
                 address=created.address,
                 idempotency_key="pg-identical-lifecycle-retry",

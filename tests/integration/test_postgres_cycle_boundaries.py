@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from typing import Any
+from typing import TypedDict
 
 import pytest
 from django.db import close_old_connections, connection
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
+from accounts.models import User
 from agents.models import AgentCredential
 from core import maintenance
 from core.errors import CycleClosed
@@ -21,6 +24,14 @@ from tunnels.access import resolve_tunnel
 from tunnels.models import Cycle, Message, Tunnel, TunnelEvent
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
+
+
+class RolloverCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
 
 
 def _wait_for_row_lock(*, waiter: int, owner: int) -> None:
@@ -42,7 +53,10 @@ def _wait_for_row_lock(*, waiter: int, owner: int) -> None:
 @pytest.mark.parametrize("boundary", ["close", "expiry"])
 @pytest.mark.parametrize("first", ["post", "close"])
 def test_post_and_close_respect_both_tunnel_lock_orders(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, boundary: str, first: str
+    credential_factory: CredentialFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+    first: str,
 ) -> None:
     creator, _ = credential_factory()
     writer, _ = credential_factory()
@@ -69,15 +83,30 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
             if not release_owner.wait(timeout=15):
                 raise TimeoutError("The test did not release the tunnel lock.")
 
-    def resolve_then_pause(**kwargs: Any) -> Tunnel:
-        tunnel = original_resolve(**kwargs)
-        if kwargs.get("for_update"):
+    def resolve_then_pause(
+        *, credential: AgentCredential, address: str, for_update: bool = False
+    ) -> Tunnel:
+        tunnel = original_resolve(credential=credential, address=address, for_update=for_update)
+        if for_update:
             pause_first_operation()
         return tunnel
 
-    def close_after_pause(**kwargs: Any) -> None:
+    def close_after_pause(
+        *,
+        tunnel: Tunnel,
+        cycle: Cycle,
+        reason: str,
+        actor_credential: AgentCredential | None = None,
+        actor_user: User | None = None,
+    ) -> None:
         pause_first_operation()
-        original_close(**kwargs)
+        original_close(
+            tunnel=tunnel,
+            cycle=cycle,
+            reason=reason,
+            actor_credential=actor_credential,
+            actor_user=actor_user,
+        )
 
     monkeypatch.setattr(cycles, "resolve_tunnel", resolve_then_pause)
     monkeypatch.setattr(messages, "resolve_tunnel", resolve_then_pause)
@@ -162,7 +191,7 @@ def test_post_and_close_respect_both_tunnel_lock_orders(
 
 @pytest.mark.parametrize("rollover", [False, True])
 def test_expired_cycle_can_be_replaced_before_maintenance(
-    credential_factory: Any, rollover: bool
+    credential_factory: CredentialFactory, rollover: bool
 ) -> None:
     creator, _ = credential_factory()
     created = cycles.create_tunnel(
@@ -172,7 +201,7 @@ def test_expired_cycle_can_be_replaced_before_maintenance(
     )
     expiry = timezone.now() - timedelta(seconds=1)
     Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=120)
-    arguments: dict[str, Any] = {
+    arguments: RolloverCycleArguments = {
         "credential": creator,
         "idempotency_key": "pg-lazy-expiry-next",
         "address": created.address,

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 from django.contrib import admin
 from django.test import Client
 from django.urls import reverse
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -24,8 +23,8 @@ def test_admin_accounts_are_not_managed_through_django_admin() -> None:
 
 def test_agent_admin_change_page_hides_key_digest(
     client: Client,
-    user_factory: Any,
-    credential_factory: Any,
+    user_factory: UserFactory,
+    credential_factory: CredentialFactory,
 ) -> None:
     administrator = user_factory(username="admin")
     administrator.is_staff = True
@@ -47,14 +46,14 @@ def test_agent_admin_change_page_hides_key_digest(
 
 @pytest.mark.parametrize("payload_type", ["text", "json"])
 def test_tunnel_inspection_shows_stored_data_but_rejects_changes(
-    client: Client, credential_factory: Any, payload_type: str
+    client: Client, credential_factory: CredentialFactory, payload_type: str
 ) -> None:
     administrator = User.objects.create_superuser(
         username="inspection-admin", password="test-password-42"
     )
     credential, _ = credential_factory()
     marker = "Visible inspection payload"
-    content: dict[str, Any] = (
+    content: dict[str, object] = (
         {"type": "text", "text": marker}
         if payload_type == "text"
         else {"type": "json", "value": {"detail": marker}}

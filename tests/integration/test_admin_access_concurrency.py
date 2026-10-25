@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Barrier, Event
-from typing import Any
 from uuid import UUID
 
 import pytest
 from django.db import close_old_connections
 from django.utils import timezone
+from pydantic import TypeAdapter
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_access import (
     authenticate_admin_key,
@@ -26,10 +27,10 @@ from accounts.admin_commands import (
     TunnelClose,
     TunnelsRetireForCredential,
 )
-from accounts.admin_data import AdminOperationResult
+from accounts.admin_data import AdminOperationResult, AgentResourceData, KeyResourceData
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminReceipt, User
-from agents.services import revoke_credential
+from agents.services import IssuedCredential, revoke_credential
 from core.errors import IdempotencyConflict, InvalidCredential, TunnelUnavailable
 from core.models import AuditEvent
 from tunnels.admin_actions import close_cycle_as_admin, retirement_confirmation
@@ -40,7 +41,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 def test_overlapping_bulk_retirements_commit_one_complete_selection(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory()
@@ -120,7 +121,7 @@ def test_independent_self_deactivations_can_leave_no_active_admins() -> None:
 
 
 def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     credential, _ = credential_factory(user=actor)
@@ -136,9 +137,9 @@ def test_unrelated_tunnel_admin_writes_reach_domain_work_together(
     )
     both_in_domain = Barrier(2)
 
-    def close_after_both_arrive(*args: Any, **kwargs: Any) -> None:
+    def close_after_both_arrive(*, actor: User, tunnel_id: UUID, expected_cycle_id: UUID) -> None:
         both_in_domain.wait(timeout=15)
-        close_cycle_as_admin(*args, **kwargs)
+        close_cycle_as_admin(actor=actor, tunnel_id=tunnel_id, expected_cycle_id=expected_cycle_id)
 
     monkeypatch.setattr("accounts.admin_commands.close_cycle_as_admin", close_after_both_arrive)
 
@@ -203,9 +204,11 @@ def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.Monkey
 
     both_in_domain = Barrier(2)
 
-    def create_after_both_arrive(*args: Any, **kwargs: Any) -> Any:
+    def create_after_both_arrive(
+        *, actor: User, name: str, expires_at: datetime | None = None, key: str | None = None
+    ) -> IssuedCredential:
         both_in_domain.wait(timeout=15)
-        return create_credential(*args, **kwargs)
+        return create_credential(actor=actor, name=name, expires_at=expires_at, key=key)
 
     monkeypatch.setattr("accounts.admin_commands.create_credential", create_after_both_arrive)
 
@@ -224,7 +227,15 @@ def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.Monkey
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(create, (1, 2)))
-    assert len({item["resource"]["id"] for item in results}) == 2
+    assert (
+        len(
+            {
+                TypeAdapter(AgentResourceData).validate_python(item["resource"], strict=True)["id"]
+                for item in results
+            }
+        )
+        == 2
+    )
     assert AdminReceipt.objects.filter(owner=actor).count() == 2
     assert AuditEvent.objects.filter(action="agents.create").count() == 2
 
@@ -235,7 +246,7 @@ def test_concurrent_changed_admin_requests_with_one_key_conflict(
 ) -> None:
     actor = User.objects.create_user(username="operator", password="test-long-password-7291")
     both_started = Barrier(2)
-    requests: list[tuple[type[AdminCommand], dict[str, Any]]] = [
+    requests: list[tuple[type[AdminCommand], dict[str, object]]] = [
         (AccountCreate, {"username": "first-request", "password": "test-long-password-7292"}),
         (
             AgentCreate if different_operation else AccountCreate,
@@ -245,7 +256,7 @@ def test_concurrent_changed_admin_requests_with_one_key_conflict(
         ),
     ]
 
-    def execute(request: tuple[type[AdminCommand], dict[str, Any]]) -> str:
+    def execute(request: tuple[type[AdminCommand], dict[str, object]]) -> str:
         close_old_connections()
         try:
             both_started.wait(timeout=15)
@@ -314,15 +325,21 @@ def test_key_issuance_finishes_before_concurrent_owner_deactivation(
     deactivation_entered_domain = Event()
     deactivation_finished = Event()
 
-    def pause_after_issue(*args: Any, **kwargs: Any) -> Any:
-        result = issue_admin_key(*args, **kwargs)
+    def pause_after_issue(
+        *, owner: User, name: str, key: str | None = None, expires_at: datetime | None = None
+    ) -> tuple[AdminCredential, str]:
+        result = issue_admin_key(owner=owner, name=name, key=key, expires_at=expires_at)
         issued.set()
         assert release_issuance.wait(timeout=15)
         return result
 
-    def observe_state_change(*args: Any, **kwargs: Any) -> User:
+    def observe_state_change(
+        *, actor: User, admin_id: UUID, active: bool, expected_active: bool | None = None
+    ) -> User:
         deactivation_entered_domain.set()
-        return change_admin_state(*args, **kwargs)
+        return change_admin_state(
+            actor=actor, admin_id=admin_id, active=active, expected_active=expected_active
+        )
 
     monkeypatch.setattr("accounts.admin_commands.issue_admin_key", pause_after_issue)
     monkeypatch.setattr("accounts.admin_commands.change_admin_state", observe_state_change)
@@ -366,7 +383,12 @@ def test_key_issuance_finishes_before_concurrent_owner_deactivation(
         result = key_future.result(timeout=15)
         deactivate_future.result(timeout=15)
     assert not User.objects.get(pk=owner.pk).is_active
-    assert AdminCredential.objects.get(pk=result["resource"]["id"]).revoked_at is not None
+    assert (
+        AdminCredential.objects.get(
+            pk=TypeAdapter(KeyResourceData).validate_python(result["resource"], strict=True)["id"]
+        ).revoked_at
+        is not None
+    )
     change_admin_state(actor=actor, admin_id=owner.pk, active=True, expected_active=False)
     with pytest.raises(InvalidCredential):
         authenticate_admin_key(result["secret"])

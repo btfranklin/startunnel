@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import InvalidRequest
 from core.limits import Limits
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.message_data import message_payload
 from tunnels.messages import get_branch, get_subtree, post_reply
+from tunnels.models import Message
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 @pytest.fixture
-def branched_tree(credential_factory: Any) -> tuple[Any, Any, list[Any]]:
+def branched_tree(
+    credential_factory: CredentialFactory,
+) -> tuple[AgentCredential, CreatedTunnel, list[Message]]:
     credential, _ = credential_factory()
     created = create_tunnel(
         credential=credential,
@@ -37,14 +41,15 @@ def branched_tree(credential_factory: Any) -> tuple[Any, Any, list[Any]]:
 
 
 def test_deep_preorder_pages_keep_one_snapshot_and_bounded_queries(
-    branched_tree: tuple[Any, Any, list[Any]], django_assert_num_queries: Any
+    branched_tree: tuple[AgentCredential, CreatedTunnel, list[Message]],
+    django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
     credential, created, messages = branched_tree
     after = 0
     snapshot = None
     sequences: list[int] = []
     while True:
-        with django_assert_num_queries(8, exact=False):
+        with django_assert_max_num_queries(8):
             page = get_subtree(
                 credential=credential,
                 address=created.address,
@@ -90,7 +95,10 @@ def test_deep_preorder_pages_keep_one_snapshot_and_bounded_queries(
     ],
 )
 def test_subtree_depth_boundaries(
-    branched_tree: tuple[Any, Any, list[Any]], depth: int, sequences: list[int], truncated: bool
+    branched_tree: tuple[AgentCredential, CreatedTunnel, list[Message]],
+    depth: int,
+    sequences: list[int],
+    truncated: bool,
 ) -> None:
     credential, created, _ = branched_tree
     page = get_subtree(
@@ -106,7 +114,7 @@ def test_subtree_depth_boundaries(
 
 @pytest.mark.parametrize(("after", "depth"), [(3, 8), (6, 1)])
 def test_subtree_continuation_must_belong_to_selected_descendants(
-    branched_tree: tuple[Any, Any, list[Any]], after: int, depth: int
+    branched_tree: tuple[AgentCredential, CreatedTunnel, list[Message]], after: int, depth: int
 ) -> None:
     credential, created, messages = branched_tree
     with pytest.raises(InvalidRequest):
@@ -120,10 +128,11 @@ def test_subtree_continuation_must_belong_to_selected_descendants(
 
 
 def test_branch_loads_ordered_ancestors_with_bounded_queries(
-    branched_tree: tuple[Any, Any, list[Any]], django_assert_num_queries: Any
+    branched_tree: tuple[AgentCredential, CreatedTunnel, list[Message]],
+    django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
     credential, created, messages = branched_tree
-    with django_assert_num_queries(7, exact=False):
+    with django_assert_max_num_queries(7):
         branch = get_branch(
             credential=credential, address=created.address, message_id=messages[-1].id
         )

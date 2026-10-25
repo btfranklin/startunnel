@@ -2,8 +2,9 @@
 
 import subprocess
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from io import TextIOBase
 
 import pytest
 from scripts import run_resource_measurement as resources
@@ -39,7 +40,7 @@ def test_external_snapshot_checks_container_state_without_exec_or_sql(
     calls: list[str] = []
 
     class Stats:
-        def get(self, path: str) -> dict[str, Any]:
+        def get(self, path: str) -> dict[str, object]:
             calls.append(path)
             if "/stats?" in path:
                 return {
@@ -105,9 +106,11 @@ def test_live_events_are_complete_and_observer_is_reaped_on_failure(
             ended.append("wait")
             return -15
 
-    def start(*args: Any, **kwargs: Any) -> Process:
-        kwargs["stdout"].write("event\n" * 300)
-        kwargs["stdout"].flush()
+    def start(*args: object, **kwargs: object) -> Process:
+        stdout = kwargs["stdout"]
+        assert isinstance(stdout, TextIOBase)
+        stdout.write("event\n" * 300)
+        stdout.flush()
         return Process()
 
     monkeypatch.setattr(subprocess, "Popen", start)
@@ -130,7 +133,7 @@ def test_memory_gate_checks_services_even_when_total_memory_is_constant(
         def __init__(self, *args: object) -> None:
             pass
 
-        def __enter__(self) -> Any:
+        def __enter__(self) -> object:
             return self
 
         def __exit__(self, *args: object) -> None:
@@ -156,7 +159,7 @@ def test_memory_gate_checks_services_even_when_total_memory_is_constant(
         )
 
     @contextmanager
-    def events(stack: object) -> Any:
+    def events(stack: object) -> Iterator[list[object]]:
         yield []
 
     monkeypatch.setattr(resources, "MeasurementStack", Stack)

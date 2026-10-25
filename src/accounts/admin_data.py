@@ -2,19 +2,114 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
 from agents.models import AgentCredential
+from core.json_types import JsonObject, json_object
 from core.models import AuditEvent
 from tunnels.access import cycle_is_readable
 from tunnels.admin_actions import retirement_confirmation
-from tunnels.beacons import beacon_data
-from tunnels.models import Beacon, Cycle, Tunnel, TunnelAddress
+from tunnels.beacons import BeaconData, CountedBeacon, beacon_data
+from tunnels.models import Cycle, Tunnel, TunnelAddress
 
 from .models import AdminCredential, User
 
 
-def admin_resource(account: User) -> dict[str, Any]:
+class AgentResourceData(TypedDict):
+    id: str
+    name: str
+    display_prefix: str
+    created_at: str
+    last_used_at: str | None
+    expires_at: str | None
+    revoked_at: str | None
+    available: bool
+
+
+class KeyResourceData(AgentResourceData):
+    admin_id: str
+
+
+class AccountResourceData(TypedDict):
+    id: str
+    username: str
+    active: bool
+    browser_access: bool
+    created_at: str
+    initial_key: NotRequired[KeyResourceData]
+
+
+class TunnelResourceData(TypedDict):
+    id: str
+    label: str
+    state: str
+    creator_id: str
+    created_at: str
+    address: str | None
+    address_generation: int | None
+    active_cycle_id: str | None
+    retirement_confirmation: str
+
+
+class AuditResourceData(TypedDict):
+    id: str
+    actor_id: str | None
+    credential_id: str | None
+    channel: str
+    action: str
+    target_type: str
+    target_id: str | None
+    request_id: str | None
+    created_at: str
+    metadata: JsonObject
+
+
+class CycleResourceData(TypedDict):
+    id: str
+    number: int
+    state: str
+    label: str
+    created_at: str
+
+
+class TunnelRetirementData(TypedDict):
+    credential_id: str
+    retired_tunnel_ids: list[str]
+
+
+type AdminResourceData = (
+    AccountResourceData
+    | KeyResourceData
+    | AgentResourceData
+    | TunnelResourceData
+    | BeaconData
+    | TunnelRetirementData
+)
+type ListedResourceData = (
+    AccountResourceData
+    | KeyResourceData
+    | AgentResourceData
+    | TunnelResourceData
+    | BeaconData
+    | AuditResourceData
+    | CycleResourceData
+)
+
+
+class TunnelPrefetchData(TypedDict):
+    current_addresses: list[TunnelAddress]
+    active_cycles: list[Cycle]
+
+
+if TYPE_CHECKING:
+    from django_stubs_ext import WithAnnotations
+
+    type PrefetchedTunnel = WithAnnotations[Tunnel, TunnelPrefetchData]
+else:
+    type PrefetchedTunnel = Tunnel
+
+
+def admin_resource(account: User) -> AccountResourceData:
     return {
         "id": str(account.id),
         "username": account.username,
@@ -24,7 +119,7 @@ def admin_resource(account: User) -> dict[str, Any]:
     }
 
 
-def key_resource(key: AdminCredential) -> dict[str, Any]:
+def key_resource(key: AdminCredential) -> KeyResourceData:
     return {
         "id": str(key.id),
         "admin_id": str(key.owner_id),
@@ -38,7 +133,7 @@ def key_resource(key: AdminCredential) -> dict[str, Any]:
     }
 
 
-def agent_resource(key: AgentCredential) -> dict[str, Any]:
+def agent_resource(key: AgentCredential) -> AgentResourceData:
     return {
         "id": str(key.id),
         "name": key.name,
@@ -53,7 +148,7 @@ def agent_resource(key: AgentCredential) -> dict[str, Any]:
 
 def _serialize_tunnel(
     tunnel: Tunnel, address: TunnelAddress | None, cycle: Cycle | None
-) -> dict[str, Any]:
+) -> TunnelResourceData:
     return {
         "id": str(tunnel.id),
         "label": tunnel.label,
@@ -67,14 +162,14 @@ def _serialize_tunnel(
     }
 
 
-def tunnel_resource(tunnel: Tunnel) -> dict[str, Any]:
+def tunnel_resource(tunnel: Tunnel) -> TunnelResourceData:
     address = TunnelAddress.objects.filter(tunnel=tunnel, state=TunnelAddress.State.CURRENT).first()
     cycle = Cycle.objects.filter(tunnel=tunnel, state=Cycle.State.ACTIVE).first()
     return _serialize_tunnel(tunnel, address, cycle)
 
 
-def _tunnel_list_resource(tunnel: Tunnel) -> dict[str, Any]:
-    prefetched = cast(Any, tunnel)
+def _tunnel_list_resource(tunnel: Tunnel) -> TunnelResourceData:
+    prefetched = cast(PrefetchedTunnel, tunnel)
     addresses: list[TunnelAddress] = prefetched.current_addresses
     cycles: list[Cycle] = prefetched.active_cycles
     return _serialize_tunnel(
@@ -82,7 +177,7 @@ def _tunnel_list_resource(tunnel: Tunnel) -> dict[str, Any]:
     )
 
 
-def audit_resource(event: AuditEvent) -> dict[str, Any]:
+def audit_resource(event: AuditEvent) -> AuditResourceData:
     return {
         "id": str(event.id),
         "actor_id": str(event.actor_user_id) if event.actor_user_id else None,
@@ -95,7 +190,7 @@ def audit_resource(event: AuditEvent) -> dict[str, Any]:
         "target_id": str(event.target_id) if event.target_id else None,
         "request_id": str(event.request_id) if event.request_id else None,
         "created_at": event.created_at.isoformat(),
-        "metadata": event.metadata,
+        "metadata": json_object(event.metadata),
     }
 
 
@@ -105,7 +200,7 @@ class OperationReference(TypedDict):
 
 
 class AdminOperationResult(TypedDict):
-    resource: dict[str, Any]
+    resource: AdminResourceData
     operation: OperationReference
     secret: NotRequired[str]
 
@@ -138,11 +233,11 @@ class AdminStatusData(TypedDict):
 
 
 class AdminPageData(TypedDict):
-    items: list[dict[str, Any]]
+    items: list[ListedResourceData]
     next_cursor: str | None
 
 
-def beacon_resource(beacon: Beacon) -> dict[str, Any]:
+def beacon_resource(beacon: CountedBeacon) -> BeaconData:
     """Keep Beacon history metadata after its cycle content expires."""
 
     data = beacon_data(beacon)

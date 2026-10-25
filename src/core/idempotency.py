@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
 
 from django.conf import settings
 from django.utils import timezone
@@ -38,7 +38,7 @@ def _key_digest(key: str) -> bytes:
     return hmac.digest(settings.IDEMPOTENCY_SECRET.encode(), key.encode(), "sha256")
 
 
-def _request_digest(request_data: dict[str, Any]) -> bytes:
+def _request_digest(request_data: Mapping[str, object]) -> bytes:
     try:
         canonical = json.dumps(
             request_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -49,7 +49,7 @@ def _request_digest(request_data: dict[str, Any]) -> bytes:
 
 
 def begin(
-    *, credential: AgentCredential, operation: str, key: str, request_data: dict[str, Any]
+    *, credential: AgentCredential, operation: str, key: str, request_data: Mapping[str, object]
 ) -> IdempotencyResult:
     """Reserve or replay a receipt inside the caller's write transaction."""
 
@@ -77,7 +77,7 @@ def begin(
 
 
 def finish(
-    record: AgentReceipt, *, response: dict[str, Any], resource_id: str | None = None
+    record: AgentReceipt, *, response: Mapping[str, object], resource_id: str | None = None
 ) -> None:
     record.response = response
     record.resource_id = resource_id

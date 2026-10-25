@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from uuid import UUID, uuid4
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone
 
@@ -149,7 +149,7 @@ def _provision(*, run_id: UUID, credential_count: int) -> dict[str, object]:
 class Command(BaseCommand):
     help = "Provision or remove fixtures for the opt-in HTTP load proof."
 
-    def add_arguments(self, parser: Any) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument("--output")
         group.add_argument("--cleanup-manifest")

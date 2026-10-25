@@ -2,25 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Any
+from uuid import UUID
 
 import pytest
 import time_machine
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.factories import CredentialFactory, UserFactory
 
+from agents.models import AgentCredential
 from core.cursors import encode_cursor
 from core.errors import InvalidCredential, InvalidRequest
 from tunnels.admin_actions import start_cycle_as_admin
-from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.entry import enter_tunnel
-from tunnels.message_data import message_payload
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
+from tunnels.entry import TunnelEntry, enter_tunnel
+from tunnels.message_data import MessageData, message_payload
 from tunnels.messages import post_reply
-from tunnels.models import ActivityCheckpoint
+from tunnels.models import ActivityCheckpoint, Message
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any) -> Any:
+def _create(credential: AgentCredential) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key="entry-create-0001",
@@ -28,7 +31,7 @@ def _create(credential: Any) -> Any:
     )
 
 
-def _reply(created: Any, credential: Any, key: str, text: str) -> Any:
+def _reply(created: CreatedTunnel, credential: AgentCredential, key: str, text: str) -> Message:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -38,7 +41,9 @@ def _reply(created: Any, credential: Any, key: str, text: str) -> Any:
     ).message
 
 
-def test_entry_returns_root_once_and_the_latest_messages(credential_factory: Any) -> None:
+def test_entry_returns_root_once_and_the_latest_messages(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Entry creator")
     created = _create(creator)
     replies = [
@@ -62,7 +67,9 @@ def test_entry_returns_root_once_and_the_latest_messages(credential_factory: Any
     assert not ActivityCheckpoint.objects.filter(tunnel=created.tunnel).exists()
 
 
-def test_entry_with_no_active_cycle_does_not_select_closed_history(credential_factory: Any) -> None:
+def test_entry_with_no_active_cycle_does_not_select_closed_history(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Dormant entry creator")
     created = _create(creator)
     close_cycle(
@@ -82,7 +89,9 @@ def test_entry_with_no_active_cycle_does_not_select_closed_history(credential_fa
     assert view.activity_position == 4
 
 
-def test_entry_follows_a_replacement_cycle(credential_factory: Any, user_factory: Any) -> None:
+def test_entry_follows_a_replacement_cycle(
+    credential_factory: CredentialFactory, user_factory: UserFactory
+) -> None:
     creator, _ = credential_factory(name="Replacement entry creator")
     operator = user_factory()
     created = _create(creator)
@@ -108,7 +117,9 @@ def test_entry_follows_a_replacement_cycle(credential_factory: Any, user_factory
     assert view.history_omitted is False
 
 
-def test_entry_hides_the_cycle_at_its_deadline_before_maintenance(credential_factory: Any) -> None:
+def test_entry_hides_the_cycle_at_its_deadline_before_maintenance(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Expired entry creator")
     created = _create(creator)
     with time_machine.travel(created.cycle.expires_at, tick=False):
@@ -125,7 +136,7 @@ def test_entry_hides_the_cycle_at_its_deadline_before_maintenance(credential_fac
     [{"limit": 0}, {"limit": 1001}, {"max_bytes": 0}, {"max_bytes": 1_048_577}],
 )
 def test_entry_rejects_limits_outside_instance_bounds(
-    credential_factory: Any, arguments: dict[str, int]
+    credential_factory: CredentialFactory, arguments: dict[str, int]
 ) -> None:
     creator, _ = credential_factory(name="Bounded entry creator")
     created = _create(creator)
@@ -134,7 +145,7 @@ def test_entry_rejects_limits_outside_instance_bounds(
 
 
 def test_entry_rechecks_revocation_after_assembly(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agents.models import AgentCredential
     from tunnels import entry
@@ -143,8 +154,12 @@ def test_entry_rechecks_revocation_after_assembly(
     created = _create(creator)
     original_size = entry._response_wire_size
 
-    def revoke_after_assembly(*args: Any, **kwargs: Any) -> int:
-        size = original_size(*args, **kwargs)
+    def revoke_after_assembly(
+        entry: TunnelEntry, *, fixed_size: int, message_bytes: int, message_count: int
+    ) -> int:
+        size = original_size(
+            entry, fixed_size=fixed_size, message_bytes=message_bytes, message_count=message_count
+        )
         AgentCredential.objects.filter(pk=creator.pk).update(revoked_at=timezone.now())
         return size
 
@@ -154,7 +169,7 @@ def test_entry_rechecks_revocation_after_assembly(
 
 
 def test_entry_keeps_its_snapshot_without_repeated_tunnel_queries(
-    credential_factory: Any, django_assert_num_queries: Any
+    credential_factory: CredentialFactory, django_assert_num_queries: DjangoAssertNumQueries
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
@@ -164,7 +179,7 @@ def test_entry_keeps_its_snapshot_without_repeated_tunnel_queries(
 
 
 def test_entry_serializes_each_message_once_and_signs_activity_once(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from collections import Counter
 
@@ -175,16 +190,16 @@ def test_entry_serializes_each_message_once_and_signs_activity_once(
     replies = [
         _reply(created, creator, f"entry-work-{index}", "Reply café.") for index in range(12)
     ]
-    serializations: Counter[Any] = Counter()
+    serializations: Counter[UUID] = Counter()
     cursor_kinds: Counter[str] = Counter()
     original_payload = message_payload
     original_cursor = encode_cursor
 
-    def count_payload(message: Any) -> dict[str, Any]:
+    def count_payload(message: Message) -> MessageData:
         serializations[message.id] += 1
         return original_payload(message)
 
-    def count_cursor(kind: str, **values: Any) -> str:
+    def count_cursor(kind: str, **values: object) -> str:
         cursor_kinds[kind] += 1
         return original_cursor(kind, **values)
 

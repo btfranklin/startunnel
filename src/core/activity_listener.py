@@ -10,21 +10,10 @@ from uuid import UUID
 import psycopg
 from django.conf import settings
 
+from .database_options import postgres_connection_options
 from .notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL
 
 logger = logging.getLogger(__name__)
-
-
-def _connection_kwargs() -> dict[str, object]:
-    database = settings.DATABASES["default"]
-    return {
-        "dbname": database["NAME"],
-        "user": database.get("USER") or None,
-        "password": database.get("PASSWORD") or None,
-        "host": database.get("HOST") or None,
-        "port": database.get("PORT") or None,
-        "connect_timeout": 5,
-    }
 
 
 async def _wait_readable(fileno: int) -> None:
@@ -107,7 +96,7 @@ class ActivityListener:
         while not self._stopping:
             try:
                 connection = await psycopg.AsyncConnection.connect(
-                    **_connection_kwargs(),  # type: ignore[arg-type]
+                    **postgres_connection_options(),
                     autocommit=True,
                 )
                 async with connection:

@@ -2,28 +2,31 @@
 
 import asyncio
 from contextlib import suppress
-from typing import Any
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.db import connection
+from tests.factories import CredentialFactory
 
 import tunnels.activity as activity
+from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
-from tunnels.cycles import create_tunnel
-from tunnels.messages import post_reply
+from tunnels.activity import ActivityPage
+from tunnels.cycles import CreatedTunnel, create_tunnel
+from tunnels.messages import PostedReply, post_reply
+from tunnels.models import Tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 @pytest.mark.asyncio
 async def test_activity_wait_observes_commit_in_registration_window(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publisher, _ = await sync_to_async(credential_factory)()
     reader, _ = await sync_to_async(credential_factory)()
 
-    def create() -> Any:
+    def create() -> CreatedTunnel:
         try:
             return create_tunnel(
                 credential=publisher,
@@ -42,10 +45,25 @@ async def test_activity_wait_observes_commit_in_registration_window(
     loop = asyncio.get_running_loop()
     read = activity._continue_activity_wait_for_async
 
-    def pause_then_read(**arguments: Any) -> Any:
+    def pause_then_read(
+        *,
+        tunnel: Tunnel,
+        credential: AgentCredential,
+        address: str,
+        after_position: int,
+        limit: int,
+        event_types: tuple[str, ...] | None,
+    ) -> ActivityPage:
         loop.call_soon_threadsafe(entered.set)
         asyncio.run_coroutine_threadsafe(release.wait(), loop).result(timeout=5)
-        return read(**arguments)
+        return read(
+            tunnel=tunnel,
+            credential=credential,
+            address=address,
+            after_position=after_position,
+            limit=limit,
+            event_types=event_types,
+        )
 
     monkeypatch.setattr(activity, "_continue_activity_wait_for_async", pause_then_read)
     waiting = asyncio.create_task(
@@ -60,7 +78,7 @@ async def test_activity_wait_observes_commit_in_registration_window(
         await asyncio.wait_for(entered.wait(), timeout=5)
         assert listener._waiters
 
-        def reply() -> Any:
+        def reply() -> PostedReply:
             try:
                 return post_reply(
                     credential=publisher,

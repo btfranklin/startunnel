@@ -3,25 +3,44 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, TypedDict
 from uuid import uuid4
 
 import pytest
+from django.test import Client
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_access import issue_admin_key
 from accounts.models import AdminReceipt
+from agents.models import AgentCredential
 from agents.services import revoke_credential
 from core.cursors import decode_cursor, encode_cursor
+from core.json_types import json_object
 from core.models import AuditEvent
 from tunnels.admin_actions import retire_tunnel_as_admin, retirement_confirmation
 from tunnels.beacons import publish_beacon
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.models import Beacon, Message, Tunnel
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str) -> Any:
+class RetirementSelection(TypedDict):
+    tunnel_id: str
+    expected_address_generation: int
+    confirmation: str
+
+
+class BulkRetirementBody(TypedDict):
+    credential_id: str
+    tunnels: list[RetirementSelection]
+
+
+def _create(credential: AgentCredential, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -30,7 +49,7 @@ def _create(credential: Any, key: str) -> Any:
     )
 
 
-def _selection(created: Any) -> dict[str, Any]:
+def _selection(created: CreatedTunnel) -> RetirementSelection:
     return {
         "tunnel_id": str(created.tunnel.id),
         "expected_address_generation": 1,
@@ -38,7 +57,9 @@ def _selection(created: Any) -> dict[str, Any]:
     }
 
 
-def _retire(client: Any, secret: str, data: dict[str, Any], key: str) -> Any:
+def _retire(
+    client: Client, secret: str, data: Mapping[str, object], key: str
+) -> _MonkeyPatchedWSGIResponse:
     return client.post(
         "/api/v1/admin/tunnels/retire-for-credential",
         data=json.dumps(data),
@@ -49,27 +70,27 @@ def _retire(client: Any, secret: str, data: dict[str, Any], key: str) -> Any:
 
 
 def test_creator_filter_paginates_and_keeps_old_unfiltered_cursors(
-    client: Any, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     _, secret = issue_admin_key(owner=actor, name="recovery")
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + secret}
+    headers = {"Authorization": "Bearer " + secret}
     first, _ = credential_factory()
     other, _ = credential_factory()
     created = [_create(first, "filter-first"), _create(first, "filter-second")]
     created.append(_create(other, "filter-other"))
     expected = sorted(str(item.tunnel.id) for item in created[:2])
-    query = {"creator_id": str(first.id), "limit": 1}
-    page = client.get("/api/v1/admin/tunnels", query, **headers).json()
+    query: dict[str, str | int] = {"creator_id": str(first.id), "limit": 1}
+    page = client.get("/api/v1/admin/tunnels", query, headers=headers).json()
     assert [row["id"] for row in page["items"]] == expected[:1]
     rest = client.get(
-        "/api/v1/admin/tunnels", {**query, "cursor": page["next_cursor"]}, **headers
+        "/api/v1/admin/tunnels", {**query, "cursor": page["next_cursor"]}, headers=headers
     ).json()
     assert [row["id"] for row in rest["items"]] == expected[1:]
     assert rest["next_cursor"] is None
     for filters in ({}, {"creator_id": str(other.id)}):
         response = client.get(
-            "/api/v1/admin/tunnels", {**filters, "cursor": page["next_cursor"]}, **headers
+            "/api/v1/admin/tunnels", {**filters, "cursor": page["next_cursor"]}, headers=headers
         )
         assert response.status_code == 400
 
@@ -89,16 +110,16 @@ def test_creator_filter_paginates_and_keeps_old_unfiltered_cursors(
     old_cursor = encode_cursor(
         "admin_tunnels", after=ordered[0], after_at=None, filters=old_filters
     )
-    response = client.get("/api/v1/admin/tunnels", {"cursor": old_cursor}, **headers)
+    response = client.get("/api/v1/admin/tunnels", {"cursor": old_cursor}, headers=headers)
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["items"]] == ordered[1:]
-    default_page = client.get("/api/v1/admin/tunnels", {"limit": 1}, **headers).json()
+    default_page = client.get("/api/v1/admin/tunnels", {"limit": 1}, headers=headers).json()
     decoded = decode_cursor(default_page["next_cursor"], kind="admin_tunnels")
-    assert "creator_id" not in decoded["filters"]
+    assert "creator_id" not in json_object(decoded["filters"])
 
 
 def test_bulk_retirement_keeps_history_and_replays_safe_result(
-    client: Any, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     admin_key, secret = issue_admin_key(owner=actor, name="recovery")
@@ -112,7 +133,7 @@ def test_bulk_retirement_keeps_history_and_replays_safe_result(
     )
     revoke_credential(actor=actor, credential=credential)
     assert Tunnel.objects.filter(state="active").count() == 2
-    body: dict[str, Any] = {
+    body: BulkRetirementBody = {
         "credential_id": str(credential.id),
         "tunnels": [_selection(row) for row in created],
     }
@@ -163,7 +184,11 @@ def test_bulk_retirement_keeps_history_and_replays_safe_result(
     ],
 )
 def test_bulk_retirement_failure_rolls_back_every_target(
-    client: Any, user_factory: Any, credential_factory: Any, fault: str, status: int
+    client: Client,
+    user_factory: UserFactory,
+    credential_factory: CredentialFactory,
+    fault: str,
+    status: int,
 ) -> None:
     actor = user_factory()
     _, secret = issue_admin_key(owner=actor, name="recovery")
@@ -172,7 +197,7 @@ def test_bulk_retirement_failure_rolls_back_every_target(
         [_create(credential, "rollback-first"), _create(credential, "rollback-second")],
         key=lambda row: row.tunnel.id,
     )
-    body: dict[str, Any] = {
+    body: BulkRetirementBody = {
         "credential_id": str(credential.id),
         "tunnels": [_selection(row) for row in created],
     }
@@ -192,7 +217,12 @@ def test_bulk_retirement_failure_rolls_back_every_target(
     elif fault == "generation":
         body["tunnels"][1]["expected_address_generation"] = 2
     elif fault == "retired":
-        retire_tunnel_as_admin(actor=actor, **_selection(created[1]))
+        retire_tunnel_as_admin(
+            actor=actor,
+            tunnel_id=created[1].tunnel.id,
+            expected_address_generation=1,
+            confirmation=retirement_confirmation(created[1].tunnel),
+        )
     before = list(Tunnel.objects.order_by("id").values("id", "state", "next_event_position"))
     retired_audits = AuditEvent.objects.filter(action="tunnel.retired").count()
     response = _retire(client, secret, body, "recovery-rollback")
@@ -217,7 +247,9 @@ def test_bulk_retirement_failure_rolls_back_every_target(
 
 
 @pytest.mark.parametrize("count", [0, 501])
-def test_bulk_retirement_request_is_bounded(client: Any, user_factory: Any, count: int) -> None:
+def test_bulk_retirement_request_is_bounded(
+    client: Client, user_factory: UserFactory, count: int
+) -> None:
     _, secret = issue_admin_key(owner=user_factory(), name="recovery")
     selection = {"tunnel_id": str(uuid4()), "expected_address_generation": 1, "confirmation": "x"}
     response = _retire(

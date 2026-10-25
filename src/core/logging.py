@@ -8,7 +8,6 @@ import logging
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -37,7 +36,7 @@ class SafeJsonFormatter(logging.Formatter):
             "uvicorn.access",
         } or logger.startswith(("django.request.", "django.server.", "django.security."))
         message = "[REDACTED]" if raw_http or hasattr(record, "sql") else record.getMessage()
-        event: dict[str, Any] = {
+        event: dict[str, object] = {
             "asctime": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "levelname": record.levelname,
             "name": record.name,

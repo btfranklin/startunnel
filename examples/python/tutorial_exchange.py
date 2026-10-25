@@ -6,27 +6,30 @@ import asyncio
 import json
 import os
 import sys
-from typing import Any
 
 from startunnel_client import (
+    JsonObject,
+    JsonValue,
     StarTunnelClient,
     StarTunnelError,
+    json_object,
+    json_value,
     load_env_file,
     new_idempotency_key,
     require_environment,
 )
 
 
-def require_object(value: object, name: str) -> dict[str, Any]:
+def require_object(value: object, name: str) -> JsonObject:
     if not isinstance(value, dict):
         raise ValueError(f"The API response did not contain {name}.")
-    return value
+    return json_object(value)
 
 
-def require_list(value: object, name: str) -> list[Any]:
+def require_list(value: object, name: str) -> list[JsonValue]:
     if not isinstance(value, list):
         raise ValueError(f"The API response did not contain {name}.")
-    return value
+    return [json_value(item) for item in value]
 
 
 def require_string(value: object, name: str) -> str:

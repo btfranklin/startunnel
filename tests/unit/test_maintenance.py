@@ -5,14 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from uuid import UUID
 
 import pytest
 import time_machine
 from django.contrib.sessions.models import Session
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.models import AdminReceipt
 from core.logging import SafeJsonFormatter
@@ -28,14 +29,16 @@ from core.maintenance import (
 from core.maintenance_status import read_maintenance_status
 from core.management.commands.maintenance_loop import Command as MaintenanceCommand
 from core.models import AgentReceipt, AuditEvent, MaintenanceState, RateLimitBucket
-from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import Cycle, Message
 
 pytestmark = pytest.mark.django_db
 
 
-def _tree(credential_factory: Any, suffix: str, *, closed: bool = False) -> Any:
+def _tree(
+    credential_factory: CredentialFactory, suffix: str, *, closed: bool = False
+) -> CreatedTunnel:
     creator, _ = credential_factory(name=f"Coordinator {suffix}")
     created = create_tunnel(
         credential=creator,
@@ -59,7 +62,9 @@ def _tree(credential_factory: Any, suffix: str, *, closed: bool = False) -> Any:
     return created
 
 
-def test_cleanup_closes_expired_cycle_from_original_expiry(credential_factory: Any) -> None:
+def test_cleanup_closes_expired_cycle_from_original_expiry(
+    credential_factory: CredentialFactory,
+) -> None:
     created = _tree(credential_factory, "expired")
     now = timezone.now()
     expiry = now - timedelta(minutes=10)
@@ -73,7 +78,9 @@ def test_cleanup_closes_expired_cycle_from_original_expiry(credential_factory: A
     assert not Message.objects.filter(cycle=created.cycle).exists()
 
 
-def test_cleanup_keeps_future_cycle_and_records_status(credential_factory: Any) -> None:
+def test_cleanup_keeps_future_cycle_and_records_status(
+    credential_factory: CredentialFactory,
+) -> None:
     created = _tree(credential_factory, "future")
     counts = cleanup_once(now=timezone.now())
     created.cycle.refresh_from_db()
@@ -87,7 +94,7 @@ def test_cleanup_keeps_future_cycle_and_records_status(credential_factory: Any) 
 
 
 def test_cleanup_purges_all_due_noncontent_categories(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     now = timezone.now()
@@ -124,7 +131,7 @@ def test_cleanup_purges_all_due_noncontent_categories(
 
 
 def test_cleanup_limits_each_batch(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     now = timezone.now()
@@ -151,7 +158,7 @@ def test_delete_batch_preserves_rows_refreshed_after_selection(
 ) -> None:
     now = timezone.now()
     if kind == "session":
-        row: Any = Session.objects.create(
+        row: Session | RateLimitBucket = Session.objects.create(
             session_key="refreshed-session", session_data="", expire_date=now
         )
         field = "expire_date"
@@ -160,7 +167,7 @@ def test_delete_batch_preserves_rows_refreshed_after_selection(
         field = "expires_at"
     original_delete = QuerySet.delete
 
-    def refresh_before_delete(queryset: QuerySet[Any]) -> tuple[int, dict[str, int]]:
+    def refresh_before_delete(queryset: QuerySet[Model]) -> tuple[int, dict[str, int]]:
         type(row).objects.filter(pk=row.pk).update(**{field: now + timedelta(hours=1)})
         return original_delete(queryset)
 
@@ -171,7 +178,7 @@ def test_delete_batch_preserves_rows_refreshed_after_selection(
 
 
 def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     created = _tree(credential_factory, "failed-deletion-backlog", closed=True)
     now = timezone.now()
@@ -195,7 +202,7 @@ def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
     )
     attempts: list[bool] = []
 
-    def fail_deletion(**kwargs: Any) -> bool:
+    def fail_deletion(**kwargs: object) -> bool:
         attempts.append(True)
         raise RuntimeError("Synthetic content deletion failure.")
 
@@ -228,7 +235,7 @@ def test_failed_deletion_does_not_delay_other_batches_or_nearer_deadlines(
 
 
 def test_next_deadline_and_due_work_use_earliest_persisted_value(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     created = _tree(credential_factory, "deadline")
     now = timezone.now()
@@ -240,7 +247,7 @@ def test_next_deadline_and_due_work_use_earliest_persisted_value(
 
 
 def test_admin_receipt_deadlines_and_cleanup_are_bounded(
-    user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = user_factory()
     now = timezone.now()
@@ -276,7 +283,9 @@ def test_admin_receipt_deadlines_and_cleanup_are_bounded(
 
 
 def test_failed_cycle_does_not_block_later_deletion(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    credential_factory: CredentialFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     first = _tree(credential_factory, "failure-first", closed=True)
     second = _tree(credential_factory, "failure-second", closed=True)
@@ -291,7 +300,7 @@ def test_failed_cycle_does_not_block_later_deletion(
         "core.maintenance", fromlist=["delete_due_cycle_content"]
     ).delete_due_cycle_content
 
-    def fail_one(*, cycle_id: Any, now: Any) -> bool:
+    def fail_one(*, cycle_id: UUID, now: datetime) -> bool:
         if cycle_id == first.cycle.id:
             raise RuntimeError("expected test failure")
         return bool(original(cycle_id=cycle_id, now=now))
@@ -309,7 +318,7 @@ def test_failed_cycle_does_not_block_later_deletion(
 
 
 def test_cleanup_records_deletion_failure_and_observed_lag(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     created = _tree(credential_factory, "record-failure", closed=True)
     now = timezone.now()

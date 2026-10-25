@@ -5,18 +5,19 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
-from collections.abc import Callable
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Literal, cast
 from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import DatabaseError, connection, transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q, QuerySet
 from django.utils import timezone
+from pydantic import TypeAdapter, ValidationError
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
@@ -34,7 +35,7 @@ from core.maintenance_status import read_maintenance_status
 from core.models import AuditEvent
 from core.rate_limits import consume_admin_operation
 from tunnels.access import cycle_is_readable
-from tunnels.beacons import beacon_queryset
+from tunnels.beacons import CountedBeacon, beacon_queryset
 from tunnels.models import Beacon, Cycle, Tunnel, TunnelAddress
 
 from .admin_access import validate_actor
@@ -43,7 +44,9 @@ from .admin_data import (
     AdminOperationResult,
     AdminPageData,
     AdminStatusData,
+    ListedResourceData,
     OperationReference,
+    TunnelResourceData,
     _tunnel_list_resource,
     admin_resource,
     agent_resource,
@@ -52,6 +55,11 @@ from .admin_data import (
     key_resource,
 )
 from .models import AdminCredential, AdminReceipt, User
+
+type AdminRow = User | AdminCredential | AgentCredential | Tunnel | AuditEvent | Cycle | Beacon
+type AdminResourceKind = Literal[
+    "accounts", "keys", "agents", "tunnels", "audit", "cycles", "beacons"
+]
 
 
 def admin_status() -> AdminStatusData:
@@ -83,7 +91,7 @@ def admin_status() -> AdminStatusData:
 
 
 def list_admin_resources(
-    kind: str,
+    kind: AdminResourceKind,
     *,
     actor: User,
     limit: int = DEFAULT_LIMITS.default_list_page,
@@ -103,7 +111,7 @@ def list_admin_resources(
     validate_actor(actor)
     if not 1 <= limit <= instance_limits.effective_limits().maximum_list_page:
         raise InvalidRequest("The page limit is outside the allowed range.")
-    models: dict[str, Any] = {
+    models: dict[AdminResourceKind, type[AdminRow]] = {
         "accounts": User,
         "keys": AdminCredential,
         "agents": AgentCredential,
@@ -112,8 +120,8 @@ def list_admin_resources(
         "cycles": Cycle,
         "beacons": Beacon,
     }
-    queryset = (
-        models[kind].objects.all().order_by("-created_at", "-id")
+    queryset: QuerySet[AdminRow] = (
+        AuditEvent.objects.all().order_by("-created_at", "-id")
         if kind == "audit"
         else models[kind].objects.all().order_by("id")
     )
@@ -155,11 +163,14 @@ def list_admin_resources(
         elif kind in {"keys", "agents"}:
             if state not in {"available", "revoked"}:
                 raise InvalidRequest("Select available or revoked keys.")
-            queryset = (
-                queryset.available()
-                if state == "available"
-                else queryset.filter(revoked_at__isnull=False)
-            )
+            if state == "available":
+                queryset = (
+                    AdminCredential.objects.available().select_related("owner").order_by("id")
+                    if kind == "keys"
+                    else AgentCredential.objects.available().order_by("id")
+                )
+            else:
+                queryset = queryset.filter(revoked_at__isnull=False)
         else:
             queryset = queryset.filter(state=state)
     if admin_id and kind == "keys":
@@ -180,8 +191,6 @@ def list_admin_resources(
         if target_id:
             queryset = queryset.filter(target_id=target_id)
         if credential_id:
-            from django.db.models import Q
-
             queryset = queryset.filter(
                 Q(actor_admin_credential_id=credential_id) | Q(actor_credential_id=credential_id)
             )
@@ -192,9 +201,10 @@ def list_admin_resources(
         try:
             after_id = UUID(str(decoded["after"]))
             if kind == "audit":
-                from django.db.models import Q
-
-                after_at = datetime.fromisoformat(decoded["after_at"])
+                after_at_value = decoded["after_at"]
+                if not isinstance(after_at_value, str):
+                    raise ValueError("The cursor date must be text.")
+                after_at = datetime.fromisoformat(after_at_value)
                 queryset = queryset.filter(
                     Q(created_at__lt=after_at) | Q(created_at=after_at, id__lt=after_id)
                 )
@@ -203,27 +213,12 @@ def list_admin_resources(
         except (ValueError, KeyError) as error:
             raise InvalidRequest("The cursor is not valid.") from error
     rows = list(queryset[: limit + 1])
-    serializers: dict[str, Callable[[Any], dict[str, Any]]] = {
-        "accounts": admin_resource,
-        "keys": key_resource,
-        "agents": agent_resource,
-        "tunnels": _tunnel_list_resource,
-        "audit": audit_resource,
-        "beacons": beacon_resource,
-        "cycles": lambda row: {
-            "id": str(row.id),
-            "number": row.number,
-            "state": row.state,
-            "label": row.label if cycle_is_readable(row) else "",
-            "created_at": row.created_at.isoformat(),
-        },
-    }
     return {
-        "items": [serializers[kind](row) for row in rows[:limit]],
+        "items": [_serialize_admin_row(row) for row in rows[:limit]],
         "next_cursor": encode_cursor(
             "admin_" + kind,
             after=str(rows[limit - 1].id),
-            after_at=rows[limit - 1].created_at.isoformat() if kind == "audit" else None,
+            after_at=_audit_row_date(rows[limit - 1]) if kind == "audit" else None,
             filters=filters,
         )
         if len(rows) > limit
@@ -231,18 +226,51 @@ def list_admin_resources(
     }
 
 
-def receipt_response(receipt: AdminReceipt) -> dict[str, Any]:
+def _audit_row_date(row: AdminRow) -> str:
+    assert isinstance(row, AuditEvent)
+    return row.created_at.isoformat()
+
+
+def _serialize_admin_row(row: AdminRow) -> ListedResourceData:
+    if isinstance(row, User):
+        return admin_resource(row)
+    if isinstance(row, AdminCredential):
+        return key_resource(row)
+    if isinstance(row, AgentCredential):
+        return agent_resource(row)
+    if isinstance(row, Tunnel):
+        return _tunnel_list_resource(row)
+    if isinstance(row, AuditEvent):
+        return audit_resource(row)
+    if isinstance(row, Beacon):
+        # The Beacon list always uses beacon_queryset's response count annotation.
+        return beacon_resource(cast(CountedBeacon, row))
+    assert isinstance(row, Cycle)
+    return {
+        "id": str(row.id),
+        "number": row.number,
+        "state": row.state,
+        "label": row.label if cycle_is_readable(row) else "",
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+_ADMIN_RESULT = TypeAdapter(AdminOperationResult)
+_TUNNEL_RESOURCE = TypeAdapter(TunnelResourceData)
+
+
+def receipt_response(receipt: AdminReceipt) -> AdminOperationResult:
     """Read a receipt only while its retained result is available."""
 
-    response = dict(receipt.response)
-    if not response:
-        raise InvalidRequest("This operation is not available.")
+    try:
+        response = _ADMIN_RESULT.validate_python(receipt.response)
+    except ValidationError as error:
+        raise InvalidRequest("This operation is not available.") from error
     if receipt.operation == "beacons.withdraw":
-        beacon = (
-            Beacon.objects.select_related("cycle")
-            .filter(pk=response.get("resource", {}).get("id"))
-            .first()
-        )
+        beacon_resource_id = response["resource"].get("id")
+        if not isinstance(beacon_resource_id, str):
+            raise InvalidRequest("This operation is not available.")
+        beacon = Beacon.objects.select_related("cycle").filter(pk=beacon_resource_id).first()
         if beacon is None or not cycle_is_readable(beacon.cycle):
             raise InvalidRequest("The operation resource is not available.")
     return response
@@ -251,10 +279,13 @@ def receipt_response(receipt: AdminReceipt) -> dict[str, Any]:
 def _replay(receipt: AdminReceipt) -> AdminOperationResult:
     response = receipt_response(receipt)
     if receipt.operation == "tunnels.rotate":
-        resource = response.get("resource", {})
+        resource = _TUNNEL_RESOURCE.validate_python(response["resource"])
+        generation = resource["address_generation"]
+        if generation is None:
+            raise LifecycleConflict("This operation address is no longer available.")
         address_row = TunnelAddress.objects.filter(
-            tunnel_id=resource.get("id"),
-            generation=resource.get("address_generation"),
+            tunnel_id=resource["id"],
+            generation=generation,
             state=TunnelAddress.State.CURRENT,
             tunnel__state__in=["active", "dormant"],
         ).first()
@@ -298,7 +329,7 @@ def execute_admin_operation(
     credential: AdminCredential | None = None,
     command: AdminCommand,
     key: str,
-    request_data: dict[str, Any],
+    request_data: Mapping[str, object],
 ) -> AdminOperationResult:
     try:
         consume_admin_operation(actor.id)
@@ -332,7 +363,7 @@ def _execute_admin_operation(
     credential: AdminCredential | None = None,
     command: AdminCommand,
     key: str,
-    request_data: dict[str, Any],
+    request_data: Mapping[str, object],
 ) -> AdminOperationResult:
     validate_idempotency_key(key)
     if isinstance(command, TunnelStart) and request_data.get("root_session") is None:

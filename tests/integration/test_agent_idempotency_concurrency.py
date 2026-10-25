@@ -6,13 +6,13 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from typing import Any
 from uuid import UUID
 
 import pytest
 from django.db import close_old_connections, connection
-from django.db.models import QuerySet
+from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
 from agents.models import AgentCredential
 from core.errors import IdempotencyConflict
@@ -24,7 +24,9 @@ from tunnels.models import Message
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-def test_concurrent_agent_requests_with_changed_input_conflict(credential_factory: Any) -> None:
+def test_concurrent_agent_requests_with_changed_input_conflict(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(
         credential=credential,
@@ -64,7 +66,7 @@ def test_concurrent_agent_requests_with_changed_input_conflict(credential_factor
 
 @pytest.mark.parametrize("changed_input", [False, True])
 def test_waiting_agent_retry_recovers_after_expired_receipt_is_replaced(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch, changed_input: bool
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch, changed_input: bool
 ) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(
@@ -91,7 +93,7 @@ def test_waiting_agent_retry_recovers_after_expired_receipt_is_replaced(
     owner_pid: list[int] = []
     original_get = QuerySet.get
 
-    def get_after_both_arrive(queryset: QuerySet[Any], *args: Any, **kwargs: Any) -> Any:
+    def get_after_both_arrive[T: Model](queryset: QuerySet[T], *args: Q, **kwargs: object) -> T:
         if (
             queryset.model is AgentReceipt
             and queryset.query.select_for_update

@@ -1,20 +1,27 @@
 """Tunnel creation caps limit one credential without changing shared access."""
 
 from dataclasses import replace
-from typing import Any
 
 import pytest
+from tests.factories import CredentialFactory, UserFactory
 
+from agents.models import AgentCredential
 from core.errors import QuotaExceeded
 from core.limits import Limits
 from tunnels.admin_actions import retire_tunnel_as_admin, retirement_confirmation
-from tunnels.cycles import agent_tunnel_status, close_cycle, create_tunnel, start_cycle
+from tunnels.cycles import (
+    CreatedTunnel,
+    agent_tunnel_status,
+    close_cycle,
+    create_tunnel,
+    start_cycle,
+)
 from tunnels.messages import post_reply, read_tree
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str) -> Any:
+def _create(credential: AgentCredential, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -23,7 +30,7 @@ def _create(credential: Any, key: str) -> Any:
 
 
 def test_creation_cap_counts_each_creator_and_preserves_exact_retries(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     limits = replace(Limits(), non_retired_tunnels=2, non_retired_tunnels_per_credential=1)
     monkeypatch.setattr("tunnels.cycles.instance_limits.effective_limits", lambda: limits)
@@ -49,7 +56,9 @@ def test_creation_cap_counts_each_creator_and_preserves_exact_retries(
 
 
 def test_creation_cap_preserves_shared_use_and_retirement_releases_capacity(
-    credential_factory: Any, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     limits = replace(Limits(), non_retired_tunnels_per_credential=1)
     monkeypatch.setattr("tunnels.cycles.instance_limits.effective_limits", lambda: limits)

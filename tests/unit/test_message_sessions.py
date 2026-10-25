@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import NotRequired, TypedDict
+from uuid import UUID
 
 import pytest
 from asgiref.sync import async_to_sync
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import IdempotencyConflict, InvalidRequest
 from tunnels.activity import read_activity_async
 from tunnels.codec import canonical_address
@@ -22,7 +26,58 @@ from tunnels.participants import list_participants
 pytestmark = pytest.mark.django_db
 
 
-def _request_digest(data: dict[str, Any]) -> bytes:
+class CreateTunnelArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    root_content: Mapping[str, object]
+
+
+class PostReplyArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    parent_id: UUID
+    content: Mapping[str, object]
+    session: NotRequired[str | None]
+
+
+class StartCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+    root_session: NotRequired[str | None]
+
+
+class RolloverCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+    root_session: NotRequired[str | None]
+    expected_cycle_id: UUID
+
+
+class UnlabeledStartCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+
+
+class UnlabeledRolloverCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+    expected_cycle_id: UUID
+
+
+def _request_digest(data: Mapping[str, object]) -> bytes:
     canonical = json.dumps(
         data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode()
@@ -31,7 +86,7 @@ def _request_digest(data: dict[str, Any]) -> bytes:
 
 @pytest.mark.django_db(transaction=True)
 def test_labels_are_stored_and_shared_reads_keep_sender_identity(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory(name="Shared agent")
     created = create_tunnel(
@@ -73,6 +128,7 @@ def test_labels_are_stored_and_shared_reads_keep_sender_identity(
         if item.message is not None
     ] == ["chat-a", "chat-b"]
     entry = entry_payload(enter_tunnel(credential=credential, address=created.address))
+    assert entry["root"] is not None
     assert entry["root"]["sender"]["session"] == "chat-a"
     assert entry["recent_messages"][0]["sender"]["session"] == "chat-b"
     participants = list_participants(credential=credential, address=created.address)
@@ -81,10 +137,10 @@ def test_labels_are_stored_and_shared_reads_keep_sender_identity(
 
 
 def test_exact_retries_include_labels_and_match_absent_session_request_data(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
-    common = {
+    common: CreateTunnelArguments = {
         "credential": credential,
         "idempotency_key": "session-create-retry",
         "root_content": {"type": "text", "text": "Root"},
@@ -105,7 +161,7 @@ def test_exact_retries_include_labels_and_match_absent_session_request_data(
     with pytest.raises(IdempotencyConflict):
         create_tunnel(**common, root_session="chat-a")
 
-    reply = {
+    reply: PostReplyArguments = {
         "credential": credential,
         "idempotency_key": "session-reply-retry",
         "address": created.address,
@@ -126,22 +182,23 @@ def test_exact_retries_include_labels_and_match_absent_session_request_data(
     assert post_reply(**reply).replay
     assert first.message.session == "chat-a"
     with pytest.raises(IdempotencyConflict):
-        post_reply(**{**reply, "session": "chat-b"})
-    unlabeled_result = post_reply(
-        **{**reply, "idempotency_key": "session-reply-unlabeled", "session": None}
-    )
+        changed_reply = reply.copy()
+        changed_reply["session"] = "chat-b"
+        post_reply(**changed_reply)
+    unlabeled_request = reply.copy()
+    unlabeled_request["idempotency_key"] = "session-reply-unlabeled"
+    unlabeled_request["session"] = None
+    unlabeled_result = post_reply(**unlabeled_request)
     stored_unlabeled_reply = credential.agent_receipts.get(
         resource_id=str(unlabeled_result.message.id)
     )
     assert bytes(stored_unlabeled_reply.request_digest) == _request_digest(unlabeled_reply)
-    assert post_reply(
-        **{key: value for key, value in reply.items() if key not in {"session", "idempotency_key"}},
-        idempotency_key="session-reply-unlabeled",
-    ).replay
+    unlabeled_request.pop("session")
+    assert post_reply(**unlabeled_request).replay
 
 
 def test_start_and_rollover_store_root_session_and_check_retries(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(
@@ -155,7 +212,7 @@ def test_start_and_rollover_store_root_session_and_check_retries(
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    common = {
+    common: StartCycleArguments = {
         "credential": credential,
         "idempotency_key": "session-cycle-start",
         "address": created.address,
@@ -167,9 +224,11 @@ def test_start_and_rollover_store_root_session_and_check_retries(
     assert started.root.session == "chat-a"
     assert start_cycle(**common).replay
     with pytest.raises(IdempotencyConflict):
-        start_cycle(**{**common, "root_session": "chat-b"})
+        changed_start = common.copy()
+        changed_start["root_session"] = "chat-b"
+        start_cycle(**changed_start)
 
-    rollover = {
+    rollover: RolloverCycleArguments = {
         **common,
         "idempotency_key": "session-cycle-rollover",
         "expected_cycle_id": started.cycle.id,
@@ -180,11 +239,13 @@ def test_start_and_rollover_store_root_session_and_check_retries(
     assert next_cycle.root.session == "chat-b"
     assert rollover_cycle(**rollover).replay
     with pytest.raises(IdempotencyConflict):
-        rollover_cycle(**{**rollover, "root_session": "chat-a"})
+        changed_rollover = rollover.copy()
+        changed_rollover["root_session"] = "chat-a"
+        rollover_cycle(**changed_rollover)
 
 
 def test_unlabeled_cycle_retries_match_absent_session_request_data(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = create_tunnel(
@@ -198,7 +259,7 @@ def test_unlabeled_cycle_retries_match_absent_session_request_data(
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    common = {
+    common: UnlabeledStartCycleArguments = {
         "credential": credential,
         "idempotency_key": "session-old-cycle-start",
         "address": created.address,
@@ -222,7 +283,7 @@ def test_unlabeled_cycle_retries_match_absent_session_request_data(
     with pytest.raises(IdempotencyConflict):
         start_cycle(**common, root_session="chat-a")
 
-    rollover = {
+    rollover: UnlabeledRolloverCycleArguments = {
         **common,
         "idempotency_key": "session-old-cycle-rollover",
         "expected_cycle_id": started.cycle.id,
@@ -242,7 +303,7 @@ def test_unlabeled_cycle_retries_match_absent_session_request_data(
 @pytest.mark.parametrize(
     "label", ["", " abc", "abc ", "a\n", "a\t", "a\x00", "a\u0085", "a\u202e", "a" * 33]
 )
-def test_invalid_sessions_are_rejected(credential_factory: Any, label: str) -> None:
+def test_invalid_sessions_are_rejected(credential_factory: CredentialFactory, label: str) -> None:
     credential, _ = credential_factory()
     with pytest.raises(InvalidRequest, match="session"):
         create_tunnel(

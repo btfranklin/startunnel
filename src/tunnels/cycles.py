@@ -6,7 +6,6 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
 from uuid import UUID
 
 from django.conf import settings
@@ -123,7 +122,7 @@ class CycleSnapshot:
     event_position: int
 
 
-def _read_cycle_snapshot(response: Mapping[str, Any]) -> CycleSnapshot:
+def _read_cycle_snapshot(response: Mapping[str, object]) -> CycleSnapshot:
     cycle_state = response.get("cycle_state")
     message_count = response.get("message_count")
     content_bytes = response.get("content_bytes")
@@ -212,7 +211,7 @@ def create_tunnel(
     *,
     credential: AgentCredential,
     idempotency_key: str,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     label: str = "",
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
@@ -230,7 +229,7 @@ def create_tunnel(
     correlation = _normalize_correlation_id(root_correlation_id)
     session = _validate_session(root_session)
     mention_ids = root_mentions or []
-    request_data = {
+    request_data: dict[str, object] = {
         "label": tunnel_label,
         "cycle_label": normalized_cycle_label,
         "expires_in_seconds": seconds,
@@ -441,7 +440,7 @@ def list_cycles(
 def _prepare_cycle_root(
     *,
     limits: Limits,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str,
     expires_in_seconds: int | None,
     root_mentions: list[UUID] | None,
@@ -593,10 +592,10 @@ def _cycle_request_data(
     expected_cycle_id: UUID | None,
     cycle_label: str,
     expires_in_seconds: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     root_mentions: list[UUID],
     root_correlation_id: str,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "address": canonical_address(address),
         "expected_address_generation": expected_address_generation,
@@ -616,7 +615,7 @@ def start_cycle(
     idempotency_key: str,
     address: str,
     expected_address_generation: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
     root_mentions: list[UUID] | None = None,
@@ -709,7 +708,7 @@ def rollover_cycle(
     address: str,
     expected_cycle_id: UUID,
     expected_address_generation: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
     root_mentions: list[UUID] | None = None,
@@ -871,7 +870,7 @@ def close_cycle(
     expected_cycle_id: UUID,
 ) -> None:
     canonical = canonical_address(address)
-    request_data = {
+    request_data: dict[str, object] = {
         "address": canonical,
         "expected_cycle_id": str(expected_cycle_id),
     }

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 from django.test import Client
+from tests.factories import CredentialFactory
 
 from tunnels.models import Cycle, Message, Tunnel
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -28,10 +32,10 @@ def _headers(key: str, idempotency: str | None = None) -> dict[str, str]:
 def _post(
     client: Client,
     path: str,
-    body: dict[str, Any],
+    body: dict[str, object],
     key: str,
     idempotency: str | None = None,
-) -> Any:
+) -> _MonkeyPatchedWSGIResponse:
     return client.post(
         path,
         data=json.dumps(body),
@@ -40,7 +44,7 @@ def _post(
     )
 
 
-def _create_body(label: str, root_text: str) -> dict[str, Any]:
+def _create_body(label: str, root_text: str) -> dict[str, object]:
     return {
         "label": label,
         "cycle": {
@@ -55,7 +59,7 @@ def _create_body(label: str, root_text: str) -> dict[str, Any]:
 
 def test_deterministic_global_agents_build_and_retain_a_tree(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     _, sender_key = credential_factory(name="Agent A")
     _, receiver_key = credential_factory(name="Agent B")

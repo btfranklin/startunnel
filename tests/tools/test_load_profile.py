@@ -7,13 +7,17 @@ from pathlib import Path
 
 import httpx
 import pytest
+from tests.json_values import json_elements, json_members
 from tests.load.profile import (
     Credential,
     CredentialManifest,
     LoadConfig,
+    LoadProfileError,
     load_credential_manifest,
     run_load_profile,
 )
+
+from core.json_types import JsonObject, JsonValue
 
 
 def test_load_manifest_accepts_readonly_symlinked_input(tmp_path: Path) -> None:
@@ -201,3 +205,154 @@ def test_custom_error_names_do_not_enter_the_safe_report() -> None:
 
     custom_error = type("private_credential", (httpx.ReadTimeout,), {})
     assert _http_exception_type(custom_error("private request data")) == "ReadTimeout"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", 42),
+        ("credential_id", None),
+        ("key", ["private-key"]),
+        ("credentials", {"key": "private-key"}),
+        ("credential_count", "1"),
+        ("credential_count", True),
+    ],
+)
+def test_load_manifest_rejects_wrong_identity_field_types(
+    tmp_path: Path, field: str, value: JsonValue
+) -> None:
+    document: JsonObject = {
+        "run_id": "private-run",
+        "credential_count": 1,
+        "credentials": [{"credential_id": "private-agent", "key": "private-key"}],
+    }
+    if field in {"credential_id", "key"}:
+        credential = json_members(json_elements(document["credentials"])[0])
+        credential[field] = value
+    else:
+        document[field] = value
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(LoadProfileError) as caught:
+        load_credential_manifest(path)
+
+    assert "private" not in str(caught.value)
+
+
+def _minimal_created_tunnel() -> JsonObject:
+    return {
+        "tunnel": {"address": "private-address"},
+        "cycle": {"id": "private-cycle", "root": {"id": "private-root"}},
+        "activity_cursor": "private-cursor",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("tunnel", []),
+        ("cycle", None),
+        ("root", "private-payload"),
+        ("address", {"payload": "private-payload"}),
+        ("cycle_id", 42),
+        ("root_id", False),
+        ("activity_cursor", ["private-cursor"]),
+    ],
+)
+async def test_malformed_created_identity_fails_with_a_safe_report(
+    monkeypatch: pytest.MonkeyPatch, field: str, value: JsonValue
+) -> None:
+    body = _minimal_created_tunnel()
+    if field == "root":
+        json_members(body["cycle"])["root"] = value
+    elif field == "address":
+        json_members(body["tunnel"])["address"] = value
+    elif field == "cycle_id":
+        json_members(body["cycle"])["id"] = value
+    elif field == "root_id":
+        json_members(json_members(body["cycle"])["root"])["id"] = value
+    else:
+        body[field] = value
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, path: str, **kwargs: object) -> httpx.Response:
+            assert path == "/api/v1/tunnels"
+            return httpx.Response(201, json=body)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    report: dict[str, object] = {}
+    with pytest.raises(LoadProfileError) as caught:
+        await run_load_profile(
+            base_url="http://fixture",
+            host_header=None,
+            manifest=CredentialManifest("private-run", (Credential("private-id", "private-key"),)),
+            config=LoadConfig(
+                duration_seconds=1, sends_per_second=1, concurrent_activity_readers=1
+            ),
+            partial_report=report,
+        )
+
+    assert report["passed"] is False
+    results = report["results"]
+    assert isinstance(results, dict)
+    assert results["failures_by_status"] == {"invalid_response": 1}
+    assert results["successful_sends"] == 0
+    assert "private" not in str(caught.value)
+    assert "private" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body", [None, [], {}, {"next_cursor": 42}, {"next_cursor": {"payload": "private-payload"}}]
+)
+async def test_malformed_activity_cursor_fails_with_a_safe_report(
+    monkeypatch: pytest.MonkeyPatch, body: JsonValue
+) -> None:
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, path: str, **kwargs: object) -> httpx.Response:
+            if path == "/api/v1/tunnels":
+                return httpx.Response(201, json=_minimal_created_tunnel())
+            if path == "/api/v1/activity":
+                return httpx.Response(200, json=body)
+            return httpx.Response(201 if path == "/api/v1/messages" else 204)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    report = await run_load_profile(
+        base_url="http://fixture",
+        host_header=None,
+        manifest=CredentialManifest("private-run", (Credential("private-id", "private-key"),)),
+        config=LoadConfig(
+            duration_seconds=1,
+            sends_per_second=1,
+            concurrent_activity_readers=1,
+            drain_seconds=0,
+        ),
+    )
+
+    assert report["passed"] is False
+    results = report["results"]
+    assert isinstance(results, dict)
+    assert results["failures_by_status"] == {"invalid_response": 1}
+    assert results["successful_sends"] == 1
+    assert results["activity_reads"] == 0
+    assert "private" not in json.dumps(report)

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from asgiref.sync import iscoroutinefunction
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 from django.utils.module_loading import import_string
 
@@ -40,10 +39,17 @@ def test_entire_django_middleware_chain_is_async_capable() -> None:
         ApiErrorEnvelopeMiddleware,
     ],
 )
-async def test_project_middleware_awaits_an_async_downstream(middleware_type: Any) -> None:
+async def test_project_middleware_awaits_an_async_downstream(
+    middleware_type: type[
+        TrustedProxyMiddleware
+        | RequestIdMiddleware
+        | SecurityHeadersMiddleware
+        | ApiErrorEnvelopeMiddleware
+    ],
+) -> None:
     calls = 0
 
-    async def endpoint(request: Any) -> HttpResponse:
+    async def endpoint(request: HttpRequest) -> HttpResponse:
         nonlocal calls
         calls += 1
         return HttpResponse("ready")
@@ -52,14 +58,16 @@ async def test_project_middleware_awaits_an_async_downstream(middleware_type: An
     request = RequestFactory().get("/health/live", REMOTE_ADDR="127.0.0.1")
 
     assert iscoroutinefunction(middleware)
-    response = await middleware(request)
+    pending = middleware(request)
+    assert not isinstance(pending, HttpResponse)
+    response = await pending
     assert response.status_code == 200
     assert calls == 1
 
 
 @pytest.mark.asyncio
 async def test_async_api_error_replacement_keeps_the_request_id() -> None:
-    async def endpoint(request: Any) -> HttpResponse:
+    async def endpoint(request: HttpRequest) -> HttpResponse:
         del request
         return HttpResponse("not found", status=404, content_type="text/html")
 
@@ -67,7 +75,9 @@ async def test_async_api_error_replacement_keeps_the_request_id() -> None:
     request.request_id = "safe-request-id"  # type: ignore[attr-defined]
     middleware = ApiErrorEnvelopeMiddleware(endpoint)
 
-    response = await middleware(request)
+    pending = middleware(request)
+    assert not isinstance(pending, HttpResponse)
+    response = await pending
 
     assert response.status_code == 404
     assert json.loads(response.content)["error"] == {

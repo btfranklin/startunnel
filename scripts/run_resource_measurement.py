@@ -16,11 +16,29 @@ import time
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_boolean,
+        json_integer,
+        json_number,
+        json_object,
+        json_string,
+    )
+else:
+    from json_data import (
+        json_boolean,
+        json_integer,
+        json_number,
+        json_object,
+        json_string,
+    )
+
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import (
@@ -67,6 +85,138 @@ class Boundary:
     anonymous_rss_bytes: dict[str, int]
 
 
+class BoundaryData(TypedDict):
+    captured_at: str
+    cpu_usage_ns: dict[str, int]
+    cpu_captured_monotonic_seconds: dict[str, float]
+    memory_bytes: dict[str, int]
+    anonymous_rss_bytes: dict[str, int]
+
+
+def _boundary_data(boundary: Boundary) -> BoundaryData:
+    return {
+        "captured_at": boundary.captured_at,
+        "cpu_usage_ns": boundary.cpu_usage_ns,
+        "cpu_captured_monotonic_seconds": boundary.cpu_captured_monotonic_seconds,
+        "memory_bytes": boundary.memory_bytes,
+        "anonymous_rss_bytes": boundary.anonymous_rss_bytes,
+    }
+
+
+class ActivityCounters(TypedDict):
+    captured_at: str
+    database_transactions: int
+    maintenance: dict[str, int] | None
+
+
+class MemorySample(TypedDict):
+    captured_at: str
+    cgroup_bytes: dict[str, int]
+    anonymous_rss_bytes: dict[str, int]
+
+
+class DeletionProof(TypedDict):
+    passed: bool
+    elapsed_seconds: float
+    target_seconds: int
+    message_count: int
+
+
+class CycleMeasurement(TypedDict):
+    cycle: int
+    before: BoundaryData
+    after_load: BoundaryData
+    after_settle: BoundaryData
+    settle_memory_samples: list[MemorySample]
+
+
+class IdleMeasurement(TypedDict):
+    requested_seconds: int
+    actual_seconds: float
+    start: BoundaryData
+    end: BoundaryData
+    cpu_percent_of_one_core: float
+    cpu_percent_by_service: dict[str, float]
+    database_transaction_delta: int
+    maintenance_delta: dict[str, int] | None
+    health_probe_executions: dict[str, int]
+    health_probe_scope: str
+    memory_samples: list[MemorySample]
+    activity_counter_start: ActivityCounters
+    activity_counter_end: ActivityCounters
+    database_counter_scope: str
+
+
+class MemoryMeasurement(TypedDict):
+    stabilized_totals_bytes: list[int]
+    sampled_peak_total_bytes: int
+    stable: bool
+    stabilized_service_bytes: dict[str, list[int]]
+    criterion: str
+
+
+class StackMeasurement(TypedDict):
+    source: str
+    project_name: str
+    build_seconds: float
+    ready_seconds: float
+    idle: IdleMeasurement
+    cycles: list[CycleMeasurement]
+    memory: MemoryMeasurement
+    deletion: DeletionProof | None
+
+
+class MeasurementOptions(TypedDict):
+    warmup_seconds: int
+    idle_seconds: int
+    sample_seconds: int
+    cycles: int
+    settle_seconds: int
+    load_operations: int
+    deletion_timeout_seconds: int
+
+
+class MeasurementMethod(MeasurementOptions):
+    baseline_ref: str | None
+    candidate_ref: str
+    candidate_commit: str
+    compose_file: str
+    scope: str
+    web_database_pool_max_size: int
+    command: str
+    production_process_mode: str
+    external_clients: bool
+    cgroup_cpu_reads: str
+    memory_sample_seconds: int
+
+
+class MeasurementHost(TypedDict):
+    system: str
+    release: str
+    machine: str
+    processor_count: int | None
+    docker_server_version: str
+
+
+class ResourceAcceptance(TypedDict):
+    candidate_idle_cpu_below_one_percent: bool
+    candidate_memory_stable: bool
+    candidate_deletion_within_target: bool
+    candidate_recurring_work_bounded: bool
+    candidate_ready_within_two_minutes: bool
+    physical_wakeups_or_watts_measured: bool
+
+
+class ResourceReport(TypedDict):
+    schema: str
+    created_at: str
+    host: MeasurementHost
+    method: MeasurementMethod
+    baseline: StackMeasurement | None
+    candidate: StackMeasurement
+    acceptance: ResourceAcceptance
+
+
 def cpu_percentages(start: Boundary, end: Boundary) -> dict[str, float]:
     """Return each container's CPU rate over its own measured interval."""
 
@@ -101,28 +251,30 @@ def count_health_probes(events: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for line in events.splitlines():
         try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
+            event = json_object(json.loads(line))
+        except ValueError:
             continue
         action = str(event.get("Action", ""))
         if "exec_create:" not in action or not any(marker in action for marker in HEALTH_MARKERS):
             continue
-        attributes = event.get("Actor", {}).get("Attributes", {})
+        attributes = json_object(json_object(event.get("Actor", {})).get("Attributes", {}))
         service = attributes.get("com.docker.compose.service")
         if isinstance(service, str):
             counts[service] = counts.get(service, 0) + 1
     return counts
 
 
-def recurring_work_is_bounded(idle: Mapping[str, Any]) -> bool:
+def recurring_work_is_bounded(idle: Mapping[str, object]) -> bool:
     """Accept at most one scheduled probe or reconciliation per minute plus jitter."""
 
-    allowed = math.ceil(float(idle["actual_seconds"]) / 60) + 1
-    health = idle["health_probe_executions"]
-    maintenance = idle["maintenance_delta"]
-    health_is_bounded = all(int(count) <= allowed for count in health.values())
+    allowed = math.ceil(float(json_number(idle["actual_seconds"])) / 60) + 1
+    health = json_object(idle["health_probe_executions"])
+    maintenance = (
+        None if idle["maintenance_delta"] is None else json_object(idle["maintenance_delta"])
+    )
+    health_is_bounded = all(json_integer(count) <= allowed for count in health.values())
     reconciliation_is_bounded = (
-        maintenance is None or int(maintenance["reconciliation_count"]) <= allowed
+        maintenance is None or json_integer(maintenance["reconciliation_count"]) <= allowed
     )
     return health_is_bounded and reconciliation_is_bounded
 
@@ -229,12 +381,14 @@ class MeasurementStack:
         raw = self.capture(
             "inspect running containers", "ps", "--status", "running", "--format", "{{json .}}"
         )
-        rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
-        counts = Counter(row["Service"] for row in rows)
+        rows = [json_object(json.loads(line)) for line in raw.splitlines() if line.strip()]
+        counts = Counter(json_string(row["Service"]) for row in rows)
         return {
-            row["Service"]
-            if counts[row["Service"]] == 1
-            else row["Service"] + ":" + row["Name"]: row["ID"]
+            json_string(row["Service"])
+            if counts[json_string(row["Service"])] == 1
+            else json_string(row["Service"]) + ":" + json_string(row["Name"]): json_string(
+                row["ID"]
+            )
             for row in rows
         }
 
@@ -244,9 +398,12 @@ class MeasurementStack:
             raise LaneError("runtime containers", "The reference backend is missing a service.")
         for service, identifier in self.identifiers.items():
             state = self.stats.get(f"/containers/{identifier}/json")
-            if not state["State"]["Running"]:
+            if not json_boolean(json_object(state["State"])["Running"]):
                 raise LaneError("runtime containers", f"The {service} container is not running.")
-            self.started[service] = (state["State"]["StartedAt"], state["RestartCount"])
+            self.started[service] = (
+                json_string(json_object(state["State"])["StartedAt"]),
+                json_integer(state["RestartCount"]),
+            )
 
     def sql(self, statement: str) -> str:
         return self.capture(
@@ -276,19 +433,27 @@ def _boundary(stack: MeasurementStack) -> Boundary:
         before = time.monotonic()
         stats = stack.stats.get(f"/containers/{identifier}/stats?stream=false&one-shot=true")
         captured[service] = (before + time.monotonic()) / 2
-        cpu[service] = int(stats["cpu_stats"]["cpu_usage"]["total_usage"])
-        memory[service] = int(stats["memory_stats"]["usage"])
-        rss[service] = int(stats["memory_stats"]["stats"]["anon"])
+        cpu[service] = json_integer(
+            json_object(json_object(stats["cpu_stats"])["cpu_usage"])["total_usage"]
+        )
+        memory[service] = json_integer(json_object(stats["memory_stats"])["usage"])
+        rss[service] = json_integer(
+            json_object(json_object(stats["memory_stats"])["stats"])["anon"]
+        )
         state = stack.stats.get(f"/containers/{identifier}/json")
         if (
-            not state["State"]["Running"]
-            or (state["State"]["StartedAt"], state["RestartCount"]) != stack.started[service]
+            not json_boolean(json_object(state["State"])["Running"])
+            or (
+                json_string(json_object(state["State"])["StartedAt"]),
+                json_integer(state["RestartCount"]),
+            )
+            != stack.started[service]
         ):
             raise LaneError("runtime containers", f"The {service} container stopped or restarted.")
     return Boundary(datetime.now(UTC).isoformat(), cpu, captured, memory, rss)
 
 
-def _activity_counters(stack: MeasurementStack) -> dict[str, Any]:
+def _activity_counters(stack: MeasurementStack) -> ActivityCounters:
     transactions = stack.sql(
         "SELECT xact_commit + xact_rollback FROM pg_stat_database "
         "WHERE datname = current_database();"
@@ -316,8 +481,8 @@ def _activity_counters(stack: MeasurementStack) -> dict[str, Any]:
 
 def _sleep_with_memory_samples(
     stack: MeasurementStack, duration_seconds: int, sample_seconds: int
-) -> list[dict[str, Any]]:
-    samples: list[dict[str, Any]] = []
+) -> list[MemorySample]:
+    samples: list[MemorySample] = []
     deadline = time.monotonic() + duration_seconds
     next_sample = time.monotonic()
     while time.monotonic() < deadline:
@@ -427,7 +592,7 @@ def _run_load(stack: MeasurementStack, operations: int) -> None:
     )
 
 
-def _prove_deletion(stack: MeasurementStack, timeout_seconds: int) -> dict[str, Any]:
+def _prove_deletion(stack: MeasurementStack, timeout_seconds: int) -> DeletionProof:
     cycle_id = stack.sql(
         "SELECT id FROM tunnels_cycle WHERE state = 'closed' ORDER BY created_at DESC LIMIT 1;"
     )
@@ -472,7 +637,7 @@ def _measure_stack(
     settle_seconds: int,
     load_operations: int,
     deletion_timeout_seconds: int,
-) -> dict[str, Any]:
+) -> StackMeasurement:
     with MeasurementStack(root, project_name, label) as stack:
         build_started = time.monotonic()
         stack.run("build runtime image", "build", "web", timeout_seconds=2_400)
@@ -505,7 +670,7 @@ def _measure_stack(
             raise LaneError("runtime containers", "The measured container set changed.")
         activity_end = _activity_counters(stack)
 
-        cycle_results: list[dict[str, Any]] = []
+        cycle_results: list[CycleMeasurement] = []
         stabilized_totals: list[int] = []
         stabilized_services: dict[str, list[int]] = {service: [] for service in stack.identifiers}
         peak_memory = max(
@@ -529,14 +694,14 @@ def _measure_stack(
             cycle_results.append(
                 {
                     "cycle": cycle,
-                    "before": asdict(before),
-                    "after_load": asdict(load_end),
-                    "after_settle": asdict(settled),
+                    "before": _boundary_data(before),
+                    "after_load": _boundary_data(load_end),
+                    "after_settle": _boundary_data(settled),
                     "settle_memory_samples": settle_samples,
                 }
             )
 
-        deletion: dict[str, Any] | None = None
+        deletion: DeletionProof | None = None
         if label == "candidate":
             deletion = _prove_deletion(stack, deletion_timeout_seconds)
         percentages = cpu_percentages(idle_start, idle_end)
@@ -549,8 +714,8 @@ def _measure_stack(
             "idle": {
                 "requested_seconds": idle_seconds,
                 "actual_seconds": round(idle_duration, 3),
-                "start": asdict(idle_start),
-                "end": asdict(idle_end),
+                "start": _boundary_data(idle_start),
+                "end": _boundary_data(idle_end),
                 "cpu_percent_of_one_core": round(cpu_percent, 4),
                 "cpu_percent_by_service": {
                     name: round(value, 4) for name, value in percentages.items()
@@ -629,7 +794,7 @@ def _positive(arguments: argparse.Namespace) -> None:
             raise ValueError(f"--{name.replace('_', '-')} must be positive.")
 
 
-def _write_report(report: dict[str, Any]) -> Path:
+def _write_report(report: ResourceReport) -> Path:
     output = (
         ROOT
         / "artifacts"
@@ -665,7 +830,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout=30,
             check=True,
         ).stdout.strip()
-        common = {
+        common: MeasurementOptions = {
             "warmup_seconds": arguments.warmup_seconds,
             "idle_seconds": arguments.idle_seconds,
             "sample_seconds": arguments.sample_seconds,
@@ -690,7 +855,8 @@ def main(argv: list[str] | None = None) -> int:
                 "candidate",
                 **common,
             )
-        report: dict[str, Any] = {
+        assert candidate["deletion"] is not None
+        report: ResourceReport = {
             "schema": "startunnel-resource-measurement",
             "created_at": datetime.now(UTC).isoformat(),
             "host": {

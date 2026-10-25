@@ -70,6 +70,7 @@ def _activity_rows(query: QuerySet[TunnelEvent], *, limit: int) -> list[TunnelEv
         prefetch_related_objects(messages, "mentions")
     else:
         for message in messages:
+            # Django creates this private relation cache at runtime; its stubs omit the field.
             message._prefetched_objects_cache = {"mentions": []}  # type: ignore[attr-defined]
     return rows
 

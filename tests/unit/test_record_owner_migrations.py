@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
 
 import pytest
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
+from tests.factories import UserFactory
 
 from accounts.models import User
 
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.django_db
     ],
 )
 def test_record_owner_moves_keep_permission_identity_and_joins(
-    user_factory: Any,
+    user_factory: UserFactory,
     old_app: str,
     old_model: str,
     new_app: str,

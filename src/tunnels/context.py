@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal, TypedDict
 from uuid import UUID
 
 from agents.models import AgentCredential
@@ -14,7 +14,7 @@ from core.errors import ContextBudgetTooSmall, CycleUnavailable, InvalidRequest
 from core.limits import DEFAULT_LIMITS, MAX_CONTEXT_REFERENCES
 
 from .access import resolve_tunnel, select_cycle
-from .message_data import message_payload
+from .message_data import MessageData, message_payload
 from .messages import load_branch
 from .models import ActivityCheckpoint, Message, Tunnel, TunnelEvent
 
@@ -40,7 +40,12 @@ class ContextView:
     truncated: bool
 
 
-def context_item_payload(message: Message, reason: ContextReason) -> dict[str, Any]:
+class ContextItemData(TypedDict):
+    reason: ContextReason
+    message: MessageData
+
+
+def context_item_payload(message: Message, reason: ContextReason) -> ContextItemData:
     """Return the canonical public context item used for exact byte accounting."""
 
     return {"reason": reason, "message": message_payload(message)}

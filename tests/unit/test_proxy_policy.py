@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory, override_settings
 
 from core.middleware import TrustedProxyMiddleware
@@ -14,9 +12,9 @@ from core.security import client_ip
 
 @override_settings(STARTUNNEL_TRUSTED_PROXY_CIDRS=["10.0.0.0/8"])
 def test_untrusted_peer_cannot_spoof_forwarded_client_address() -> None:
-    captured: dict[str, Any] = {}
+    captured: dict[str, object] = {}
 
-    def endpoint(request: Any) -> HttpResponse:
+    def endpoint(request: HttpRequest) -> HttpResponse:
         captured["source_ip"] = client_ip(request)
         captured["proto"] = request.META.get("HTTP_X_FORWARDED_PROTO")
         return HttpResponse()
@@ -36,9 +34,9 @@ def test_untrusted_peer_cannot_spoof_forwarded_client_address() -> None:
 
 @override_settings(STARTUNNEL_TRUSTED_PROXY_CIDRS=["10.0.0.0/8"])
 def test_trusted_peer_can_supply_one_replaced_client_address() -> None:
-    captured: dict[str, Any] = {}
+    captured: dict[str, object] = {}
 
-    def endpoint(request: Any) -> HttpResponse:
+    def endpoint(request: HttpRequest) -> HttpResponse:
         captured["source_ip"] = client_ip(request)
         captured["proto"] = request.META.get("HTTP_X_FORWARDED_PROTO")
         return HttpResponse()
@@ -57,7 +55,9 @@ def test_trusted_peer_can_supply_one_replaced_client_address() -> None:
 
 
 @override_settings(STARTUNNEL_TRUSTED_PROXY_CIDRS=["10.0.0.0/8"])
-def test_login_limit_uses_the_client_address_from_a_trusted_proxy(monkeypatch: Any) -> None:
+def test_login_limit_uses_the_client_address_from_a_trusted_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from accounts.forms import ThrottledAuthenticationForm
 
     sources: list[str] = []
@@ -67,7 +67,7 @@ def test_login_limit_uses_the_client_address_from_a_trusted_proxy(monkeypatch: A
     )
     monkeypatch.setattr("django.contrib.auth.forms.authenticate", lambda *args, **kwargs: None)
 
-    def endpoint(request: Any) -> HttpResponse:
+    def endpoint(request: HttpRequest) -> HttpResponse:
         form = ThrottledAuthenticationForm(
             request, data={"username": "operator", "password": "invalid"}
         )
@@ -134,7 +134,7 @@ def test_exact_proxy_peer_preserves_https_and_client_identity() -> None:
 
 
 @override_settings(STARTUNNEL_TRUSTED_PROXY_CIDRS=["127.0.0.0/8"])
-def test_direct_development_login_keeps_one_limit_source(monkeypatch: Any) -> None:
+def test_direct_development_login_keeps_one_limit_source(monkeypatch: pytest.MonkeyPatch) -> None:
     from accounts.forms import ThrottledAuthenticationForm
 
     sources: list[str] = []

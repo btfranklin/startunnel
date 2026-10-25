@@ -8,7 +8,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import (
@@ -19,7 +19,7 @@ if TYPE_CHECKING or __package__:
         termination_signals,
     )
     from scripts.run_resource_measurement import main as run_resource_measurement
-    from scripts.system_proof import run_system_proof, write_system_report
+    from scripts.system_proof import SystemReport, run_system_proof, write_system_report
 else:
     from compose_isolation import (
         IsolatedComposeProject,
@@ -29,7 +29,7 @@ else:
         termination_signals,
     )
     from run_resource_measurement import main as run_resource_measurement
-    from system_proof import run_system_proof, write_system_report
+    from system_proof import SystemReport, run_system_proof, write_system_report
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             print("The live-agents lane is missing: " + ", ".join(missing), file=sys.stderr)
             return 2
 
-    system_report: dict[str, Any] | None = None
+    system_report: SystemReport | None = None
     stack: IsolatedComposeProject | None = None
     try:
         profiles: tuple[str, ...] = (
@@ -223,9 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     except (InterruptedError, IsolationError, LaneError) as error:
         if system_report is not None:
             system_report.update(
-                status="failed",
-                finished_at=datetime.now(UTC).isoformat(),
-                disposable_volumes_removed=bool(stack and stack.cleanup_complete),
+                SystemReport(
+                    status="failed",
+                    finished_at=datetime.now(UTC).isoformat(),
+                    disposable_volumes_removed=bool(stack and stack.cleanup_complete),
+                )
             )
             write_system_report(system_report)
         print(f"Isolated lane failed: {error}", file=sys.stderr)

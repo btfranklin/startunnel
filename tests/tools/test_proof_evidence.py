@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import proof_build, proof_evidence
 from scripts import release_candidate as candidate
 from scripts.release_candidate import verify_evidence
+from tests.json_values import json_members
 from tests.structure.test_candidate_promotion import (
     COMMIT,
     HELPER_IMAGE_ID,
@@ -114,7 +114,7 @@ def test_load_manifest_rejects_changed_fixed_workload(
     report["configuration"]["duration_seconds"] = 299
     workload.write_text(json.dumps(report))
     record = proof_evidence.read_object(manifest)
-    record["files"]["load-workload.json"] = proof_evidence.checksum(workload)
+    json_members(record["files"])["load-workload.json"] = proof_evidence.checksum(workload)
 
     with pytest.raises(ValueError, match="configuration"):
         proof_evidence.validate_proof(
@@ -147,7 +147,7 @@ def test_load_manifest_rejects_incomplete_observations(
     report["observations"][field] = value
     execution.write_text(json.dumps(report))
     record = proof_evidence.read_object(manifest)
-    record["files"][execution.name] = proof_evidence.checksum(execution)
+    json_members(record["files"])[execution.name] = proof_evidence.checksum(execution)
 
     with pytest.raises(ValueError, match="observations"):
         proof_evidence.validate_proof(
@@ -166,7 +166,7 @@ def test_load_manifest_rejects_diagnostic_workload(
     report[field] = False if field == "release_evidence_eligible" else 1
     workload.write_text(json.dumps(report))
     record = proof_evidence.read_object(manifest)
-    record["files"][workload.name] = proof_evidence.checksum(workload)
+    json_members(record["files"])[workload.name] = proof_evidence.checksum(workload)
 
     with pytest.raises(ValueError, match="diagnostic"):
         proof_evidence.validate_proof(
@@ -186,7 +186,7 @@ def test_load_manifest_requires_helper_id_match(
     )
     workload.write_text(json.dumps(report))
     record = proof_evidence.read_object(manifest)
-    record["files"][workload.name] = proof_evidence.checksum(workload)
+    json_members(record["files"])[workload.name] = proof_evidence.checksum(workload)
 
     with pytest.raises(ValueError, match="helper identity"):
         proof_evidence.validate_proof(
@@ -208,7 +208,7 @@ def test_load_manifest_rejects_wrong_helper_source_or_platform(
     report["helper"][field] = value
     execution.write_text(json.dumps(report))
     record = proof_evidence.read_object(manifest)
-    record["files"][execution.name] = proof_evidence.checksum(execution)
+    json_members(record["files"])[execution.name] = proof_evidence.checksum(execution)
 
     with pytest.raises(ValueError, match="helper identity"):
         proof_evidence.validate_proof(
@@ -226,7 +226,7 @@ def test_system_manifest_rejects_changed_helper_build_inputs(
     provenance["hashes"]["Dockerfile"] = "0" * 64
     helper.write_text(json.dumps(provenance))
     record = proof_evidence.read_object(manifest)
-    record["files"][helper.name] = proof_evidence.checksum(helper)
+    json_members(record["files"])[helper.name] = proof_evidence.checksum(helper)
 
     with pytest.raises(ValueError, match="dependency inputs"):
         proof_evidence.validate_proof(
@@ -298,7 +298,7 @@ def test_collection_rejects_expired_missing_duplicate_and_excess_attempt_artifac
     def download(
         _repository: str,
         _run_id: int,
-        selected: dict[str, Any],
+        selected: dict[str, object],
         destination: Path,
     ) -> None:
         assert selected["name"] == "candidate-image-42-1"
@@ -369,7 +369,7 @@ def test_success_without_candidate_image_is_checksum_protected_diagnostic(
     assert record["status"] == "diagnostic"
     assert record["files"]
     assert record["reports"]
-    for name, checksum in record["files"].items():
+    for name, checksum in json_members(record["files"]).items():
         assert proof_evidence.checksum(attempt_dir / name) == checksum
     with pytest.raises(ValueError, match="status"):
         proof_evidence.validate_proof(record, attempt_dir, kind=kind, commit=COMMIT, image="")
@@ -398,6 +398,10 @@ def test_candidate_promotion_rejects_a_diagnostic_proof(
 def test_success_with_missing_diagnostic_report_remains_a_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    def inputs(kind: str, commit: str) -> proof_evidence.ProofInputs:
+        return {"source_commit": commit, "platform": "linux/amd64", "files": {}, "profiles": [kind]}
+
+    monkeypatch.setattr(proof_evidence, "proof_inputs", inputs)
     monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
     monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
     monkeypatch.setattr(

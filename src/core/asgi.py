@@ -7,17 +7,25 @@ import json
 import mimetypes
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable
 from email.utils import formatdate
 from pathlib import Path
-from typing import Any
+
+from asgiref.typing import (
+    ASGI3Application,
+    ASGIReceiveCallable,
+    ASGIReceiveEvent,
+    ASGISendCallable,
+    HTTPScope,
+    Scope,
+)
 
 from .security import CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY
 
-ASGIMessage = Mapping[str, Any]
-ASGIReceive = Callable[[], Awaitable[ASGIMessage]]
-ASGISend = Callable[[ASGIMessage], Awaitable[None]]
-ASGIApplication = Callable[[dict[str, Any], ASGIReceive, ASGISend], Awaitable[None]]
+ASGIMessage = ASGIReceiveEvent
+ASGIReceive = ASGIReceiveCallable
+ASGISend = ASGISendCallable
+ASGIApplication = ASGI3Application
 StaticFinder = Callable[[str], str | list[str] | None]
 _HASHED_ASSET = re.compile(r"\.[0-9a-f]{8,64}\.", flags=re.IGNORECASE)
 
@@ -40,16 +48,15 @@ class StaticFilesMiddleware:
 
     async def __call__(
         self,
-        scope: dict[str, Any],
+        scope: Scope,
         receive: ASGIReceive,
         send: ASGISend,
     ) -> None:
-        path = str(scope.get("path", ""))
-        if (
-            scope.get("type") != "http"
-            or scope.get("method") not in {"GET", "HEAD"}
-            or not path.startswith(self.url_prefix)
-        ):
+        if scope["type"] != "http":
+            await self.application(scope, receive, send)
+            return
+        path = scope["path"]
+        if scope.get("method") not in {"GET", "HEAD"} or not path.startswith(self.url_prefix):
             await self.application(scope, receive, send)
             return
         relative = path.removeprefix(self.url_prefix)
@@ -79,7 +86,7 @@ class StaticFilesMiddleware:
 
     async def _send_file(
         self,
-        scope: dict[str, Any],
+        scope: HTTPScope,
         send: ASGISend,
         file_path: Path,
     ) -> None:
@@ -104,8 +111,15 @@ class StaticFilesMiddleware:
             (b"x-frame-options", b"DENY"),
         ]
         if request_headers.get(b"if-none-match") == etag.encode():
-            await send({"type": "http.response.start", "status": 304, "headers": common_headers})
-            await send({"type": "http.response.body", "body": b""})
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 304,
+                    "headers": common_headers,
+                    "trailers": False,
+                }
+            )
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
             return
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         headers = [
@@ -116,8 +130,10 @@ class StaticFilesMiddleware:
         body = (
             b"" if scope.get("method") == "HEAD" else await asyncio.to_thread(file_path.read_bytes)
         )
-        await send({"type": "http.response.start", "status": 200, "headers": headers})
-        await send({"type": "http.response.body", "body": body})
+        await send(
+            {"type": "http.response.start", "status": 200, "headers": headers, "trailers": False}
+        )
+        await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
 class RequestBodyLimitMiddleware:
@@ -129,7 +145,7 @@ class RequestBodyLimitMiddleware:
 
     async def __call__(
         self,
-        scope: dict[str, Any],
+        scope: Scope,
         receive: ASGIReceive,
         send: ASGISend,
     ) -> None:
@@ -168,7 +184,7 @@ class RequestBodyLimitMiddleware:
         await self.application(scope, replay_receive, send)
 
     @staticmethod
-    def _declared_size(scope: dict[str, Any]) -> int:
+    def _declared_size(scope: HTTPScope) -> int:
         for name, value in scope.get("headers", []):
             if name.lower() == b"content-length":
                 try:
@@ -178,7 +194,7 @@ class RequestBodyLimitMiddleware:
         return 0
 
     @staticmethod
-    async def _send_too_large(scope: dict[str, Any], send: ASGISend) -> None:
+    async def _send_too_large(scope: HTTPScope, send: ASGISend) -> None:
         request_id = str(uuid.uuid4())
         api_request = str(scope.get("path", "")).startswith("/api/v1/")
         if api_request:
@@ -207,8 +223,10 @@ class RequestBodyLimitMiddleware:
             (b"x-frame-options", b"DENY"),
             (b"x-request-id", request_id.encode()),
         ]
-        await send({"type": "http.response.start", "status": 413, "headers": headers})
-        await send({"type": "http.response.body", "body": body})
+        await send(
+            {"type": "http.response.start", "status": 413, "headers": headers, "trailers": False}
+        )
+        await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
 class LifespanMiddleware:
@@ -219,11 +237,11 @@ class LifespanMiddleware:
 
     async def __call__(
         self,
-        scope: dict[str, Any],
+        scope: Scope,
         receive: ASGIReceive,
         send: ASGISend,
     ) -> None:
-        if scope.get("type") != "lifespan":
+        if scope["type"] != "lifespan":
             await self.application(scope, receive, send)
             return
         from .activity_listener import activity_listener

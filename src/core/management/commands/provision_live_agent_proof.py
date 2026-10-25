@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone
 
@@ -83,7 +82,7 @@ def _write_environment(path: Path, values: dict[str, str]) -> None:
 class Command(BaseCommand):
     help = "Provision credentials for the opt-in live OpenAI agent proof."
 
-    def add_arguments(self, parser: Any) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--output", required=True)
 
     def handle(self, *args: object, **options: object) -> None:

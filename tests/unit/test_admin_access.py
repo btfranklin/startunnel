@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 from datetime import timedelta
-from typing import Any
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,6 +14,8 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.utils import timezone
 from pydantic import ValidationError as CommandValidationError
+from tests.admin_results import run
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_access import authenticate_admin_key, issue_admin_key
 from accounts.admin_commands import (
@@ -31,7 +33,6 @@ from accounts.admin_commands import (
     TunnelRotate,
     TunnelStart,
 )
-from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation, list_admin_resources
 from accounts.models import AdminCredential, AdminReceipt, User
 from core.errors import IdempotencyConflict, InvalidCredential, InvalidRequest, LifecycleConflict
@@ -40,19 +41,8 @@ from core.models import AuditEvent
 pytestmark = pytest.mark.django_db
 
 
-def run(
-    actor: User, command_type: type[AdminCommand], data: dict[str, Any], key: str | None = None
-) -> AdminOperationResult:
-    return execute_admin_operation(
-        actor=actor,
-        command=command_type.model_validate(data),
-        key=key or str(uuid4()),
-        request_data=data,
-    )
-
-
 def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
-    user_factory: Any, credential_factory: Any
+    user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     from tunnels.cycles import create_tunnel
 
@@ -93,6 +83,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
 
     from tunnels.models import Cycle
 
+    assert first["resource"]["active_cycle_id"] is not None
     cycle = Cycle.objects.get(pk=first["resource"]["active_cycle_id"])
     assert cycle.root_message is not None and cycle.root_message.session is None
     labeled = run(
@@ -106,6 +97,7 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
         },
         "admin-session-labeled",
     )
+    assert labeled["resource"]["active_cycle_id"] is not None
     labeled_cycle = Cycle.objects.get(pk=labeled["resource"]["active_cycle_id"])
     assert labeled_cycle.root_message is not None
     assert labeled_cycle.root_message.session == "operator-chat"
@@ -113,14 +105,14 @@ def test_admin_unlabeled_retry_keeps_old_digest_and_label_conflicts(
 
 @pytest.mark.parametrize("command_type", [AccountCreate, AccountPassword])
 def test_password_retry_rejects_changed_input_without_another_mutation(
-    command_type: type[AdminCommand],
-    user_factory: Any,
+    command_type: type[AccountCreate | AccountPassword],
+    user_factory: UserFactory,
 ) -> None:
     actor = user_factory()
     password = "Original-retry-password-7839!"
     changed_password = "Changed-retry-password-9462!"
     key = str(uuid4())
-    data: dict[str, Any] = {"password": password}
+    data: dict[str, object] = {"password": password}
     if command_type is AccountCreate:
         data["username"] = "operator-regression"
     else:
@@ -151,7 +143,7 @@ def test_password_retry_rejects_changed_input_without_another_mutation(
     ) == [UUID(result["operation"]["audit_event_id"])]
 
 
-def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
+def test_passwordless_account_replay_and_audit(user_factory: UserFactory) -> None:
     actor = user_factory()
     key = str(uuid4())
     data = {"username": "automation", "key_name": "runner"}
@@ -192,7 +184,7 @@ def test_passwordless_account_replay_and_audit(user_factory: Any) -> None:
 
 
 def test_admin_key_isolation_expiry_and_stale_actor(
-    user_factory: Any, credential_factory: Any
+    user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     credential, secret = issue_admin_key(owner=actor, name="runner")
@@ -217,7 +209,7 @@ def test_admin_key_isolation_expiry_and_stale_actor(
         )
 
 
-def test_creation_validation_and_cursor(user_factory: Any) -> None:
+def test_creation_validation_and_cursor(user_factory: UserFactory) -> None:
     actor = user_factory()
     for data in [
         {"username": ""},
@@ -251,7 +243,9 @@ def test_creation_validation_and_cursor(user_factory: Any) -> None:
     assert list_admin_resources("accounts", actor=actor, state="inactive")["items"] == []
 
 
-def test_receipts_are_owner_scoped_and_keys_replay_only_when_available(user_factory: Any) -> None:
+def test_receipts_are_owner_scoped_and_keys_replay_only_when_available(
+    user_factory: UserFactory,
+) -> None:
     actor = user_factory()
     replacement, _ = issue_admin_key(owner=actor, name="replacement")
     key = str(uuid4())
@@ -284,7 +278,7 @@ def test_receipts_are_owner_scoped_and_keys_replay_only_when_available(user_fact
     )
 
 
-def test_bootstrap_and_recovery_private_files(tmp_path: Any) -> None:
+def test_bootstrap_and_recovery_private_files(tmp_path: Path) -> None:
     path = tmp_path / "bootstrap.key"
     call_command("create_instance_admin", "runner", key_file=str(path))
     assert path.stat().st_mode & 0o777 == 0o600
@@ -304,7 +298,7 @@ def test_bootstrap_and_recovery_private_files(tmp_path: Any) -> None:
 
 
 def test_tunnel_operations_replay_and_revoked_addresses(
-    user_factory: Any, credential_factory: Any
+    user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     from accounts.admin_data import tunnel_resource
     from tunnels.cycles import create_tunnel
@@ -383,7 +377,7 @@ def test_tunnel_operations_replay_and_revoked_addresses(
 
 @pytest.mark.parametrize("inactive_reason", ["revoked", "expired"])
 def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
-    user_factory: Any, credential_factory: Any, inactive_reason: str
+    user_factory: UserFactory, credential_factory: CredentialFactory, inactive_reason: str
 ) -> None:
     from tunnels.cycles import create_tunnel
 
@@ -445,14 +439,14 @@ def test_admin_can_start_and_roll_over_after_tunnel_creator_is_inactive(
     assert set(events.values_list("actor_user_id", flat=True)) == {actor.id}
 
 
-def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
+def test_validation_failure_is_atomic_and_safe(user_factory: UserFactory) -> None:
     actor = user_factory()
     initial = User.objects.count()
     with pytest.raises(InvalidRequest):
         run(actor, AccountCreate, {"username": "invalid-key-owner", "key_name": ""})
     assert User.objects.count() == initial
     assert AdminReceipt.objects.count() == 0
-    cases: list[tuple[type[AdminCommand], dict[str, Any]]] = [
+    cases: list[tuple[type[AdminCommand], dict[str, object]]] = [
         (AccountPassword, {"admin_id": str(actor.id), "password": "x"}),
         (
             KeyCreate,
@@ -479,7 +473,7 @@ def test_validation_failure_is_atomic_and_safe(user_factory: Any) -> None:
     assert AdminReceipt.objects.count() == 0
 
 
-def test_audit_pages_are_chronological_and_filtered(user_factory: Any) -> None:
+def test_audit_pages_are_chronological_and_filtered(user_factory: UserFactory) -> None:
     actor = user_factory()
     first = run(actor, AgentCreate, {"name": "first"})
     second = run(actor, AgentCreate, {"name": "second"})
@@ -506,7 +500,7 @@ def test_optional_browser_password_form() -> None:
     ).is_valid()
 
 
-def test_safe_failure_audit_and_filters(user_factory: Any) -> None:
+def test_safe_failure_audit_and_filters(user_factory: UserFactory) -> None:
     actor = user_factory()
     credential, _ = issue_admin_key(owner=actor, name="automation")
     with pytest.raises(LifecycleConflict):
@@ -538,7 +532,9 @@ def test_safe_failure_audit_and_filters(user_factory: Any) -> None:
     assert not list_admin_resources("audit", actor=actor, target_id=uuid4())["items"]
 
 
-def test_secret_file_failure_rolls_back_bootstrap(tmp_path: Any, monkeypatch: Any) -> None:
+def test_secret_file_failure_rolls_back_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import os
 
     def fail_fsync(descriptor: int) -> None:
@@ -557,7 +553,7 @@ def test_secret_file_failure_rolls_back_bootstrap(tmp_path: Any, monkeypatch: An
     assert not path.exists()
 
 
-def test_recovery_key_can_use_a_symlinked_output_parent(tmp_path: Any) -> None:
+def test_recovery_key_can_use_a_symlinked_output_parent(tmp_path: Path) -> None:
     owner = User.objects.create_user(username="linked-recovery")
     directory = tmp_path / "actual"
     directory.mkdir()

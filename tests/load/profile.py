@@ -11,11 +11,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal, TypedDict
 from uuid import uuid4
 
 import httpx
 from scripts.load_diagnostic import DiagnosticLock
 from scripts.proof_timing import PhaseTimings
+
+from core.json_types import JsonValue, json_object, json_value
 
 MAX_IN_FLIGHT_SENDS = 256
 
@@ -54,6 +57,84 @@ class LoadConfig:
             raise ValueError("drain_seconds must be from 0 through 300.")
 
 
+@dataclass(frozen=True, slots=True)
+class _LoadTunnel:
+    address: str
+    cycle_id: str
+    root_id: str
+    cursor: str
+    creator_key: str
+
+
+class _TextContent(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class _RootRequest(TypedDict):
+    content: _TextContent
+
+
+class _CycleRequest(TypedDict):
+    label: str
+    expires_in_seconds: int
+    root: _RootRequest
+
+
+class _CreateRequest(TypedDict):
+    label: str
+    cycle: _CycleRequest
+
+
+class _ActivityRequest(TypedDict):
+    address: str
+    after_cursor: str
+    wait_seconds: int
+    limit: int
+
+
+class _ReplyRequest(TypedDict):
+    address: str
+    parent_id: str
+    content: _TextContent
+
+
+class _CloseRequest(TypedDict):
+    address: str
+    expected_cycle_id: str
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("The load field must be text.")
+    return value
+
+
+def _array(value: object) -> list[JsonValue]:
+    checked = json_value(value)
+    if not isinstance(checked, list):
+        raise ValueError("The load manifest credentials must be an array.")
+    return checked
+
+
+def _created_tunnel(value: object, *, creator_key: str) -> _LoadTunnel:
+    body = json_object(value)
+    tunnel = json_object(body["tunnel"])
+    cycle = json_object(body["cycle"])
+    root = json_object(cycle["root"])
+    return _LoadTunnel(
+        address=_text(tunnel["address"]),
+        cycle_id=_text(cycle["id"]),
+        root_id=_text(root["id"]),
+        cursor=_text(body["activity_cursor"]),
+        creator_key=creator_key,
+    )
+
+
+def _activity_cursor(value: object) -> str:
+    return _text(json_object(value)["next_cursor"])
+
+
 def default_manifest_path() -> Path:
     return Path("/tmp") / f"startunnel-load-{uuid4().hex}.json"
 
@@ -62,19 +143,29 @@ def load_credential_manifest(path: Path) -> CredentialManifest:
     if not path.is_file():
         raise LoadProfileError("The load credential manifest is not a regular file.")
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        entries = document["credentials"]
+        decoded: object = json.loads(path.read_text(encoding="utf-8"))
+        document = json_object(decoded)
+        entries = _array(document["credentials"])
         credentials = tuple(
-            Credential(credential_id=str(item["credential_id"]), key=str(item["key"]))
+            Credential(
+                credential_id=_text(json_object(item)["credential_id"]),
+                key=_text(json_object(item)["key"]),
+            )
             for item in entries
         )
         manifest = CredentialManifest(
-            run_id=str(document["run_id"]),
+            run_id=_text(document["run_id"]),
             credentials=credentials,
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise LoadProfileError("The load credential manifest is not valid.") from error
-    if len(credentials) != int(document.get("credential_count", -1)) or not credentials:
+    credential_count = document.get("credential_count", -1)
+    if (
+        not isinstance(credential_count, int)
+        or isinstance(credential_count, bool)
+        or len(credentials) != credential_count
+        or not credentials
+    ):
         raise LoadProfileError("The load credential count is not valid.")
     return manifest
 
@@ -90,11 +181,10 @@ def _percentile(values: list[float], fraction: float) -> float:
 def _http_exception_type(error: httpx.HTTPError) -> str:
     """Return a public HTTPX class name without exception or request data."""
     for error_class in type(error).__mro__:
-        if (
-            issubclass(error_class, httpx.HTTPError)
-            and getattr(httpx, error_class.__name__, None) is error_class
-        ):
-            return str(error_class.__name__)
+        name: str = error_class.__name__
+        exported: object = getattr(httpx, name, None)
+        if issubclass(error_class, httpx.HTTPError) and exported is error_class:
+            return name
     return "HTTPError"
 
 
@@ -121,9 +211,14 @@ async def run_load_profile(
     common_headers = {"Host": host_header} if host_header else {}
     timings: list[float] = []
     failures: dict[str, int] = {}
-    transport_errors: dict[str, dict[str, int]] = {"message_send": {}, "activity_poll": {}}
+    transport_errors: dict[Literal["message_send", "activity_poll"], dict[str, int]] = {
+        "message_send": {},
+        "activity_poll": {},
+    }
 
-    def record_transport_error(operation: str, error: httpx.HTTPError) -> None:
+    def record_transport_error(
+        operation: Literal["message_send", "activity_poll"], error: httpx.HTTPError
+    ) -> None:
         failures["transport"] = failures.get("transport", 0) + 1
         counts = transport_errors[operation]
         name = _http_exception_type(error)
@@ -133,7 +228,7 @@ async def run_load_profile(
     reads = 0
     stopped = asyncio.Event()
     tunnel_count = min(10, max(1, len(manifest.credentials) // 3))
-    tunnels: list[dict[str, str]] = []
+    tunnels: list[_LoadTunnel] = []
     readers: list[asyncio.Task[None]] = []
     send_tasks: set[asyncio.Task[None]] = set()
 
@@ -159,56 +254,62 @@ async def run_load_profile(
             with phases.phase("tunnel_setup"):
                 for index in range(tunnel_count):
                     credential = manifest.credentials[index]
+                    create_request: _CreateRequest = {
+                        "label": f"Load tunnel {index}",
+                        "cycle": {
+                            "label": "Load cycle",
+                            "expires_in_seconds": 3600,
+                            "root": {"content": {"type": "text", "text": "Load root."}},
+                        },
+                    }
                     response = await client.post(
                         "/api/v1/tunnels",
                         headers={
                             "Authorization": f"Bearer {credential.key}",
                             "Idempotency-Key": f"load-create-{uuid4().hex}",
                         },
-                        json={
-                            "label": f"Load tunnel {index}",
-                            "cycle": {
-                                "label": "Load cycle",
-                                "expires_in_seconds": 3600,
-                                "root": {"content": {"type": "text", "text": "Load root."}},
-                            },
-                        },
+                        json=create_request,
                     )
                     if response.status_code != 201:
                         raise LoadProfileError("The load proof could not create its tunnels.")
-                    body = response.json()
-                    tunnels.append(
-                        {
-                            "address": str(body["tunnel"]["address"]),
-                            "cycle_id": str(body["cycle"]["id"]),
-                            "root_id": str(body["cycle"]["root"]["id"]),
-                            "cursor": str(body["activity_cursor"]),
-                            "creator_key": credential.key,
-                        }
-                    )
+                    try:
+                        created_value: object = response.json()
+                        tunnel = _created_tunnel(created_value, creator_key=credential.key)
+                    except (KeyError, TypeError, ValueError) as error:
+                        failures["invalid_response"] = failures.get("invalid_response", 0) + 1
+                        raise LoadProfileError("The load tunnel response is not valid.") from error
+                    tunnels.append(tunnel)
             with DiagnosticLock(diagnostic_lock_seconds, Path(__file__).resolve().parents[2]):
 
                 async def reader(reader_index: int) -> None:
                     nonlocal reads
                     tunnel = tunnels[reader_index % len(tunnels)]
-                    cursor = tunnel["cursor"]
+                    cursor = tunnel.cursor
                     request_index = reader_index
                     while not stopped.is_set():
                         credential = manifest.credentials[request_index % len(manifest.credentials)]
                         request_index += config.concurrent_activity_readers
                         try:
+                            activity_request: _ActivityRequest = {
+                                "address": tunnel.address,
+                                "after_cursor": cursor,
+                                "wait_seconds": 20,
+                                "limit": 100,
+                            }
                             response = await activity_client.post(
                                 "/api/v1/activity",
                                 headers={"Authorization": f"Bearer {credential.key}"},
-                                json={
-                                    "address": tunnel["address"],
-                                    "after_cursor": cursor,
-                                    "wait_seconds": 20,
-                                    "limit": 100,
-                                },
+                                json=activity_request,
                             )
                             if response.status_code == 200:
-                                cursor = str(response.json()["next_cursor"])
+                                try:
+                                    activity_value: object = response.json()
+                                    cursor = _activity_cursor(activity_value)
+                                except KeyError, TypeError, ValueError:
+                                    failures["invalid_response"] = (
+                                        failures.get("invalid_response", 0) + 1
+                                    )
+                                    return
                                 reads += 1
                             else:
                                 status = str(response.status_code)
@@ -233,17 +334,18 @@ async def run_load_profile(
                     ]
                     request_started = time.monotonic()
                     try:
+                        reply_request: _ReplyRequest = {
+                            "address": tunnel.address,
+                            "parent_id": tunnel.root_id,
+                            "content": {"type": "text", "text": "Load reply."},
+                        }
                         response = await client.post(
                             "/api/v1/messages",
                             headers={
                                 "Authorization": f"Bearer {credential.key}",
                                 "Idempotency-Key": f"load-reply-{uuid4().hex}",
                             },
-                            json={
-                                "address": tunnel["address"],
-                                "parent_id": tunnel["root_id"],
-                                "content": {"type": "text", "text": "Load reply."},
-                            },
+                            json=reply_request,
                         )
                         timings.append((time.monotonic() - request_started) * 1000)
                         if response.status_code == 201:
@@ -319,16 +421,17 @@ async def run_load_profile(
                         await asyncio.gather(*done, *pending, return_exceptions=True)
                 with phases.phase("cycle_close_verification"):
                     for tunnel in tunnels:
+                        close_request: _CloseRequest = {
+                            "address": tunnel.address,
+                            "expected_cycle_id": tunnel.cycle_id,
+                        }
                         response = await client.post(
                             "/api/v1/cycles/close",
                             headers={
-                                "Authorization": f"Bearer {tunnel['creator_key']}",
+                                "Authorization": f"Bearer {tunnel.creator_key}",
                                 "Idempotency-Key": f"load-close-{uuid4().hex}",
                             },
-                            json={
-                                "address": tunnel["address"],
-                                "expected_cycle_id": tunnel["cycle_id"],
-                            },
+                            json=close_request,
                         )
                         if response.status_code != 204:
                             failures[str(response.status_code)] = (

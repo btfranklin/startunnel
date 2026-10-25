@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
 from accounts.admin_access import issue_admin_key
@@ -18,13 +17,13 @@ from ._admin_key_file import reserve_key_file
 class Command(BaseCommand):
     help = "Issue a recovery key for a named administrator from the server."
 
-    def add_arguments(self, parser: Any) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("username")
         parser.add_argument("--key-file", required=True)
         parser.add_argument("--key-name", default="recovery")
 
-    def handle(self, *args: Any, **options: Any) -> None:
-        path, descriptor = reserve_key_file(options["key_file"])
+    def handle(self, *args: object, **options: object) -> None:
+        path, descriptor = reserve_key_file(str(options["key_file"]))
         try:
             with os.fdopen(descriptor, "w") as output, transaction.atomic():
                 user = (
@@ -36,7 +35,7 @@ class Command(BaseCommand):
                     raise CommandError("This administrator does not exist.")
                 user.is_active = True
                 user.save(update_fields=["is_active"])
-                credential, secret = issue_admin_key(owner=user, name=options["key_name"])
+                credential, secret = issue_admin_key(owner=user, name=str(options["key_name"]))
                 output.write(secret + "\n")
                 output.flush()
                 os.fsync(output.fileno())

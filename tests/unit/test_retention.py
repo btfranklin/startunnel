@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Any
+from typing import TypedDict
 from uuid import uuid4
 
 import pytest
@@ -12,23 +12,36 @@ import time_machine
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from pydantic import TypeAdapter
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory
 
+from accounts.admin_data import CycleResourceData
 from accounts.admin_services import list_admin_resources
+from agents.models import AgentCredential
 from core.errors import CycleUnavailable, TunnelUnavailable
 from core.models import AgentReceipt
 from tunnels import admin_actions, cycles, messages
 from tunnels.access import cycle_is_readable
-from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.messages import post_reply, read_tree
+from tunnels.cycles import CreatedTunnel, StartedCycle, close_cycle, create_tunnel
+from tunnels.messages import PostedReply, post_reply, read_tree
 from tunnels.models import Cycle, Message, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
 
 
+class RolloverCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    root_content: Mapping[str, object]
+
+
 def _conversation(
-    credential_factory: Any, suffix: str = "retention", *, closed: bool = False
-) -> tuple[Any, Any]:
+    credential_factory: CredentialFactory, suffix: str = "retention", *, closed: bool = False
+) -> tuple[CreatedTunnel, PostedReply]:
     credential, _ = credential_factory()
     created = create_tunnel(
         credential=credential,
@@ -54,7 +67,9 @@ def _conversation(
     return created, reply
 
 
-def test_explicit_close_snapshots_current_retention(credential_factory: Any, settings: Any) -> None:
+def test_explicit_close_snapshots_current_retention(
+    credential_factory: CredentialFactory, settings: Settings
+) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 60
     created, _ = _conversation(credential_factory, "explicit")
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 300
@@ -67,13 +82,17 @@ def test_explicit_close_snapshots_current_retention(credential_factory: Any, set
     created.cycle.refresh_from_db()
     assert created.cycle.state == Cycle.State.CLOSED
     assert created.cycle.retention_seconds == 300
+    assert created.cycle.closed_at is not None
     assert created.cycle.delete_after == created.cycle.closed_at + timedelta(seconds=300)
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 600
     created.cycle.refresh_from_db()
+    assert created.cycle.closed_at is not None
     assert created.cycle.delete_after == created.cycle.closed_at + timedelta(seconds=300)
 
 
-def test_forever_close_keeps_history(credential_factory: Any, settings: Any) -> None:
+def test_forever_close_keeps_history(
+    credential_factory: CredentialFactory, settings: Settings
+) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = None
     created, _ = _conversation(credential_factory, "forever")
     close_cycle(
@@ -87,7 +106,9 @@ def test_forever_close_keeps_history(credential_factory: Any, settings: Any) -> 
     assert cycle_is_readable(created.cycle, now=timezone.now() + timedelta(days=3650))
 
 
-def test_active_cycle_deadline_is_exact_before_worker_closure(credential_factory: Any) -> None:
+def test_active_cycle_deadline_is_exact_before_worker_closure(
+    credential_factory: CredentialFactory,
+) -> None:
     created, _ = _conversation(credential_factory, "logical")
     expiry = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=60)
@@ -100,7 +121,7 @@ def test_active_cycle_deadline_is_exact_before_worker_closure(credential_factory
 
 
 def test_closed_cycle_becomes_unreadable_at_exact_delete_deadline(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     created, _ = _conversation(credential_factory, "boundary", closed=True)
     deadline = timezone.now()
@@ -116,7 +137,7 @@ def test_closed_cycle_becomes_unreadable_at_exact_delete_deadline(
 
 
 def test_due_deletion_keeps_minimal_tombstone_and_is_idempotent(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     created, reply = _conversation(credential_factory, "delete", closed=True)
     now = timezone.now()
@@ -149,7 +170,7 @@ def test_due_deletion_keeps_minimal_tombstone_and_is_idempotent(
     assert not delete_due_cycle_content(cycle_id=uuid4(), now=now)
 
 
-def test_deletion_rejects_not_due_or_active_cycle(credential_factory: Any) -> None:
+def test_deletion_rejects_not_due_or_active_cycle(credential_factory: CredentialFactory) -> None:
     created, _ = _conversation(credential_factory, "not-due")
     now = timezone.now()
     assert not delete_due_cycle_content(cycle_id=created.cycle.id, now=now)
@@ -168,7 +189,9 @@ def test_deletion_rejects_not_due_or_active_cycle(credential_factory: Any) -> No
     assert not delete_due_cycle_content(cycle_id=created.cycle.id, now=now)
 
 
-def test_expired_history_is_not_materialized_by_reads(credential_factory: Any) -> None:
+def test_expired_history_is_not_materialized_by_reads(
+    credential_factory: CredentialFactory,
+) -> None:
     created, _ = _conversation(credential_factory, "read", closed=True)
     now = timezone.now()
     Cycle.objects.filter(pk=created.cycle.pk).update(
@@ -189,12 +212,12 @@ def test_expired_history_is_not_materialized_by_reads(credential_factory: Any) -
 
 @pytest.mark.parametrize("operation", ["create", "start", "rollover"])
 def test_cycle_creation_replay_stops_at_history_deadline(
-    credential_factory: Any, settings: Any, operation: str
+    credential_factory: CredentialFactory, settings: Settings, operation: str
 ) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 1
     credential, _ = credential_factory()
 
-    def create() -> Any:
+    def create() -> CreatedTunnel:
         return create_tunnel(
             credential=credential,
             idempotency_key="retention-retry-create",
@@ -203,7 +226,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
         )
 
     first = create()
-    retry: Callable[[], Any] = create
+    retry: Callable[[], CreatedTunnel | StartedCycle] = create
     if operation == "start":
         close_cycle(
             credential=credential,
@@ -212,7 +235,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
             expected_cycle_id=first.cycle.id,
         )
 
-        def start() -> Any:
+        def start() -> StartedCycle:
             return cycles.start_cycle(
                 credential=credential,
                 idempotency_key="retention-retry-start",
@@ -225,7 +248,7 @@ def test_cycle_creation_replay_stops_at_history_deadline(
         retry = start
     elif operation == "rollover":
 
-        def rollover() -> Any:
+        def rollover() -> StartedCycle:
             return cycles.rollover_cycle(
                 credential=credential,
                 idempotency_key="retention-retry-rollover",
@@ -272,13 +295,17 @@ def test_cycle_creation_replay_stops_at_history_deadline(
 @pytest.mark.parametrize("action", ["close", "retire"])
 @pytest.mark.parametrize("current_retention", [600, None])
 def test_admin_actions_do_not_extend_expired_history(
-    credential_factory: Any, settings: Any, action: str, current_retention: int | None
+    credential_factory: CredentialFactory,
+    settings: Settings,
+    action: str,
+    current_retention: int | None,
 ) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 60
     created, _ = _conversation(credential_factory, f"expired-{action}")
     expiry = created.cycle.expires_at
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = current_retention
     actor = created.tunnel.creator.created_by
+    assert actor is not None
     with time_machine.travel(expiry + timedelta(seconds=61), tick=False):
         if action == "close":
             admin_actions.close_cycle_as_admin(
@@ -300,9 +327,12 @@ def test_admin_actions_do_not_extend_expired_history(
 
 
 @pytest.mark.parametrize("action", ["rotate", "retire"])
-def test_reply_replay_checks_current_tunnel_access(credential_factory: Any, action: str) -> None:
+def test_reply_replay_checks_current_tunnel_access(
+    credential_factory: CredentialFactory, action: str
+) -> None:
     created, _ = _conversation(credential_factory, f"reply-access-{action}")
     actor = created.tunnel.creator.created_by
+    assert actor is not None
     if action == "rotate":
         admin_actions.rotate_address_as_admin(
             actor=actor, tunnel_id=created.tunnel.id, expected_address_generation=1
@@ -325,7 +355,7 @@ def test_reply_replay_checks_current_tunnel_access(credential_factory: Any, acti
 
 
 def test_reply_and_close_replay_stop_at_history_deadline(
-    credential_factory: Any, settings: Any
+    credential_factory: CredentialFactory, settings: Settings
 ) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 1
     created, _ = _conversation(credential_factory, "reply-history")
@@ -356,11 +386,12 @@ def test_reply_and_close_replay_stop_at_history_deadline(
 @pytest.mark.parametrize("operation", ["start", "rollover", "close"])
 @pytest.mark.parametrize("access_change", ["rotate", "retire"])
 def test_cycle_control_replays_check_current_address(
-    credential_factory: Any, operation: str, access_change: str
+    credential_factory: CredentialFactory, operation: str, access_change: str
 ) -> None:
     created, _ = _conversation(credential_factory, f"control-{operation}-{access_change}")
     credential = created.tunnel.creator
     actor = credential.created_by
+    assert actor is not None
     if operation == "start":
         close_cycle(
             credential=credential,
@@ -369,7 +400,7 @@ def test_cycle_control_replays_check_current_address(
             expected_cycle_id=created.cycle.id,
         )
 
-    def retry() -> Any:
+    def retry() -> StartedCycle | None:
         if operation == "close":
             return close_cycle(
                 credential=credential,
@@ -377,7 +408,7 @@ def test_cycle_control_replays_check_current_address(
                 address=created.address,
                 expected_cycle_id=created.cycle.id,
             )
-        common = {
+        common: RolloverCycleArguments = {
             "credential": credential,
             "idempotency_key": "control-access-create-cycle",
             "address": created.address,
@@ -409,12 +440,13 @@ def test_cycle_control_replays_check_current_address(
 
 @pytest.mark.parametrize("state", [Cycle.State.ACTIVE, Cycle.State.CLOSED])
 def test_admin_cycle_labels_stop_at_history_deadline_without_extra_queries(
-    credential_factory: Any, state: str
+    credential_factory: CredentialFactory, state: str
 ) -> None:
     created, _ = _conversation(
         credential_factory, "admin-labels-first", closed=state == Cycle.State.CLOSED
     )
     actor = created.tunnel.creator.created_by
+    assert actor is not None
     deadline = timezone.now() + timedelta(seconds=1)
     Cycle.objects.filter(pk=created.cycle.id).update(
         state=state,
@@ -427,7 +459,10 @@ def test_admin_cycle_labels_stop_at_history_deadline_without_extra_queries(
     with time_machine.travel(deadline - timedelta(microseconds=1), tick=False):
         with CaptureQueriesContext(connection) as one_cycle_queries:
             before = list_admin_resources("cycles", actor=actor)
-        assert before["items"][0]["label"] == "Temporary cycle"
+        before_items = TypeAdapter(list[CycleResourceData]).validate_python(
+            before["items"], strict=True
+        )
+        assert before_items[0]["label"] == "Temporary cycle"
     second, _ = _conversation(credential_factory, "admin-labels-second")
     with (
         time_machine.travel(deadline, tick=False),
@@ -435,7 +470,12 @@ def test_admin_cycle_labels_stop_at_history_deadline_without_extra_queries(
     ):
         after = list_admin_resources("cycles", actor=actor)
     assert len(two_cycle_queries) == len(one_cycle_queries)
-    rows = {item["id"]: item for item in after["items"]}
+    rows = {
+        item["id"]: item
+        for item in TypeAdapter(list[CycleResourceData]).validate_python(
+            after["items"], strict=True
+        )
+    }
     assert rows[str(created.cycle.id)]["label"] == ""
     assert rows[str(created.cycle.id)]["state"] == state
     assert rows[str(created.cycle.id)]["number"] == 1
@@ -443,7 +483,7 @@ def test_admin_cycle_labels_stop_at_history_deadline_without_extra_queries(
 
 
 def test_branch_assembly_handles_history_deleted_after_focus_read(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     created, reply = _conversation(credential_factory, "read-deletion")
     credential = created.tunnel.creator
@@ -467,7 +507,9 @@ def test_branch_assembly_handles_history_deleted_after_focus_read(
         messages.load_branch(focus)
 
 
-def test_subtree_hydration_rejects_missing_selected_messages(credential_factory: Any) -> None:
+def test_subtree_hydration_rejects_missing_selected_messages(
+    credential_factory: CredentialFactory,
+) -> None:
     created, reply = _conversation(credential_factory, "subtree-deletion")
     selected_ids = [created.root.id, reply.message.id]
     close_cycle(
@@ -484,13 +526,17 @@ def test_subtree_hydration_rejects_missing_selected_messages(credential_factory:
         messages._messages_by_id_in_order(selected_ids)
 
 
-def test_message_hydration_does_not_return_a_partial_page(credential_factory: Any) -> None:
+def test_message_hydration_does_not_return_a_partial_page(
+    credential_factory: CredentialFactory,
+) -> None:
     created, _ = _conversation(credential_factory, "partial-page")
     with pytest.raises(CycleUnavailable):
         messages._messages_by_id_in_order([created.root.id, uuid4()])
 
 
-def test_branch_assembly_handles_a_deleted_uncached_ancestor(credential_factory: Any) -> None:
+def test_branch_assembly_handles_a_deleted_uncached_ancestor(
+    credential_factory: CredentialFactory,
+) -> None:
     created, reply = _conversation(credential_factory, "uncached-ancestor")
     credential = created.tunnel.creator
     descendant = post_reply(

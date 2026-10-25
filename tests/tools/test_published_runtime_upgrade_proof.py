@@ -5,15 +5,16 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import prove_published_upgrade as proof
 
 
-def release_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, Any]]:
+def release_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, str | None]]:
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "a" * 40)
-    data = {
+    data: dict[str, str | None] = {
         "version": "v0.2.0",
         "platform": "linux/amd64",
         "source_commit": "a" * 40,
@@ -33,7 +34,7 @@ def test_published_record_requires_tagged_immutable_image(
     path.write_text(json.dumps(data), encoding="utf-8")
     calls: list[list[str]] = []
 
-    def tagged_revision(command: list[str], **kwargs: Any) -> str:
+    def tagged_revision(command: list[str], **kwargs: object) -> str:
         calls.append(command)
         return "a" * 40
 

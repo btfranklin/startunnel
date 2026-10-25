@@ -60,6 +60,29 @@ CLI types. Run the smoke suite directly with:
 python3 tests/cli_standalone.py
 ```
 
+Run the complete Python type gate with `pdm run types`. It checks tracked and
+nonignored Python files, including new tools, migrations, tests, the CLI,
+the website builder, and examples. Source exports use the same source scope
+as the secret scan. Build output, private artifacts, and installed packages
+are outside this scope.
+
+The gate uses strict mypy settings and rejects explicit `Any`, types lost
+through missing imports, and decorated functions with untyped signatures.
+Suppressions must name an error code. Pydantic constructors also use typed fields. The
+standalone examples use separate import contexts because the Django app and
+the OpenAI SDK both have an `agents` package. These contexts retain the same
+strict settings. Development dependencies include the SDK for static checks;
+the type gate makes no provider requests and needs no provider key.
+The standalone CLI and its smoke tests also pass a Python 3.10 type-check target.
+The load driver also rejects unchecked `Any` expressions. Its JSON readers check
+field types, and malformed responses fail the proof with safe failure counts.
+
+Use typed records for known fields and recursive JSON types for arbitrary JSON.
+Validate external data before returning a typed record. Use `object` for input
+that still needs validation. An unavoidable `Any` needs a local, error-specific
+suppression and a comment that states the library or runtime limitation. Do not
+use a module-wide exemption, an `Any` alias, or a blanket suppression.
+
 It runs a copied client outside the checkout against a local synthetic HTTP
 server. CI runs it without project packages on Linux, Windows, and macOS with Python
 3.10 and 3.14. These jobs check real runtimes; the existing AST check separately

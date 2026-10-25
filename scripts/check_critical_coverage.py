@@ -5,10 +5,24 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_array,
+        json_integer,
+        json_object,
+    )
+else:
+    from json_data import (
+        json_array,
+        json_integer,
+        json_object,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,31 +109,36 @@ def _line_range(source_path: Path, function_name: str) -> range:
     return range(node.lineno, node.end_lineno + 1)
 
 
-def _covered_lines(file_report: dict[str, Any]) -> set[int]:
-    return {int(line) for line in file_report.get("executed_lines", [])}
+def _covered_lines(file_report: Mapping[str, object]) -> set[int]:
+    return {json_integer(line) for line in json_array(file_report.get("executed_lines", []))}
 
 
-def _missing_lines(file_report: dict[str, Any]) -> set[int]:
-    return {int(line) for line in file_report.get("missing_lines", [])}
+def _missing_lines(file_report: Mapping[str, object]) -> set[int]:
+    return {json_integer(line) for line in json_array(file_report.get("missing_lines", []))}
 
 
-def _missing_branch_sources(file_report: dict[str, Any]) -> set[int]:
-    return {int(branch[0]) for branch in file_report.get("missing_branches", [])}
+def _missing_branch_sources(file_report: Mapping[str, object]) -> set[int]:
+    return {
+        json_integer(json_array(branch)[0])
+        for branch in json_array(file_report.get("missing_branches", []))
+    }
 
 
-def find_gaps(report: dict[str, Any], root: Path = ROOT, *, postgres: bool = False) -> list[str]:
+def find_gaps(
+    report: Mapping[str, object], root: Path = ROOT, *, postgres: bool = False
+) -> list[str]:
     """Return human-readable gaps in the authoritative critical target set."""
 
-    files = report.get("files", {})
+    files = json_object(report.get("files", {}))
     gaps: list[str] = []
     for target in POSTGRES_TARGETS if postgres else CRITICAL_TARGETS:
         file_report = files.get(target.path)
         if file_report is None:
             gaps.append(f"{target.path}: file is absent from the coverage report")
             continue
-        executed = _covered_lines(file_report)
-        missing = _missing_lines(file_report)
-        missing_branch_sources = _missing_branch_sources(file_report)
+        executed = _covered_lines(json_object(file_report))
+        missing = _missing_lines(json_object(file_report))
+        missing_branch_sources = _missing_branch_sources(json_object(file_report))
         for function_name in target.functions:
             lines = set(_line_range(root / target.path, function_name))
             relevant_missing = sorted(lines & missing)
@@ -143,7 +162,7 @@ def check_report(report_path: Path, root: Path = ROOT, *, postgres: bool = False
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
         raise ValueError("Coverage JSON must contain an object.")
-    return find_gaps(report, root, postgres=postgres)
+    return find_gaps(json_object(report), root, postgres=postgres)
 
 
 def _print_gaps(gaps: Iterable[str]) -> None:

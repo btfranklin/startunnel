@@ -6,13 +6,14 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
-from typing import Any
 from uuid import UUID
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.db import DatabaseError, close_old_connections, connection, transaction
+from tests.factories import CredentialFactory, UserFactory
 
+from accounts.models import User
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
 from core.errors import TunnelUnavailable
@@ -24,7 +25,8 @@ from tunnels.admin_actions import (
     rotate_address_as_admin,
 )
 from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
-from tunnels.messages import post_reply
+from tunnels.entry import TunnelEntry
+from tunnels.messages import PostedReply, post_reply
 from tunnels.models import ActivityCheckpoint, Cycle, Message, Tunnel, TunnelEvent
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
@@ -43,14 +45,14 @@ def _create_board(credential: AgentCredential, *, key: str) -> CreatedTunnel:
 @pytest.mark.parametrize("filtered", [False, True])
 @pytest.mark.parametrize("notifications", [False, True])
 async def test_activity_wait_rejects_changed_address_before_its_deadline(
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
     filtered: bool,
     notifications: bool,
 ) -> None:
-    def prepare() -> tuple[Any, AgentCredential, CreatedTunnel]:
+    def prepare() -> tuple[User, AgentCredential, CreatedTunnel]:
         try:
             creator, _ = credential_factory()
             reader, _ = credential_factory()
@@ -129,7 +131,7 @@ async def test_activity_wait_rejects_changed_address_before_its_deadline(
 
 
 def test_checkpoint_accepts_zero_and_committed_event_positions(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Activity creator")
     reader, _ = credential_factory(name="Activity reader")
@@ -148,7 +150,7 @@ def test_checkpoint_accepts_zero_and_committed_event_positions(
     assert TunnelEvent.objects.filter(tunnel=created.tunnel, position=2).exists()
 
 
-def test_checkpoint_cannot_move_backward(credential_factory: Any) -> None:
+def test_checkpoint_cannot_move_backward(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Backward creator")
     reader, _ = credential_factory(name="Backward reader")
     created = _create_board(creator, key="activity-backward-create")
@@ -165,7 +167,7 @@ def test_checkpoint_cannot_move_backward(credential_factory: Any) -> None:
     assert checkpoint.last_event_position == 2
 
 
-def test_checkpoint_credential_cannot_be_reassigned(credential_factory: Any) -> None:
+def test_checkpoint_credential_cannot_be_reassigned(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Identity creator")
     first_reader, _ = credential_factory(name="First reader")
     second_reader, _ = credential_factory(name="Second reader")
@@ -183,7 +185,7 @@ def test_checkpoint_credential_cannot_be_reassigned(credential_factory: Any) -> 
     assert checkpoint.credential_id == first_reader.id
 
 
-def test_checkpoint_tunnel_cannot_be_reassigned(credential_factory: Any) -> None:
+def test_checkpoint_tunnel_cannot_be_reassigned(credential_factory: CredentialFactory) -> None:
     first_creator, _ = credential_factory(name="First tunnel creator")
     second_creator, _ = credential_factory(name="Second tunnel creator")
     reader, _ = credential_factory(name="Tunnel reader")
@@ -203,7 +205,7 @@ def test_checkpoint_tunnel_cannot_be_reassigned(credential_factory: Any) -> None
 
 
 def test_cycle_root_guard_rejects_missing_mismatched_and_deleted_roots(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory(name="Root guard creator")
     created = _create_board(credential, key="root-guard-create")
@@ -240,7 +242,7 @@ def test_cycle_root_guard_rejects_missing_mismatched_and_deleted_roots(
 
 
 def test_child_message_insert_skips_full_cycle_root_validation(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory(name="Root validation performance")
     created = _create_board(credential, key="root-validation-performance-create")
@@ -274,7 +276,9 @@ def test_child_message_insert_skips_full_cycle_root_validation(
             cursor.execute("RESET track_functions")
 
 
-def test_positive_checkpoint_must_name_an_existing_event(credential_factory: Any) -> None:
+def test_positive_checkpoint_must_name_an_existing_event(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Gap creator")
     reader, _ = credential_factory(name="Gap reader")
     created = _create_board(creator, key="activity-gap-create")
@@ -296,7 +300,7 @@ def test_positive_checkpoint_must_name_an_existing_event(credential_factory: Any
     ).exists()
 
 
-def test_tunnel_event_cannot_be_updated_directly(credential_factory: Any) -> None:
+def test_tunnel_event_cannot_be_updated_directly(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Immutable event creator")
     created = _create_board(creator, key="activity-event-create")
     event = TunnelEvent.objects.get(tunnel=created.tunnel, position=2)
@@ -330,7 +334,7 @@ def _advance_checkpoint(
 
 
 def test_concurrent_checkpoint_writes_cannot_commit_a_regression(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Concurrent creator")
     reader, _ = credential_factory(name="Concurrent reader")
@@ -361,7 +365,7 @@ def test_concurrent_checkpoint_writes_cannot_commit_a_regression(
     assert set(outcomes) <= {"updated:1", "updated:2", "rejected"}
 
 
-def test_checkpoint_cannot_exceed_committed_activity(credential_factory: Any) -> None:
+def test_checkpoint_cannot_exceed_committed_activity(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Future creator")
     reader, _ = credential_factory(name="Future reader")
     created = _create_board(creator, key="activity-future-create")
@@ -380,7 +384,7 @@ def test_checkpoint_cannot_exceed_committed_activity(credential_factory: Any) ->
     assert Tunnel.objects.get(pk=created.tunnel.id).next_event_position == 3
 
 
-def _pause_entry_after_tunnel_lock(*, credential: AgentCredential, address: str) -> Any:
+def _pause_entry_after_tunnel_lock(*, credential: AgentCredential, address: str) -> TunnelEntry:
     close_old_connections()
     try:
         from tunnels.entry import enter_tunnel
@@ -391,7 +395,7 @@ def _pause_entry_after_tunnel_lock(*, credential: AgentCredential, address: str)
 
 
 def test_entry_and_reply_race_preserves_the_activity_boundary(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from asgiref.sync import async_to_sync
@@ -407,8 +411,10 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
     writer_finished = threading.Event()
     original_lock = resolve_tunnel
 
-    def blocking_lock(**kwargs: Any) -> Tunnel:
-        tunnel = original_lock(**kwargs)
+    def blocking_lock(
+        *, credential: AgentCredential, address: str, for_update: bool = False
+    ) -> Tunnel:
+        tunnel = original_lock(credential=credential, address=address, for_update=for_update)
         if not lock_obtained.is_set():
             lock_obtained.set()
             assert release_entry.wait(timeout=15)
@@ -416,7 +422,7 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
 
     monkeypatch.setattr(entry, "resolve_tunnel", blocking_lock)
 
-    def post_during_entry() -> Any:
+    def post_during_entry() -> PostedReply:
         close_old_connections()
         try:
             writer_started.set()
@@ -456,7 +462,7 @@ def test_entry_and_reply_race_preserves_the_activity_boundary(
 
 
 def test_entry_and_cycle_close_race_returns_a_consistent_state(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tunnels import entry
@@ -469,8 +475,10 @@ def test_entry_and_cycle_close_race_returns_a_consistent_state(
     writer_finished = threading.Event()
     original_lock = resolve_tunnel
 
-    def blocking_lock(**kwargs: Any) -> Tunnel:
-        tunnel = original_lock(**kwargs)
+    def blocking_lock(
+        *, credential: AgentCredential, address: str, for_update: bool = False
+    ) -> Tunnel:
+        tunnel = original_lock(credential=credential, address=address, for_update=for_update)
         if not lock_obtained.is_set():
             lock_obtained.set()
             assert release_entry.wait(timeout=15)

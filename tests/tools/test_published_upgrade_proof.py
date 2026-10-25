@@ -5,13 +5,12 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import prove_admin_upgrade as proof
 
 
-def release_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, Any]]:
+def release_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, str]]:
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "a" * 40)
     data = {
         "version": "v0.1.0",

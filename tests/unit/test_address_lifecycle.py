@@ -1,21 +1,21 @@
 """Instance administrators control address and tunnel lifecycle."""
 
-from typing import Any
-
 import pytest
+from tests.factories import CredentialFactory, UserFactory
 
+from agents.models import AgentCredential
 from core.errors import InvalidRequest, LifecycleConflict, TunnelUnavailable
 from core.models import AuditEvent
 from tunnels.admin_actions import retire_tunnel_as_admin, rotate_address_as_admin
 from tunnels.codec import display_address
-from tunnels.cycles import create_tunnel, get_tunnel_status
+from tunnels.cycles import CreatedTunnel, create_tunnel, get_tunnel_status
 from tunnels.messages import post_reply
 from tunnels.models import Cycle, Tunnel, TunnelAddress, TunnelEvent
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any) -> Any:
+def _create(credential: AgentCredential) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key="address-lifecycle-create",
@@ -24,7 +24,9 @@ def _create(credential: Any) -> Any:
     )
 
 
-def test_any_active_admin_can_rotate_an_address(credential_factory: Any, user_factory: Any) -> None:
+def test_any_active_admin_can_rotate_an_address(
+    credential_factory: CredentialFactory, user_factory: UserFactory
+) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
     administrator = user_factory()
@@ -63,7 +65,7 @@ def test_any_active_admin_can_rotate_an_address(credential_factory: Any, user_fa
 
 
 def test_create_retry_never_returns_rotated_or_retired_address(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, _ = credential_factory()
     administrator = user_factory()
@@ -88,7 +90,7 @@ def test_create_retry_never_returns_rotated_or_retired_address(
 
 
 def test_rotation_rejects_stale_generation_and_inactive_admin(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, _ = credential_factory()
     administrator = user_factory()
@@ -109,7 +111,9 @@ def test_rotation_rejects_stale_generation_and_inactive_admin(
         )
 
 
-def test_display_form_uses_the_same_address_for_reply_retries(credential_factory: Any) -> None:
+def test_display_form_uses_the_same_address_for_reply_retries(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
     first = post_reply(
@@ -130,7 +134,7 @@ def test_display_form_uses_the_same_address_for_reply_retries(credential_factory
 
 
 def test_retirement_requires_confirmation_and_closes_the_cycle(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, _ = credential_factory()
     administrator = user_factory()

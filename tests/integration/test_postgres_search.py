@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 from django.contrib.postgres.search import SearchHeadline, SearchQuery, SearchRank, SearchVector
@@ -14,9 +14,11 @@ from django.db.models import BigIntegerField, TextField, Value
 from django.db.models.functions import Cast, Coalesce
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.limits import effective_limits
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import Message
 from tunnels.search import SearchHit, search_hit_payload, search_messages
@@ -29,7 +31,7 @@ def allow_api_operations(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
 
 
-def _create(credential: Any, *, key: str) -> Any:
+def _create(credential: AgentCredential, *, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -39,16 +41,16 @@ def _create(credential: Any, *, key: str) -> Any:
 
 
 def _reply(
-    credential: Any,
-    created: Any,
-    parent: Any,
+    credential: AgentCredential,
+    created: CreatedTunnel,
+    parent: Message,
     *,
     key: str,
-    content: dict[str, Any],
-    mentions: list[Any] | None = None,
+    content: Mapping[str, object],
+    mentions: list[AgentCredential] | None = None,
     correlation_id: str = "recovery-plan",
     session: str | None = None,
-) -> Any:
+) -> Message:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -62,7 +64,7 @@ def _reply(
 
 
 def test_search_finds_text_and_canonical_json_with_safe_ranked_snippets(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Search coordinator")
     worker, _ = credential_factory(name="Search worker")
@@ -103,7 +105,7 @@ def test_search_finds_text_and_canonical_json_with_safe_ranked_snippets(
 @pytest.mark.parametrize("kind", ["text", "json"])
 @pytest.mark.parametrize("query", [None, "needle"])
 def test_search_bounds_large_payloads_before_model_loading(
-    credential_factory: Any, kind: str, query: str | None
+    credential_factory: CredentialFactory, kind: str, query: str | None
 ) -> None:
     coordinator, _ = credential_factory()
     worker, _ = credential_factory()
@@ -196,7 +198,7 @@ def test_search_bounds_large_payloads_before_model_loading(
 
 
 def test_search_applies_metadata_branch_and_sequence_filters(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Filter coordinator")
     worker, _ = credential_factory(name="Filter worker")
@@ -247,7 +249,7 @@ def test_search_applies_metadata_branch_and_sequence_filters(
 
 
 def test_search_cursor_keeps_snapshot_when_a_later_match_is_posted(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Page coordinator")
     worker, _ = credential_factory(name="Page worker")
@@ -318,7 +320,7 @@ def test_postgresql_installs_the_expression_gin_index() -> None:
 
 def test_public_search_and_participant_routes_use_the_postgresql_services(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, key = credential_factory(name="HTTP search coordinator")
     worker, _ = credential_factory(name="HTTP search worker")
@@ -360,7 +362,7 @@ def test_public_search_and_participant_routes_use_the_postgresql_services(
 
 
 def test_search_byte_budget_stops_before_the_next_full_hit(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     coordinator, _ = credential_factory(name="Budget coordinator")
@@ -424,7 +426,7 @@ def test_search_byte_budget_stops_before_the_next_full_hit(
 )
 def test_public_search_preserves_timestamp_wire_format_and_counts_response_bytes(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
     microsecond: int,
     expected_wire_timestamp: str,
@@ -484,7 +486,9 @@ def test_public_search_preserves_timestamp_wire_format_and_counts_response_bytes
     )
 
 
-def test_exclusion_search_keeps_zero_rank_matches_across_pages(credential_factory: Any) -> None:
+def test_exclusion_search_keeps_zero_rank_matches_across_pages(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator, key="search-exclusion-create")
     included = _reply(

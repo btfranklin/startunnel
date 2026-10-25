@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory
 
 from core.errors import TunnelUnavailable
 from core.models import AuditEvent
@@ -15,7 +15,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_initial_and_later_cycle_roots_preserve_data_and_audit_attribution(
-    credential_factory: Any, settings: Any
+    credential_factory: CredentialFactory, settings: Settings
 ) -> None:
     creator, _ = credential_factory(name="Cycle creator")
     mentioned, _ = credential_factory(name="Mentioned agent")
@@ -80,7 +80,7 @@ def test_initial_and_later_cycle_roots_preserve_data_and_audit_attribution(
 
 
 def test_later_cycle_replay_rejects_corrupt_snapshot_without_another_write(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     first = create_tunnel(

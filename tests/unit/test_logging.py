@@ -3,16 +3,20 @@
 import json
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 from django.http import HttpResponse
 from django.test import Client, RequestFactory
+from tests.factories import CredentialFactory, UserFactory
 
 from core.logging import SafeJsonFormatter
 from core.metrics import API_REQUEST_SECONDS
 from core.middleware import RequestIdMiddleware
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 
 @pytest.mark.parametrize(
@@ -171,6 +175,7 @@ def test_request_logger_normalizes_an_unknown_method(
     with caplog.at_level(logging.INFO, logger="startunnel.request"):
         response = RequestIdMiddleware(lambda value: HttpResponse())(request)
 
+    assert isinstance(response, HttpResponse)
     assert response.status_code == 200
     record = next(record for record in caplog.records if record.name == "startunnel.request")
     assert getattr(record, "method", None) == "OTHER"
@@ -181,8 +186,8 @@ def test_request_logger_normalizes_an_unknown_method(
 @pytest.mark.django_db
 def test_api_lifecycle_logs_only_safe_request_metadata(
     client: Client,
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -190,16 +195,17 @@ def test_api_lifecycle_logs_only_safe_request_metadata(
     payload_marker = f"payload-marker-{uuid4().hex}"
     sender_user = user_factory(username=profile_marker)
     sender, sender_key = credential_factory(user=sender_user, name="Logging sender")
+    assert sender.created_by is not None
     _, receiver_key = credential_factory(name="Logging receiver")
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
 
     def post(
         path: str,
-        body: dict[str, Any],
+        body: dict[str, object],
         key: str,
         *,
         idempotency_key: str | None = None,
-    ) -> Any:
+    ) -> _MonkeyPatchedWSGIResponse:
         headers = {"Authorization": f"Bearer {key}"}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key

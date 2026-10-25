@@ -1,10 +1,9 @@
 """Agent access keeps creator IDs without loading unused credential rows."""
 
-from typing import Any
-
 import pytest
 from django.db import connection, transaction
 from django.test.utils import CaptureQueriesContext
+from tests.factories import CredentialFactory
 
 from tunnels.access import resolve_tunnel
 from tunnels.cycles import create_tunnel
@@ -15,7 +14,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 @pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("for_update", [False, True])
 def test_agent_access_does_not_load_the_creator(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
     fallback: bool,
     for_update: bool,

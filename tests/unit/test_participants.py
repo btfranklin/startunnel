@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
 
 import pytest
 from asgiref.sync import async_to_sync
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from tests.factories import CredentialFactory, UserFactory
 
+from agents.models import AgentCredential
 from core.errors import CheckpointRegression, CycleUnavailable, InvalidRequest
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.admin_actions import start_cycle_as_admin
-from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
 from tunnels.messages import post_reply
-from tunnels.models import ActivityCheckpoint
-from tunnels.participants import list_participants
+from tunnels.models import ActivityCheckpoint, Message
+from tunnels.participants import ParticipantSummary, list_participants
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, *, key: str = "participant-create") -> Any:
+class ParticipantArguments(TypedDict, total=False):
+    limit: int
+    snapshot_sequence: int
+    after_first_sequence: int
+    after_credential_id: UUID
+
+
+def _create(credential: AgentCredential, *, key: str = "participant-create") -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -30,13 +39,13 @@ def _create(credential: Any, *, key: str = "participant-create") -> Any:
 
 
 def _reply(
-    credential: Any,
-    created: Any,
-    parent: Any,
+    credential: AgentCredential,
+    created: CreatedTunnel,
+    parent: Message,
     *,
     key: str,
-    mentions: list[Any] | None = None,
-) -> Any:
+    mentions: list[AgentCredential] | None = None,
+) -> Message:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -48,7 +57,7 @@ def _reply(
 
 
 def test_participants_merge_sends_and_mentions_with_immutable_name_snapshots(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Coordinator")
     worker, _ = credential_factory(name="Worker at send")
@@ -103,8 +112,8 @@ def test_participants_merge_sends_and_mentions_with_immutable_name_snapshots(
 
 @pytest.mark.django_db(transaction=True)
 def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Checkpoint coordinator")
     reader, _ = credential_factory(name="Checkpoint reader")
@@ -112,7 +121,7 @@ def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
     created = _create(coordinator, key="participant-checkpoint-create")
     _reply(reader, created, created.root, key="participant-checkpoint-first-reply")
 
-    def reader_summary(cycle_id: Any) -> Any:
+    def reader_summary(cycle_id: UUID) -> ParticipantSummary:
         page = list_participants(
             credential=coordinator,
             address=created.address,
@@ -185,7 +194,7 @@ def test_participant_acknowledgement_is_explicit_and_shared_across_cycles(
 
 
 def test_participant_pages_keep_one_snapshot_during_later_messages(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Page coordinator")
     first, _ = credential_factory(name="First participant")
@@ -225,7 +234,7 @@ def test_participant_pages_keep_one_snapshot_during_later_messages(
 
 
 def test_participant_checkpoint_metadata_uses_one_bounded_query(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Checkpoint query coordinator")
     first, _ = credential_factory(name="Checkpoint query first")
@@ -262,8 +271,8 @@ def test_participant_checkpoint_metadata_uses_one_bounded_query(
     ],
 )
 def test_participant_read_rejects_invalid_page_state(
-    credential_factory: Any,
-    arguments: dict[str, Any],
+    credential_factory: CredentialFactory,
+    arguments: ParticipantArguments,
     message: str,
 ) -> None:
     credential, _ = credential_factory()
@@ -278,7 +287,7 @@ def test_participant_read_rejects_invalid_page_state(
         )
 
 
-def test_participant_read_keeps_cycle_scope(credential_factory: Any) -> None:
+def test_participant_read_keeps_cycle_scope(credential_factory: CredentialFactory) -> None:
     personal, _ = credential_factory()
     first = _create(personal, key="participant-scope-first")
     second = _create(personal, key="participant-scope-second")

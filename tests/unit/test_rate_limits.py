@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
 
 import pytest
 from django.db import DatabaseError, IntegrityError
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
 from core.errors import DependencyUnavailable, RateLimited
 from core.limits import Limits
@@ -29,7 +29,7 @@ def test_primary_window_rejects_and_reports_retry_after(monkeypatch: pytest.Monk
     _consume(key="subject", limit=2, window_seconds=60, rule="test")
     with pytest.raises(RateLimited) as caught:
         _consume(key="subject", limit=2, window_seconds=60, rule="test")
-    assert caught.value.retry_after == 60  # type: ignore[attr-defined]
+    assert caught.value.retry_after == 60
     assert len(RateLimitBucket.objects.get().accepted_at_ms) == 2
 
 
@@ -53,7 +53,7 @@ def test_burst_window_can_reject_before_primary(monkeypatch: pytest.MonkeyPatch)
     _consume(key="burst", limit=10, window_seconds=60, rule="test", burst_limit=1)
     with pytest.raises(RateLimited) as caught:
         _consume(key="burst", limit=10, window_seconds=60, rule="test", burst_limit=1)
-    assert caught.value.retry_after == 1  # type: ignore[attr-defined]
+    assert caught.value.retry_after == 1
 
 
 def test_equal_windows_enforce_the_stricter_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +76,7 @@ def test_equal_windows_enforce_the_stricter_limit(monkeypatch: pytest.MonkeyPatc
             burst_limit=1,
             burst_window_seconds=10,
         )
-    assert caught.value.retry_after == 10  # type: ignore[attr-defined]
+    assert caught.value.retry_after == 10
 
 
 def test_integrity_race_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,7 +84,7 @@ def test_integrity_race_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
     original = manager.create
     calls = 0
 
-    def racing_create(**kwargs: Any) -> Any:
+    def racing_create(**kwargs: object) -> object:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -114,7 +114,9 @@ def test_database_errors_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
         _consume(key="broken", limit=1, window_seconds=1, rule="test")
 
 
-def test_named_limit_helpers_do_not_store_raw_subjects(credential_factory: Any) -> None:
+def test_named_limit_helpers_do_not_store_raw_subjects(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory()
     limits = Limits(api_operations_per_minute=5, api_burst=5)
     consume_api_operation(credential, limits)
@@ -180,7 +182,7 @@ def test_admin_auth_attempts_keep_the_existing_source_bucket(
         consume_admin_auth_attempt(source_ip="192.0.2.44")
     with pytest.raises(RateLimited) as error:
         consume_admin_auth_attempt(source_ip="192.0.2.44")
-    assert error.value.retry_after == 300  # type: ignore[attr-defined]
+    assert error.value.retry_after == 300
     consume_admin_auth_attempt(source_ip="192.0.2.45")
     consume_login_attempt(source_ip="192.0.2.44", username="Person")
     assert RateLimitBucket.objects.count() == 3

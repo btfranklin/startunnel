@@ -9,8 +9,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import AsyncIterator, Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -19,7 +19,8 @@ import pytest
 from django.conf import settings
 from django.db import connection
 
-from core.activity_listener import ActivityListener, _connection_kwargs, _wait_readable
+from core.activity_listener import ActivityListener, _wait_readable
+from core.database_options import postgres_connection_options
 from core.maintenance import ADVISORY_LOCK_ID, next_deadline
 from core.management.commands.maintenance_loop import Command
 from core.models import MaintenanceState
@@ -28,7 +29,7 @@ from core.notifications import ACTIVITY_CHANNEL, MAINTENANCE_CHANNEL
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-def _run(exercise: Any, loop_kind: str) -> None:
+def _run(exercise: Callable[[], Coroutine[object, object, None]], loop_kind: str) -> None:
     factory = asyncio.new_event_loop
     if loop_kind == "uvloop":
         factory = pytest.importorskip("uvloop").new_event_loop
@@ -40,11 +41,11 @@ def _run(exercise: Any, loop_kind: str) -> None:
 def test_zero_timeout_drains_buffered_and_readable_notifications(loop_kind: str) -> None:
     async def exercise() -> None:
         connection = await psycopg.AsyncConnection.connect(
-            **_connection_kwargs(),  # type: ignore[arg-type]
+            **postgres_connection_options(),
             autocommit=True,
         )
         sender = await psycopg.AsyncConnection.connect(
-            **_connection_kwargs(),  # type: ignore[arg-type]
+            **postgres_connection_options(),
             autocommit=True,
         )
         async with connection, sender:
@@ -70,7 +71,9 @@ def test_activity_listener_has_no_notification_polls_during_idle(
     polls: list[float | None] = []
     notifies = psycopg.AsyncConnection.notifies
 
-    async def counted_notifies(self: Any, *, timeout: float | None = None) -> Any:
+    async def counted_notifies(
+        self: psycopg.AsyncConnection[tuple[object, ...]], *, timeout: float | None = None
+    ) -> AsyncIterator[psycopg.Notify]:
         polls.append(timeout)
         async for notification in notifies(self, timeout=timeout):
             yield notification
@@ -87,7 +90,7 @@ def test_activity_listener_has_no_notification_polls_during_idle(
             await asyncio.sleep(0.35)
             assert polls == [0]
             sender = await psycopg.AsyncConnection.connect(
-                **_connection_kwargs(),  # type: ignore[arg-type]
+                **postgres_connection_options(),
                 autocommit=True,
             )
             async with sender:
@@ -122,7 +125,7 @@ def test_maintenance_socket_stop_interrupts_a_full_reconciliation_wait(
         stop_reader,
         stop_writer,
         psycopg.connect(
-            **_connection_kwargs(),  # type: ignore[arg-type]
+            **postgres_connection_options(),
             autocommit=True,
         ) as connection,
     ):
@@ -157,7 +160,7 @@ def test_maintenance_sigterm_interrupts_the_normal_idle_wait() -> None:
         stderr=subprocess.DEVNULL,
     )
 
-    def wait_until(predicate: Any) -> None:
+    def wait_until(predicate: Callable[[], bool]) -> None:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             assert process.poll() is None

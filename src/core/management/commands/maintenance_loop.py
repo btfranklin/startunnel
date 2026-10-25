@@ -13,10 +13,11 @@ from contextlib import suppress
 
 import psycopg
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import DatabaseError, close_old_connections
 from django.utils import timezone
 
+from core.database_options import postgres_connection_options
 from core.maintenance import (
     ADVISORY_LOCK_ID,
     cleanup_once,
@@ -35,18 +36,6 @@ def _should_report_cycle(counts: Mapping[str, int], *, once: bool) -> bool:
     return once or any(count != 0 for count in counts.values())
 
 
-def _connection_kwargs() -> dict[str, object]:
-    database = settings.DATABASES["default"]
-    return {
-        "dbname": database["NAME"],
-        "user": database.get("USER") or None,
-        "password": database.get("PASSWORD") or None,
-        "host": database.get("HOST") or None,
-        "port": database.get("PORT") or None,
-        "connect_timeout": 5,
-    }
-
-
 def _wait_for_notification(
     listener: psycopg.Connection[tuple[object, ...]], stop_socket: socket.socket, timeout: float
 ) -> bool:
@@ -61,8 +50,8 @@ def _wait_for_notification(
 class Command(BaseCommand):
     help = "Run deadline-based StarTunnel maintenance."
 
-    def add_arguments(self, parser: object) -> None:
-        parser.add_argument("--once", action="store_true")  # type: ignore[attr-defined]
+    def add_arguments(self, parser: CommandParser) -> None:
+        parser.add_argument("--once", action="store_true")
 
     def handle(self, *args: object, **options: object) -> None:
         del args
@@ -98,7 +87,7 @@ class Command(BaseCommand):
         while not stop.is_set():
             try:
                 with psycopg.connect(
-                    **_connection_kwargs(),  # type: ignore[arg-type]
+                    **postgres_connection_options(),
                     autocommit=True,
                 ) as listener:
                     listener.execute(f"LISTEN {MAINTENANCE_CHANNEL}")

@@ -1,11 +1,11 @@
 """The database can use indexes for Beacon responder and receipt cleanup probes."""
 
-from typing import Any
 from uuid import uuid4
 
 import pytest
 from django.db import connection, transaction
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
 from accounts.models import AdminReceipt
 from core.models import AgentReceipt
@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 def test_beacon_lookup_indexes_match_the_actual_query_expressions(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     publisher, _ = credential_factory(name="Index publisher")
     responder, _ = credential_factory(name="Index responder")
@@ -88,7 +88,7 @@ def test_beacon_indexes_exist_on_their_owned_tables() -> None:
     }
     with connection.cursor() as cursor:
         for table, index in expected.items():
-            constraints: dict[str, Any] = connection.introspection.get_constraints(cursor, table)
+            constraints = connection.introspection.get_constraints(cursor, table)
             assert constraints[index]["index"]
         receipt_indexes = connection.introspection.get_constraints(
             cursor, AgentReceipt._meta.db_table

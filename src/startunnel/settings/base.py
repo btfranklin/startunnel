@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import dj_database_url
+from dj_database_url import DBConfig
 from dotenv import dotenv_values
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -112,7 +112,7 @@ if _proof_metrics not in {"0", "1"}:
 STARTUNNEL_PROOF_METRICS = _proof_metrics == "1"
 
 
-def database_configuration(url: str) -> dict[str, Any]:
+def database_configuration(url: str) -> DBConfig:
     """Build one database configuration and keep its bounded pool policy."""
 
     configuration = dj_database_url.parse(
@@ -128,10 +128,10 @@ def database_configuration(url: str) -> dict[str, Any]:
             "max_waiting": 256,
             "timeout": 5,
         }
-    return dict(configuration)
+    return configuration
 
 
-DATABASES: dict[str, Any] = {
+DATABASES: dict[str, DBConfig] = {
     "default": database_configuration(
         env("DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'db.sqlite3'}")
     )

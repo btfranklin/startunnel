@@ -10,31 +10,45 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
+from urllib.request import Request
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
+from cli import star_tunnel
+from jsonschema import Draft202012Validator, FormatChecker
+from scripts.json_data import JsonObject, JsonValue, json_object
+from tests.cli_types import CliModule
+from tests.json_values import json_elements, json_members
+from tests.schema_data import (
+    CliSchemaCommand,
+    OpenApiDocument,
+    Operation,
+    Schema,
+    openapi_document,
+    schema_output,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLI = PROJECT_ROOT / "cli" / "star_tunnel.py"
 OPENAPI = PROJECT_ROOT / "generated" / "openapi.json"
 
 
-def load_cli() -> Any:
+def load_cli() -> CliModule:
     spec = importlib.util.spec_from_file_location("startunnel_response_contract", CLI)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    return cast(CliModule, module)
 
 
 def normalized_path(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "{id}", path)
 
 
-def operation_for(document: dict[str, Any], method: str, path: str) -> dict[str, Any]:
+def operation_for(document: OpenApiDocument, method: str, path: str) -> Operation:
     matches = [
         operation
         for source_path, methods in document["paths"].items()
@@ -43,14 +57,16 @@ def operation_for(document: dict[str, Any], method: str, path: str) -> dict[str,
         if source_method.upper() == method
     ]
     assert len(matches) == 1, f"expected one OpenAPI operation for {method} {path}"
-    return cast(dict[str, Any], matches[0])
+    return matches[0]
 
 
-def schema_closure(document: dict[str, Any], commands: list[dict[str, Any]]) -> dict[str, Any]:
+def schema_closure(
+    document: OpenApiDocument, commands: list[CliSchemaCommand]
+) -> dict[str, dict[str, Schema]]:
     components = document["components"]
     pending: list[tuple[str, str]] = []
 
-    def collect(value: Any) -> None:
+    def collect(value: object) -> None:
         if isinstance(value, dict):
             reference = value.get("$ref")
             if reference is not None:
@@ -68,7 +84,7 @@ def schema_closure(document: dict[str, Any], commands: list[dict[str, Any]]) -> 
         collect(command["responses"])
         collect(command["stdout_schemas"])
 
-    selected: dict[str, dict[str, Any]] = {}
+    selected: dict[str, dict[str, Schema]] = {}
     while pending:
         group, name = pending.pop()
         definitions = selected.setdefault(group, {})
@@ -80,7 +96,7 @@ def schema_closure(document: dict[str, Any], commands: list[dict[str, Any]]) -> 
     return selected
 
 
-def validate_output(schema: dict[str, Any], value: Any, components: dict[str, Any]) -> None:
+def validate_output(schema: Schema, value: object, components: dict[str, Schema]) -> None:
     root = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "components": {"schemas": components},
@@ -89,7 +105,7 @@ def validate_output(schema: dict[str, Any], value: Any, components: dict[str, An
     Draft202012Validator(root, format_checker=FormatChecker()).validate(value)
 
 
-def valid_value(schema: dict[str, Any], components: dict[str, Any]) -> Any:
+def valid_value(schema: Schema, components: dict[str, Schema]) -> JsonValue:
     """Create a small valid example from the published schema definition."""
     reference = schema.get("$ref")
     if reference is not None:
@@ -129,26 +145,26 @@ def valid_value(schema: dict[str, Any], components: dict[str, Any]) -> Any:
 
 def test_schema_outputs_match_openapi_and_only_include_reachable_types() -> None:
     cli = load_cli()
-    document = json.loads(OPENAPI.read_text(encoding="utf-8"))
+    document = openapi_document(json.loads(OPENAPI.read_text(encoding="utf-8")))
 
     outputs = [
-        cli.agent_schema(),
-        cli.admin_schema(),
-        *(cli.agent_schema(command) for command in ("me", *cli.ROUTES)),
-        *(cli.admin_schema(command) for command in cli.ADMIN_COMMANDS),
+        schema_output(cli.agent_schema()),
+        schema_output(cli.admin_schema()),
+        *(schema_output(cli.agent_schema(command)) for command in ("me", *cli.ROUTES)),
+        *(schema_output(cli.admin_schema(command)) for command in cli.ADMIN_COMMANDS),
     ]
-    for schema_output in outputs:
-        commands = schema_output["commands"]
+    for schema_document in outputs:
+        commands = schema_document["commands"]
         for command in commands:
             operation = operation_for(document, command["method"], command["path"])
             assert command["responses"] == operation["responses"]
-        assert schema_output["components"] == schema_closure(document, commands)
+        assert schema_document["components"] == schema_closure(document, commands)
 
 
 def test_admin_doctor_alias_publishes_status_operation_responses() -> None:
     cli = load_cli()
-    document = json.loads(OPENAPI.read_text(encoding="utf-8"))
-    commands = {item["command"]: item for item in cli.admin_schema()["commands"]}
+    document = openapi_document(json.loads(OPENAPI.read_text(encoding="utf-8")))
+    commands = {item["command"]: item for item in schema_output(cli.admin_schema())["commands"]}
     doctor = commands["admin doctor"]
     status = commands["admin status"]
 
@@ -238,8 +254,8 @@ def test_key_issuance_stdout_matches_published_schema_and_saves_private_bytes(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     command: str,
-    body: dict[str, Any],
-    resource: dict[str, Any],
+    body: JsonObject,
+    resource: JsonObject,
     issued_secret: bool,
 ) -> None:
     cli = load_cli()
@@ -247,13 +263,13 @@ def test_key_issuance_stdout_matches_published_schema_and_saves_private_bytes(
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY", "sta_test-admin-key")
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY_FILE", raising=False)
     monkeypatch.setattr(
-        cli.sys,
+        sys,
         "stdin",
         io.TextIOWrapper(io.BytesIO(json.dumps(body).encode("utf-8"))),
     )
     secret_path = tmp_path / "issued.key"
     secret = "sta_issued-private-value"
-    api_response: dict[str, Any] = {
+    api_response: JsonObject = {
         "resource": resource,
         "operation": {
             "id": "00000000-0000-4000-8000-000000000003",
@@ -263,7 +279,9 @@ def test_key_issuance_stdout_matches_published_schema_and_saves_private_bytes(
     if issued_secret:
         api_response["secret"] = secret
 
-    def request(self: Any, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    def request(
+        self: star_tunnel.StarTunnelTransport, method: str, path: str, **kwargs: object
+    ) -> JsonObject:
         del self, method, path, kwargs
         return copy.deepcopy(api_response)
 
@@ -275,12 +293,16 @@ def test_key_issuance_stdout_matches_published_schema_and_saves_private_bytes(
     assert cli.main(arguments) == 0
     output = json.loads(capsys.readouterr().out)
     admin_command = next(
-        item for item in cli.admin_schema()["commands"] if item["command"] == "admin " + command
+        item
+        for item in schema_output(cli.admin_schema())["commands"]
+        if item["command"] == "admin " + command
     )
     output_schema = admin_command["stdout_schemas"]["200"]
     assert "secret" not in output_schema["properties"]
     assert "secret" not in output_schema.get("required", [])
-    validate_output(output_schema, output, cli.admin_schema()["components"]["schemas"])
+    validate_output(
+        output_schema, output, schema_output(cli.admin_schema())["components"]["schemas"]
+    )
     assert "secret" not in output
     if issued_secret:
         assert output["secret_output"] == str(secret_path)
@@ -296,7 +318,7 @@ def test_cli_error_schema_accepts_local_and_http_errors_but_api_error_stays_raw(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli = load_cli()
-    public_schema = cli.agent_schema()
+    public_schema = schema_output(cli.agent_schema())
     error_schema = public_schema["error_output"]["schema"]
     monkeypatch.delenv("STARTUNNEL_BASE_URL", raising=False)
     monkeypatch.delenv("STARTUNNEL_AGENT_KEY", raising=False)
@@ -323,7 +345,9 @@ def test_cli_error_schema_accepts_local_and_http_errors_but_api_error_stays_raw(
     monkeypatch.setenv("STARTUNNEL_BASE_URL", "https://example.test")
     monkeypatch.setenv("STARTUNNEL_AGENT_KEY", "st_test-agent-key")
 
-    def fail_request(self: Any, method: str, path: str, **kwargs: Any) -> Any:
+    def fail_request(
+        self: star_tunnel.StarTunnelTransport, method: str, path: str, **kwargs: object
+    ) -> object:
         del self, method, path, kwargs
         raise cli.CliError(
             "rate_limited",
@@ -344,46 +368,49 @@ def test_cli_error_schema_accepts_local_and_http_errors_but_api_error_stays_raw(
 
 def test_published_request_fields_and_stdout_schemas_support_workflow_chaining() -> None:
     cli = load_cli()
-    document = json.loads(OPENAPI.read_text(encoding="utf-8"))
-    schema = cli.agent_schema()
+    document = openapi_document(json.loads(OPENAPI.read_text(encoding="utf-8")))
+    schema = schema_output(cli.agent_schema())
     commands = {item["command"]: item for item in schema["commands"]}
     components = schema["components"]["schemas"]
 
-    def check_request(name: str, value: dict[str, Any]) -> None:
+    def check_request(name: str, value: Mapping[str, object]) -> None:
         definition = commands[name]
         assert set(definition["required_fields"]) <= value.keys()
         assert value.keys() <= set(definition["required_fields"] + definition["optional_fields"])
 
-    def response(name: str, value: dict[str, Any], status: str) -> dict[str, Any]:
+    def response(name: str, value: object, status: str) -> None:
         definition = commands[name]
         validate_output(definition["stdout_schemas"][status], value, components)
-        return value
 
-    create_request = {"cycle": {"root": {"content": {"type": "text", "text": "Root"}}}}
+    create_request: JsonObject = {"cycle": {"root": {"content": {"type": "text", "text": "Root"}}}}
     check_request("create", create_request)
     create_schema = commands["create"]["stdout_schemas"]["201"]
-    create_result = valid_value(create_schema, components)
-    create_result["tunnel"]["address"] = "address-from-create"
-    create_result["cycle"]["root"]["id"] = "00000000-0000-4000-8000-000000000005"
+    create_result = json_object(valid_value(create_schema, components))
+    json_members(create_result["tunnel"])["address"] = "address-from-create"
+    json_members(json_members(create_result["cycle"])["root"])["id"] = (
+        "00000000-0000-4000-8000-000000000005"
+    )
     response("create", create_result, "201")
 
-    reply_request = {
-        "address": create_result["tunnel"]["address"],
-        "parent_id": create_result["cycle"]["root"]["id"],
+    reply_request: JsonObject = {
+        "address": json_members(create_result["tunnel"])["address"],
+        "parent_id": json_members(json_members(create_result["cycle"])["root"])["id"],
         "content": {"type": "text", "text": "Reply"},
     }
     check_request("reply", reply_request)
     response("reply", valid_value(commands["reply"]["stdout_schemas"]["201"], components), "201")
 
-    publish_request = {"address": reply_request["address"], "text": "Beacon"}
+    publish_request: JsonObject = {"address": reply_request["address"], "text": "Beacon"}
     check_request("beacon-publish", publish_request)
-    published = valid_value(commands["beacon-publish"]["stdout_schemas"]["201"], components)
-    published["beacon"]["id"] = "00000000-0000-4000-8000-000000000006"
+    published = json_object(
+        valid_value(commands["beacon-publish"]["stdout_schemas"]["201"], components)
+    )
+    json_members(published["beacon"])["id"] = "00000000-0000-4000-8000-000000000006"
     response("beacon-publish", published, "201")
 
-    withdraw_request = {
+    withdraw_request: JsonObject = {
         "address": publish_request["address"],
-        "beacon_id": published["beacon"]["id"],
+        "beacon_id": json_members(published["beacon"])["id"],
     }
     check_request("beacon-withdraw", withdraw_request)
     response(
@@ -392,25 +419,27 @@ def test_published_request_fields_and_stdout_schemas_support_workflow_chaining()
         "200",
     )
 
-    board = valid_value(commands["beacon-board"]["stdout_schemas"]["200"], components)
+    board = json_object(valid_value(commands["beacon-board"]["stdout_schemas"]["200"], components))
     board["items"] = [valid_value(document["components"]["schemas"]["BeaconBoardItem"], components)]
-    board["items"][0]["address"] = publish_request["address"]
+    json_members(json_elements(board["items"])[0])["address"] = publish_request["address"]
     board["next_page_cursor"] = "next-page"
     response("beacon-board", board, "200")
-    page_request = {"page_cursor": board["next_page_cursor"]}
+    page_request: JsonObject = {"page_cursor": board["next_page_cursor"]}
     check_request("beacon-board", page_request)
     final_board_page = {**board, "items": [], "next_page_cursor": None, "complete": True}
     response("beacon-board", final_board_page, "200")
-    enter_request = {"address": board["items"][0]["address"]}
+    enter_request: JsonObject = {
+        "address": json_members(json_elements(board["items"])[0])["address"]
+    }
     check_request("enter", enter_request)
     response("enter", valid_value(commands["enter"]["stdout_schemas"]["200"], components), "200")
 
-    tree_page = valid_value(commands["read-tree"]["stdout_schemas"]["200"], components)
+    tree_page = json_object(valid_value(commands["read-tree"]["stdout_schemas"]["200"], components))
     tree_page["next_page_cursor"] = "tree-page"
     tree_page["complete"] = False
     response("read-tree", tree_page, "200")
-    tree_request = {
-        "address": create_result["tunnel"]["address"],
+    tree_request: JsonObject = {
+        "address": json_members(create_result["tunnel"])["address"],
         "snapshot_cursor": tree_page["snapshot_cursor"],
         "page_cursor": tree_page["next_page_cursor"],
     }
@@ -418,9 +447,9 @@ def test_published_request_fields_and_stdout_schemas_support_workflow_chaining()
     final_tree_page = {**tree_page, "next_page_cursor": None, "complete": True}
     response("read-tree", final_tree_page, "200")
 
-    close_request = {
-        "address": create_result["tunnel"]["address"],
-        "expected_cycle_id": create_result["cycle"]["id"],
+    close_request: JsonObject = {
+        "address": json_members(create_result["tunnel"])["address"],
+        "expected_cycle_id": json_members(create_result["cycle"])["id"],
     }
     check_request("close", close_request)
     validate_output(commands["close"]["stdout_schemas"]["204"], {}, components)
@@ -433,7 +462,7 @@ def test_close_prints_204_empty_object_matching_published_schema(
     monkeypatch.setenv("STARTUNNEL_BASE_URL", "https://example.test")
     monkeypatch.setenv("STARTUNNEL_AGENT_KEY", "st_test-agent-key")
     monkeypatch.setattr(
-        cli.sys,
+        sys,
         "stdin",
         io.TextIOWrapper(
             io.BytesIO(
@@ -446,7 +475,7 @@ def test_close_prints_204_empty_object_matching_published_schema(
             )
         ),
     )
-    requests: list[Any] = []
+    requests: list[tuple[Request, int]] = []
 
     class EmptyResponse:
         status = 204
@@ -454,14 +483,14 @@ def test_close_prints_204_empty_object_matching_published_schema(
         def __enter__(self) -> EmptyResponse:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        def __exit__(self, *args: object) -> None:
             del args
 
         def read(self) -> bytes:
             return b""
 
     class FakeOpener:
-        def open(self, request: Any, *, timeout: int) -> EmptyResponse:
+        def open(self, request: Request, *, timeout: int) -> EmptyResponse:
             requests.append((request, timeout))
             return EmptyResponse()
 
@@ -469,11 +498,15 @@ def test_close_prints_204_empty_object_matching_published_schema(
 
     assert cli.main(["close", "--idempotency-key", "close-test-204"]) == 0
     output = json.loads(capsys.readouterr().out)
-    schema = next(item for item in cli.agent_schema()["commands"] if item["command"] == "close")
+    schema = next(
+        item for item in schema_output(cli.agent_schema())["commands"] if item["command"] == "close"
+    )
     response_204 = schema["responses"]["204"]
     assert "content" not in response_204
     validate_output(
-        schema["stdout_schemas"]["204"], output, cli.agent_schema()["components"]["schemas"]
+        schema["stdout_schemas"]["204"],
+        output,
+        schema_output(cli.agent_schema())["components"]["schemas"],
     )
     request, _timeout = requests[0]
     assert request.get_method() == "POST"

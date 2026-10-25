@@ -1,12 +1,20 @@
 """Keep Django model administration available for inspection only."""
 
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
+from django.db.models import Model
 from django.http import HttpRequest
 
 from .models import AgentReceipt, AuditEvent
 
+if TYPE_CHECKING:
+    _InspectionBase = admin.ModelAdmin[Model]
+else:
+    _InspectionBase = admin.ModelAdmin
 
-class InspectionAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+
+class InspectionAdmin(_InspectionBase):
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 

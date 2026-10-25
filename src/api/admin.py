@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any
+from typing import Annotated
 from uuid import UUID
 
 from django.http import HttpRequest
 from django.utils import timezone
 from ninja import Router, Schema
 from ninja.security import HttpBearer
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, WithJsonSchema
 
 from accounts.admin_access import authenticate_admin_key
 from accounts.admin_commands import (
@@ -42,6 +42,7 @@ from accounts.admin_services import (
 from accounts.models import AdminCredential, AdminReceipt, User
 from core import limits as instance_limits
 from core.errors import InvalidCredential, InvalidRequest, ResourceUnavailable
+from core.json_types import JsonObject
 from core.limits import DEFAULT_LIMITS
 from core.rate_limits import consume_admin_auth_attempt
 from core.security import client_ip
@@ -132,7 +133,10 @@ class AuditResource(Schema):
     target_id: UUID | None
     request_id: UUID | None
     created_at: datetime
-    metadata: dict[str, Any]
+    metadata: Annotated[
+        JsonObject,
+        WithJsonSchema({"additionalProperties": True, "title": "Metadata", "type": "object"}),
+    ]
 
 
 class CycleResource(Schema):

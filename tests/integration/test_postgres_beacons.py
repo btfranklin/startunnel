@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 import pytest
 from django.db import close_old_connections, connection
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 from agents.models import AgentCredential
 from core import maintenance
 from core.errors import CycleClosed, LifecycleConflict
 from core.models import AuditEvent
 from tunnels.beacons import (
+    BeaconData,
     beacon_data,
     beacon_queryset,
     publish_beacon,
@@ -54,8 +56,8 @@ def _wait_for_production_tunnel_lock(*, waiter: int, owner: int) -> None:
 @pytest.mark.parametrize("operation", ["close", "agent_withdraw", "admin_withdraw"])
 @pytest.mark.parametrize("first", ["expiry", "write"])
 def test_maintenance_expiry_and_beacon_writes_respect_both_tunnel_lock_orders(
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
     first: str,
@@ -87,7 +89,13 @@ def test_maintenance_expiry_and_beacon_writes_respect_both_tunnel_lock_orders(
     def operate(role: str) -> str:
         close_old_connections()
 
-        def observe_lock(execute: Any, sql: str, params: Any, many: bool, context: Any) -> Any:
+        def observe_lock(
+            execute: Callable[[str, object, bool, dict[str, object]], object],
+            sql: str,
+            params: object,
+            many: bool,
+            context: dict[str, object],
+        ) -> object:
             tunnel_lock = (
                 sql.startswith("SELECT") and 'FROM "tunnels_tunnel"' in sql and "FOR UPDATE" in sql
             )
@@ -171,7 +179,9 @@ def test_maintenance_expiry_and_beacon_writes_respect_both_tunnel_lock_orders(
     assert AuditEvent.objects.filter(action="beacon.ended", target_id=beacon_id).count() == 1
 
 
-def test_concurrent_publications_leave_one_final_beacon(credential_factory: Any) -> None:
+def test_concurrent_publications_leave_one_final_beacon(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Concurrent Beacon publisher")
     created = create_tunnel(
         credential=creator,
@@ -211,7 +221,7 @@ def test_concurrent_publications_leave_one_final_beacon(credential_factory: Any)
 
 
 def test_publication_racing_a_reply_has_a_serialized_response_boundary(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Reply race publisher")
     responder, _ = credential_factory(name="Concurrent responder")
@@ -263,7 +273,9 @@ def test_publication_racing_a_reply_has_a_serialized_response_boundary(
     assert response_count == int(reply_message.sequence > beacon.publication_sequence)
 
 
-def test_cycle_close_racing_withdraw_ends_beacon_once(credential_factory: Any) -> None:
+def test_cycle_close_racing_withdraw_ends_beacon_once(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="End race publisher")
     created = create_tunnel(
         credential=creator,
@@ -330,7 +342,7 @@ def test_cycle_close_racing_withdraw_ends_beacon_once(credential_factory: Any) -
 
 @pytest.mark.parametrize("operation", ["publish", "withdraw"])
 def test_concurrent_identical_beacon_retries_return_one_result(
-    credential_factory: Any, operation: str
+    credential_factory: CredentialFactory, operation: str
 ) -> None:
     creator, _ = credential_factory()
     created = create_tunnel(
@@ -349,7 +361,7 @@ def test_concurrent_identical_beacon_retries_return_one_result(
         beacon_id = UUID(published["id"])
     barrier = threading.Barrier(2)
 
-    def attempt(_: int) -> tuple[dict[str, Any], bool]:
+    def attempt(_: int) -> tuple[BeaconData, bool]:
         close_old_connections()
         try:
             credential = _credential(creator.id)

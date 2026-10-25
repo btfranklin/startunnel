@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from typing import Any
+from typing import NotRequired, Unpack
 from uuid import UUID, uuid4
 
 import psycopg
@@ -12,17 +12,18 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.db import connection, transaction
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 import tunnels.beacons as beacon_domain
-from accounts.models import User
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
-from core.activity_listener import _connection_kwargs as listener_connection_kwargs
+from core.database_options import PostgresConnectionOptions, postgres_connection_options
 from core.errors import InvalidCredential
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify
 from tunnels.activity import read_activity_async
 from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.beacons import (
+    BoardWaitData,
     _advance_board_position,
     publish_beacon,
     read_board,
@@ -40,6 +41,11 @@ def board_listener(monkeypatch: pytest.MonkeyPatch) -> ActivityListener:
     listener = ActivityListener()
     monkeypatch.setattr(beacon_domain, "activity_listener", listener)
     return listener
+
+
+class ListenerTestConnectionOptions(PostgresConnectionOptions):
+    autocommit: NotRequired[bool]
+    application_name: NotRequired[str]
 
 
 def _worker[T](function: Callable[[], T]) -> T:
@@ -74,7 +80,7 @@ async def _wait_until_registered(board_listener: ActivityListener) -> None:
 
 async def _start_board_wait(
     *, credential: AgentCredential, cursor: str, board_listener: ActivityListener
-) -> asyncio.Task[dict[str, Any]]:
+) -> asyncio.Task[BoardWaitData]:
     task = asyncio.create_task(
         wait_for_board(credential=credential, after_cursor=cursor, wait_seconds=5)
     )
@@ -124,7 +130,7 @@ async def test_board_notice_is_commit_only_and_reaches_two_listener_connections(
 
 @pytest.mark.asyncio
 async def test_reconnected_subscriptions_wake_waiters_for_commits_during_disconnect(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publisher, _ = await sync_to_async(_worker)(
         lambda: credential_factory(name="Reconnect publisher")
@@ -142,18 +148,20 @@ async def test_reconnected_subscriptions_wake_waiters_for_commits_during_disconn
         )
     )
     original_connect = psycopg.AsyncConnection.connect
-    database_kwargs: dict[str, Any] = listener_connection_kwargs()
+    database_kwargs: PostgresConnectionOptions = postgres_connection_options()
     listener_tag = "listener-reconnect-" + uuid4().hex
     monkeypatch.setattr(
-        "core.activity_listener._connection_kwargs",
+        "core.activity_listener.postgres_connection_options",
         lambda: {**database_kwargs, "application_name": listener_tag},
     )
     reconnect_paused = asyncio.Event()
     release_reconnect = asyncio.Event()
-    connections: list[psycopg.AsyncConnection[Any]] = []
+    connections: list[psycopg.AsyncConnection[tuple[object, ...]]] = []
     calls = 0
 
-    async def connect_with_gap(**kwargs: Any) -> psycopg.AsyncConnection[Any]:
+    async def connect_with_gap(
+        **kwargs: Unpack[ListenerTestConnectionOptions],
+    ) -> psycopg.AsyncConnection[tuple[object, ...]]:
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -241,9 +249,9 @@ def _create(credential: AgentCredential, *, key: str) -> CreatedTunnel:
 
 @pytest.mark.asyncio
 async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     board_listener: ActivityListener,
-    user_factory: Callable[..., User],
+    user_factory: UserFactory,
 ) -> None:
     publisher, _ = await sync_to_async(credential_factory)(name="Beacon publisher")
     responder, _ = await sync_to_async(credential_factory)(name="Beacon responder")
@@ -323,7 +331,7 @@ async def test_wait_wakes_for_publication_reply_rotation_and_withdrawal(
 
 @pytest.mark.asyncio
 async def test_wait_observes_commit_between_registration_and_database_reread(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     board_listener: ActivityListener,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -336,11 +344,13 @@ async def test_wait_observes_commit_between_registration_and_database_reread(
     read_state = beacon_domain._read_board_wait_state_for_async
     loop = asyncio.get_running_loop()
 
-    def pause_then_read(**arguments: Any) -> tuple[bool, float | None]:
+    def pause_then_read(
+        *, credential: AgentCredential, after_cursor: str
+    ) -> tuple[bool, float | None]:
         loop.call_soon_threadsafe(entered.set)
         future = asyncio.run_coroutine_threadsafe(release.wait(), loop)
         future.result(timeout=5)
-        return read_state(**arguments)
+        return read_state(credential=credential, after_cursor=after_cursor)
 
     monkeypatch.setattr("tunnels.beacons._read_board_wait_state_for_async", pause_then_read)
     task = asyncio.create_task(
@@ -370,7 +380,7 @@ async def test_wait_observes_commit_between_registration_and_database_reread(
 
 @pytest.mark.asyncio
 async def test_wait_falls_back_after_listener_disconnect_and_detects_commit(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     board_listener: ActivityListener,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -411,7 +421,7 @@ async def test_wait_falls_back_after_listener_disconnect_and_detects_commit(
 
 @pytest.mark.asyncio
 async def test_positive_timeout_returns_false_and_revocation_is_rechecked(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     board_listener: ActivityListener,
 ) -> None:
     reader, _ = await sync_to_async(credential_factory)(name="Wait reader")

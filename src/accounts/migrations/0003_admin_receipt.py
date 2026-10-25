@@ -1,11 +1,19 @@
 """Name admin retry receipts without changing their table or identity."""
 
 import django.db.models.deletion
+from django.apps.registry import Apps
 from django.conf import settings
 from django.db import migrations, models
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 
-def _rename_content_type(apps, schema_editor, old_model, new_model, verbose_name):
+def _rename_content_type(
+    apps: Apps,
+    schema_editor: BaseDatabaseSchemaEditor,
+    old_model: str,
+    new_model: str,
+    verbose_name: str,
+) -> None:
     content_types = apps.get_model("contenttypes", "ContentType")
     permissions = apps.get_model("auth", "Permission")
     database = schema_editor.connection.alias
@@ -24,11 +32,11 @@ def _rename_content_type(apps, schema_editor, old_model, new_model, verbose_name
         ).update(codename=f"{action}_{new_model}", name=f"Can {action} {verbose_name}")
 
 
-def rename_content_type(apps, schema_editor):
+def rename_content_type(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     _rename_content_type(apps, schema_editor, "adminoperation", "adminreceipt", "admin receipt")
 
 
-def restore_content_type(apps, schema_editor):
+def restore_content_type(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     _rename_content_type(apps, schema_editor, "adminreceipt", "adminoperation", "admin operation")
 
 

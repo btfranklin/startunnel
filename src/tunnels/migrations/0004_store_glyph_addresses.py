@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+from django.apps.registry import Apps
 from django.db import migrations, models
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 
-def reset_tunnels(apps: Any, schema_editor: Any) -> None:
+def reset_tunnels(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     alias = schema_editor.connection.alias
-    apps.get_model("accounts", "AdminOperation").objects.using(alias).filter(
+    # The historical model was renamed after this migration.
+    historical_operations: type[models.Model] = apps.get_model(  # type: ignore[misc]
+        "accounts", "AdminOperation"
+    )
+    historical_operations._default_manager.using(alias).filter(
         operation__startswith="tunnels."
     ).delete()
     tables = (
@@ -31,7 +35,7 @@ def reset_tunnels(apps: Any, schema_editor: Any) -> None:
                 cursor.execute(f"DELETE FROM {table}")  # nosec B608
 
 
-def replace_address_guard(apps: Any, schema_editor: Any) -> None:
+def replace_address_guard(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return

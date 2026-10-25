@@ -8,13 +8,13 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import compose_isolation as isolation
 from scripts import proof_evidence
 from scripts import release_candidate as candidate
 from scripts import release_draft as draft
+from scripts.json_data import JsonObject, json_string
 from tests.structure.workflows import load_workflow
 
 IMAGE = "ghcr.io/btfranklin/startunnel@sha256:" + "a" * 64
@@ -56,7 +56,7 @@ def test_candidate_writer_keeps_the_reused_source_run(
 def test_failed_artifact_lookup_does_not_trigger_new_build_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unavailable(*args: Any, **kwargs: Any) -> Any:
+    def unavailable(*args: object, **kwargs: object) -> object:
         raise subprocess.CalledProcessError(1, ["gh", "api"])
 
     monkeypatch.setattr(candidate, "github_api", unavailable)
@@ -65,7 +65,7 @@ def test_failed_artifact_lookup_does_not_trigger_new_build_work(
         candidate.prepare("owner/repository", COMMIT, "v0.1.0")
 
 
-def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> candidate.CandidateData:
     monkeypatch.setattr(
         proof_evidence,
         "proof_inputs",
@@ -73,7 +73,7 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     )
     monkeypatch.setenv("GITHUB_RUN_ID", "42")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
-    record = {
+    record: candidate.CandidateData = {
         "source_commit": COMMIT,
         "version": "v0.1.0",
         "image": IMAGE,
@@ -82,7 +82,7 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     }
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "candidate-image.json").write_text(json.dumps(record))
-    selection: dict[str, Any] = {"selected": {}, "history": []}
+    selection: candidate.ProofSelection = {"selected": {}, "history": []}
     for kind in proof_evidence.KINDS:
         attempt_dir = directory / "proofs" / kind / "1"
         attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +174,7 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
             )
         proof_evidence.record_proof(kind, attempt_dir, commit=COMMIT, image=IMAGE, status="success")
         relative_manifest = str((attempt_dir / f"proof-{kind}.json").relative_to(directory))
-        reference = {
+        reference: candidate.ProofReference = {
             "kind": kind,
             "run_id": 42,
             "attempt": 1,
@@ -270,12 +270,10 @@ def test_collect_selects_passed_second_attempt_and_retains_first_failure(
 
     monkeypatch.setattr(candidate, "github_api", lambda *args, **kwargs: [{"artifacts": artifacts}])
 
-    def download(
-        _repository: str, _run_id: int, selected: dict[str, Any], destination: Path
-    ) -> None:
-        source_path = sources[selected["name"]]
+    def download(_repository: str, _run_id: int, selected: JsonObject, destination: Path) -> None:
+        source_path = sources[json_string(selected["name"])]
         destination.mkdir(parents=True, exist_ok=True)
-        if selected["name"].startswith("candidate-image-"):
+        if json_string(selected["name"]).startswith("candidate-image-"):
             shutil.copy(source_path / "candidate-image.json", destination / "candidate-image.json")
         else:
             shutil.copytree(source_path, destination, dirs_exist_ok=True)
@@ -298,7 +296,7 @@ def test_collect_selects_passed_second_attempt_and_retains_first_failure(
 
 def run_record(
     *, workflow: str = "release-candidate.yml", event: str = "workflow_dispatch"
-) -> dict[str, Any]:
+) -> JsonObject:
     return {
         "id": 42,
         "head_sha": COMMIT,
@@ -312,7 +310,7 @@ def run_record(
 
 def artifact(
     *, expired: bool = False, name: str | None = None, artifact_id: int = 77
-) -> dict[str, Any]:
+) -> JsonObject:
     return {
         "id": artifact_id,
         "name": name or "release-candidate-42-1",
@@ -355,7 +353,7 @@ def test_promotion_finds_retained_candidate_across_artifact_pages(
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     calls: list[list[str]] = []
 
-    def github(command: list[str], **kwargs: Any) -> str:
+    def github(command: list[str], **kwargs: object) -> str:
         calls.append(command)
         if command[2] == "repos/owner/repository/actions/artifacts?per_page=100":
             assert command[-2:] == ["--paginate", "--slurp"]
@@ -397,7 +395,7 @@ def test_retained_artifact_cannot_make_an_unrelated_or_failed_run_eligible(
     field: str,
     value: str,
 ) -> None:
-    def github(repository: str, path: str, **kwargs: Any) -> Any:
+    def github(repository: str, path: str, **kwargs: object) -> object:
         if path.startswith("actions/artifacts?"):
             return [{"artifacts": [artifact()]}]
         return {**run_record(), field: value}
@@ -411,7 +409,7 @@ def test_prepare_reuses_completed_source_ci_without_running_tests(
     monkeypatch: pytest.MonkeyPatch,
     event: str,
 ) -> None:
-    def github(repository: str, path: str, **kwargs: Any) -> Any:
+    def github(repository: str, path: str, **kwargs: object) -> object:
         if path.startswith("actions/artifacts?"):
             return [{"artifacts": [artifact(expired=True)]}]
         return {"workflow_runs": [run_record(workflow="ci.yml", event=event)]}
@@ -462,7 +460,7 @@ def test_candidate_reuse_verifies_downloaded_evidence_before_skipping_work(
     monkeypatch.setattr(candidate, "validated_run", lambda *args: 42)
     monkeypatch.setattr(candidate, "source_run", lambda *args: pytest.fail("source CI repeated"))
 
-    def download(command: list[str], **kwargs: Any) -> None:
+    def download(command: list[str], **kwargs: object) -> None:
         assert command[:6] == ["gh", "run", "download", "42", "--repo", "owner/repository"]
         directory = Path(command[-1])
         evidence(directory, monkeypatch)
@@ -489,7 +487,7 @@ def test_candidate_reuse_verifies_downloaded_evidence_before_skipping_work(
 
 
 @pytest.mark.parametrize("run_id", [None, 0, -1, True])
-def test_candidate_records_a_real_source_validation_run(run_id: Any) -> None:
+def test_candidate_records_a_real_source_validation_run(run_id: object) -> None:
     document = {
         "version": "v0.1.0",
         "source_commit": COMMIT,
@@ -595,7 +593,7 @@ def test_runtime_identity_rejects_a_different_service_image(
     )
     monkeypatch.setattr(stack, "capture", lambda step, *args: args[-1])
 
-    def inspected(command: list[str], **kwargs: Any) -> str:
+    def inspected(command: list[str], **kwargs: object) -> str:
         return "sha256:" + "d" * 64 if command[-1] == service else IMAGE_ID
 
     monkeypatch.setattr(isolation, "required_output", inspected)
@@ -674,7 +672,7 @@ def test_candidate_identity_rejects_missing_or_wrong_enabled_service(
         selected = arguments[-1]
         return "" if failure == "missing" and selected == service else selected
 
-    def inspected(command: list[str], **kwargs: Any) -> str:
+    def inspected(command: list[str], **kwargs: object) -> str:
         return (
             "sha256:" + "d" * 64 if failure == "mismatch" and command[-1] == service else IMAGE_ID
         )

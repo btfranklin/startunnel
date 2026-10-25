@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from django.test import Client
+from tests.factories import CredentialFactory
 
 from core.cursors import encode_cursor
 from tunnels.cycles import create_tunnel
 from tunnels.messages import post_reply
 from tunnels.search import SearchHit, SearchPage
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -21,7 +26,9 @@ def isolate_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
 
 
-def _post(client: Client, path: str, body: dict[str, Any], *, key: str) -> Any:
+def _post(
+    client: Client, path: str, body: Mapping[str, object], *, key: str
+) -> _MonkeyPatchedWSGIResponse:
     return client.post(
         path,
         data=json.dumps(body),
@@ -32,7 +39,7 @@ def _post(client: Client, path: str, body: dict[str, Any], *, key: str) -> Any:
 
 def test_search_returns_safe_metadata_and_binds_filters_to_page_cursor(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credential, key = credential_factory(name="Search API agent")
@@ -49,7 +56,7 @@ def test_search_returns_safe_metadata_and_binds_filters_to_page_cursor(
         content={"type": "text", "text": "Database recovery reply."},
     ).message
 
-    def fake_search(**arguments: Any) -> SearchPage:
+    def fake_search(**arguments: object) -> SearchPage:
         if arguments["after_message_id"] is None:
             return SearchPage(
                 tunnel=created.tunnel,
@@ -116,7 +123,7 @@ def test_search_returns_safe_metadata_and_binds_filters_to_page_cursor(
 
 def test_participant_route_pages_one_fixed_snapshot(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, key = credential_factory(name="Participant coordinator")
     worker, _ = credential_factory(name="Participant worker")
@@ -177,7 +184,7 @@ def test_participant_route_pages_one_fixed_snapshot(
 @pytest.mark.django_db(transaction=True)
 def test_participant_route_reports_explicit_checkpoint_state(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, coordinator_key = credential_factory(name="Acknowledgement coordinator")
     reader, reader_key = credential_factory(name="Acknowledgement reader")
@@ -195,7 +202,7 @@ def test_participant_route_reports_explicit_checkpoint_state(
         content={"type": "text", "text": "I will inspect the result."},
     )
 
-    def list_page() -> dict[str, Any]:
+    def list_page() -> dict[str, object]:
         response = _post(
             client,
             "/api/v1/participants",
@@ -205,7 +212,7 @@ def test_participant_route_reports_explicit_checkpoint_state(
         assert response.status_code == 200, response.content
         items = {item["agent_id"]: item for item in response.json()["participants"]}
         assert str(passive.id) not in items
-        return cast(dict[str, Any], items[str(reader.id)])
+        return cast(dict[str, object], items[str(reader.id)])
 
     before = list_page()
     assert before["acknowledged_event_position"] is None

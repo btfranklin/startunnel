@@ -12,7 +12,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import timedelta
-from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
@@ -21,15 +20,19 @@ import pytest
 from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.db import close_old_connections, connection, transaction
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.test import Client
 from django.utils import timezone
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import create_credential
 from core.activity_listener import ActivityListener
+from core.database_options import postgres_connection_options
 from core.errors import QuotaExceeded, RateLimited
 from core.limits import Limits
 from core.maintenance import ADVISORY_LOCK_ID, _close_expired_cycles, _delete_batch
@@ -41,18 +44,6 @@ from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.models import Cycle, Tunnel
 
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
-
-
-def _connection_kwargs() -> dict[str, Any]:
-    database = connection.settings_dict
-    return {
-        "dbname": database["NAME"],
-        "user": database.get("USER") or None,
-        "password": database.get("PASSWORD") or None,
-        "host": database.get("HOST") or None,
-        "port": database.get("PORT") or None,
-        "connect_timeout": 5,
-    }
 
 
 def _consume_in_thread(*, key: str, barrier: threading.Barrier) -> str:
@@ -127,8 +118,8 @@ def _create_credential_in_thread(*, actor_id: UUID, barrier: threading.Barrier) 
 
 
 def test_instance_credential_quota_cannot_be_exceeded_concurrently(
-    user_factory: Any,
-    settings: Any,
+    user_factory: UserFactory,
+    settings: Settings,
 ) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 1
     actors = [user_factory(username=f"quota-user-{index}") for index in range(4)]
@@ -172,7 +163,7 @@ def _create_tunnel_in_thread(
 
 
 def test_instance_tunnel_quota_cannot_be_exceeded_concurrently(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credentials = [credential_factory(name=f"Quota agent {index}")[0] for index in range(4)]
@@ -197,7 +188,7 @@ def test_instance_tunnel_quota_cannot_be_exceeded_concurrently(
 
 
 def test_one_credential_cannot_exceed_its_tunnel_creation_cap_concurrently(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credential, _ = credential_factory()
@@ -222,7 +213,7 @@ def test_one_credential_cannot_exceed_its_tunnel_creation_cap_concurrently(
 
 
 def test_notifications_follow_commit_and_rollback() -> None:
-    with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
+    with psycopg.connect(**postgres_connection_options(), autocommit=True) as listener:
         listener.execute(f"LISTEN {ACTIVITY_CHANNEL}")
         with transaction.atomic():
             notify(ACTIVITY_CHANNEL, "committed")
@@ -238,10 +229,10 @@ def test_notifications_follow_commit_and_rollback() -> None:
 
 @pytest.mark.parametrize("with_beacon", [False, True])
 def test_bulk_lifecycle_events_wake_activity_listeners(
-    credential_factory: Any, with_beacon: bool
+    credential_factory: CredentialFactory, with_beacon: bool
 ) -> None:
     credential, _ = credential_factory(name="Lifecycle notifier")
-    with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
+    with psycopg.connect(**postgres_connection_options(), autocommit=True) as listener:
         listener.execute(f"LISTEN {ACTIVITY_CHANNEL}")
         created = create_tunnel(
             credential=credential,
@@ -286,7 +277,7 @@ async def test_multiple_activity_listeners_receive_one_committed_event() -> None
         first_waiter.clear()
         second_waiter.clear()
         database = await psycopg.AsyncConnection.connect(
-            **_connection_kwargs(),
+            **postgres_connection_options(),
             autocommit=True,
         )
         async with database:
@@ -303,9 +294,11 @@ async def test_multiple_activity_listeners_receive_one_committed_event() -> None
         await second.stop()
 
 
-def test_request_deadline_notification_is_transactional(credential_factory: Any) -> None:
+def test_request_deadline_notification_is_transactional(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory(name="Deadline notifier")
-    with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
+    with psycopg.connect(**postgres_connection_options(), autocommit=True) as listener:
         listener.execute(f"LISTEN {MAINTENANCE_CHANNEL}")
         with transaction.atomic():
             create_tunnel(
@@ -327,9 +320,11 @@ def test_request_deadline_notification_is_transactional(credential_factory: Any)
         assert list(listener.notifies(timeout=0.2, stop_after=1)) == []
 
 
-def test_maintenance_lifecycle_change_does_not_notify_itself(credential_factory: Any) -> None:
+def test_maintenance_lifecycle_change_does_not_notify_itself(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory(name="Maintenance notifier")
-    with psycopg.connect(**_connection_kwargs(), autocommit=True) as listener:
+    with psycopg.connect(**postgres_connection_options(), autocommit=True) as listener:
         listener.execute(f"LISTEN {MAINTENANCE_CHANNEL}")
         created = create_tunnel(
             credential=credential,
@@ -361,10 +356,10 @@ django.setup()
 from django.core.management import call_command
 from core.management.commands import maintenance_loop
 maintenance_loop.RECONCILIATION_SECONDS = 0.2
-original_kwargs = maintenance_loop._connection_kwargs
+original_kwargs = maintenance_loop.postgres_connection_options
 def tagged_kwargs():
     return {**original_kwargs(), "application_name": sys.argv[1]}
-maintenance_loop._connection_kwargs = tagged_kwargs
+maintenance_loop.postgres_connection_options = tagged_kwargs
 call_command("maintenance_loop")
 """
     processes: list[subprocess.Popen[bytes]] = []
@@ -444,7 +439,7 @@ def test_batch_delete_preserves_a_concurrent_expiry_refresh(
 ) -> None:
     now = timezone.now()
     if kind == "session":
-        row: Any = Session.objects.create(
+        row: Session | RateLimitBucket = Session.objects.create(
             session_key="concurrent-refresh", session_data="", expire_date=now
         )
         field = "expire_date"
@@ -460,7 +455,7 @@ def test_batch_delete_preserves_a_concurrent_expiry_refresh(
         finally:
             connection.close()
 
-    def refresh_before_delete(queryset: QuerySet[Any]) -> tuple[int, dict[str, int]]:
+    def refresh_before_delete(queryset: QuerySet[Model]) -> tuple[int, dict[str, int]]:
         with ThreadPoolExecutor(max_workers=1) as pool:
             pool.submit(refresh).result(timeout=10)
         return original_delete(queryset)
@@ -471,11 +466,15 @@ def test_batch_delete_preserves_a_concurrent_expiry_refresh(
     assert type(row).objects.filter(pk=row.pk).exists()
 
 
-def test_normal_api_request_reuses_its_authentication_connection(credential_factory: Any) -> None:
+def test_normal_api_request_reuses_its_authentication_connection(
+    credential_factory: CredentialFactory,
+) -> None:
     _, key = credential_factory()
     opened: list[int] = []
 
-    def record_connection(sender: object, connection: Any, **kwargs: Any) -> None:
+    def record_connection(
+        sender: object, connection: BaseDatabaseWrapper, **kwargs: object
+    ) -> None:
         opened.append(connection.connection.info.backend_pid)
 
     connection.close()

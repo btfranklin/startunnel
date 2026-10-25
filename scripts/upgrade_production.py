@@ -8,10 +8,25 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_array,
+        json_object,
+        json_string,
+    )
+else:
+    from json_data import (
+        json_array,
+        json_object,
+        json_string,
+    )
+
+
+if TYPE_CHECKING or __package__:
     from .release_record import PLATFORM, VERSION, specification
     from .start_production import (
         ROOT,
@@ -23,12 +38,12 @@ if __package__:
         validate_rendered_images,
     )
 else:
-    from release_record import (  # type: ignore[import-not-found,no-redef]
+    from release_record import (
         PLATFORM,
         VERSION,
         specification,
     )
-    from start_production import (  # type: ignore[import-not-found,no-redef]
+    from start_production import (
         ROOT,
         compose_command,
         production_secret_directory,
@@ -44,7 +59,7 @@ def run(command: list[str], *, capture: bool = False) -> str:
     return result.stdout.strip() if capture else ""
 
 
-def validate_record(record: dict[str, Any]) -> None:
+def validate_record(record: Mapping[str, object]) -> None:
     platform = record.get("platform")
     if (
         record.get("schema") != 1
@@ -52,22 +67,22 @@ def validate_record(record: dict[str, Any]) -> None:
         or not PLATFORM.fullmatch(platform)
     ):
         raise ValueError("Unsupported release record schema or platform.")
-    if not VERSION.fullmatch(record.get("version", "")):
+    if not VERSION.fullmatch(json_string(record.get("version", ""))):
         raise ValueError("Invalid release version.")
-    if not re.fullmatch(r"[0-9a-f]{40}", record.get("source_commit", "")):
+    if not re.fullmatch(r"[0-9a-f]{40}", json_string(record.get("source_commit", ""))):
         raise ValueError("Invalid source commit.")
-    expected = specification(record["version"])
+    expected = specification(json_string(record["version"]))
     if any(record.get(key) != value for key, value in expected.items()):
         raise ValueError("Release record differs from the checked-out compatibility specification.")
-    validate_image_reference(record.get("image", ""))
+    validate_image_reference(json_string(record.get("image", "")))
 
 
-def check_compatibility(record: dict[str, Any], old_commit: str, old_version: str) -> None:
+def check_compatibility(record: Mapping[str, object], old_commit: str, old_version: str) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", old_commit):
         raise ValueError("Installed image needs a full source revision label or build record.")
-    run(["git", "merge-base", "--is-ancestor", old_commit, record["source_commit"]])
+    run(["git", "merge-base", "--is-ancestor", old_commit, json_string(record["source_commit"])])
     if old_version:
-        if old_version not in record["supported_from"]:
+        if old_version not in json_array(record["supported_from"]):
             raise ValueError("Installed version is not listed as a supported upgrade source.")
     else:
         changed = run(
@@ -77,7 +92,7 @@ def check_compatibility(record: dict[str, Any], old_commit: str, old_version: st
                 "--name-only",
                 "--diff-filter=DMRT",
                 old_commit,
-                record["source_commit"],
+                json_string(record["source_commit"]),
                 "--",
                 ":(glob)src/**/migrations/*.py",
             ],
@@ -99,9 +114,9 @@ def replace_image(text: str, image: str) -> str:
 
 
 def rendered_web_image(command: list[str]) -> str:
-    model = json.loads(run([*command, "config", "--format", "json"], capture=True))
+    model = json_object(json.loads(run([*command, "config", "--format", "json"], capture=True)))
     try:
-        image = model["services"]["web"]["image"]
+        image = json_object(json_object(model["services"])["web"])["image"]
     except (KeyError, TypeError) as error:
         raise ValueError("The selected Compose model must define a web image.") from error
     if not isinstance(image, str):
@@ -147,9 +162,9 @@ def main(argv: list[str] | None = None) -> int:
     writers_stopped = False
     temporary: Path | None = None
     try:
-        record = json.loads(args.record.read_text())
+        record = json_object(json.loads(args.record.read_text()))
         validate_record(record)
-        if run(["git", "rev-parse", "HEAD"], capture=True) != record["source_commit"]:
+        if run(["git", "rev-parse", "HEAD"], capture=True) != json_string(record["source_commit"]):
             raise ValueError(
                 "Check out the release's exact source commit before running this helper."
             )
@@ -186,26 +201,34 @@ def main(argv: list[str] | None = None) -> int:
         old_commit = labels.get("org.opencontainers.image.revision", "")
         old_version = labels.get("org.opencontainers.image.version", "")
         check_compatibility(record, old_commit, old_version)
-        new_text = replace_image(text, record["image"])
-        os.environ["STARTUNNEL_APP_IMAGE"] = record["image"]
+        new_text = replace_image(text, json_string(record["image"]))
+        os.environ["STARTUNNEL_APP_IMAGE"] = json_string(record["image"])
         command = compose_command(edge=False, env_file=env_file)
         run([*command, "config", "--quiet"])
         validate_rendered_images(rendered_images(command))
-        if rendered_web_image(command) != record["image"]:
+        if rendered_web_image(command) != json_string(record["image"]):
             raise ValueError("The selected Compose web image differs from the candidate image.")
-        run(["docker", "pull", "--platform", record["platform"], record["image"]])
+        run(
+            [
+                "docker",
+                "pull",
+                "--platform",
+                json_string(record["platform"]),
+                json_string(record["image"]),
+            ]
+        )
         revision = run(
             [
                 "docker",
                 "image",
                 "inspect",
-                record["image"],
+                json_string(record["image"]),
                 "--format",
                 '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
             ],
             capture=True,
         )
-        if revision != record["source_commit"]:
+        if revision != json_string(record["source_commit"]):
             raise ValueError("New image revision label does not match the release record.")
         run(
             [

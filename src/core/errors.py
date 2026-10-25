@@ -115,6 +115,7 @@ class EntryBudgetTooSmall(DomainError):
 
 
 class RateLimited(DomainError):
+    retry_after: int | None = None
     code = "rate_limited"
     status = 429
     message = "The request rate is too high. Wait and try again."

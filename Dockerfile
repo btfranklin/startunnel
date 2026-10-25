@@ -126,7 +126,7 @@ COPY manage.py ./manage.py
 COPY src ./src
 COPY tests/__init__.py ./tests/__init__.py
 COPY tests/load ./tests/load
-COPY scripts/__init__.py scripts/compose_isolation.py scripts/start_production.py scripts/proof_timing.py scripts/load_diagnostic.py scripts/proof_build.py ./scripts/
+COPY scripts/__init__.py scripts/compose_isolation.py scripts/start_production.py scripts/proof_timing.py scripts/load_diagnostic.py scripts/proof_build.py scripts/json_data.py ./scripts/
 
 ENV PYTHONPATH=/app/src
 

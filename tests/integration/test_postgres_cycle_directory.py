@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from tests.factories import CredentialFactory
 
 from api.router import _cycle_directory_item
 from tunnels.cycles import close_cycle, create_tunnel, list_cycles, start_cycle
@@ -15,7 +15,9 @@ from tunnels.cycles import close_cycle, create_tunnel, list_cycles, start_cycle
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
-def test_cycle_directory_bounds_root_content_before_model_loading(credential_factory: Any) -> None:
+def test_cycle_directory_bounds_root_content_before_model_loading(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     text = "x" * 65536
     created = create_tunnel(

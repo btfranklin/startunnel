@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -14,7 +14,9 @@ from django.http import HttpRequest
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
+from accounts.models import User
 from agents.models import AgentCredential
 from core.errors import InvalidRequest, QuotaExceeded, TunnelUnavailable
 from site_app.views import _authenticated_user
@@ -37,12 +39,12 @@ def test_public_home_docs_and_download(client: Client) -> None:
 
 def test_authenticated_user_requires_custom_user() -> None:
     request = HttpRequest()
-    request.user = cast(Any, SimpleNamespace())
+    request.user = cast(User, SimpleNamespace())  # Deliberately supply a non-user object.
     with pytest.raises(PermissionDenied):
         _authenticated_user(request)
 
 
-def test_admin_pages_require_login_and_render(client: Client, user_factory: Any) -> None:
+def test_admin_pages_require_login_and_render(client: Client, user_factory: UserFactory) -> None:
     for path in ["/app/", "/app/learn/", "/app/agents/", "/app/tunnels/", "/app/account/"]:
         assert client.get(path).status_code == 302
     user = user_factory()
@@ -52,7 +54,7 @@ def test_admin_pages_require_login_and_render(client: Client, user_factory: Any)
 
 
 def test_cycle_history_escapes_message_session(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory(user=actor, name="Shared agent")
@@ -70,7 +72,7 @@ def test_cycle_history_escapes_message_session(
 
 
 def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -119,7 +121,7 @@ def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
 
 
 def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -131,7 +133,7 @@ def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
         )
         for index in range(2)
     ]
-    expected_sessions: dict[Any, list[str]] = {}
+    expected_sessions: dict[object, list[str]] = {}
     for tunnel_index, created in enumerate(tunnels):
         current_cycle = created.cycle
         sessions = []
@@ -164,7 +166,7 @@ def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
 
 
 def test_create_agent_shows_key_once_and_revoke_is_instance_wide(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     client.force_login(actor)
@@ -188,7 +190,7 @@ def test_create_agent_shows_key_once_and_revoke_is_instance_wide(
 
 
 def test_agent_page_renders_form_and_domain_errors(
-    client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client.force_login(user_factory())
     assert client.post("/app/agents/create/", {"name": ""}).status_code == 400
@@ -205,7 +207,10 @@ def test_agent_page_renders_form_and_domain_errors(
 
 @pytest.mark.parametrize("credential_id", ["", "not-a-uuid", "é"])
 def test_agent_revoke_rejects_malformed_ids(
-    client: Client, user_factory: Any, credential_factory: Any, credential_id: str
+    client: Client,
+    user_factory: UserFactory,
+    credential_factory: CredentialFactory,
+    credential_id: str,
 ) -> None:
     actor = user_factory()
     credential, _ = credential_factory(user=actor)
@@ -220,7 +225,7 @@ def test_agent_revoke_rejects_malformed_ids(
 
 
 def test_expired_and_revoked_credentials_are_not_active(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     client.force_login(user_factory())
     expired, _ = credential_factory(name="Expired agent")
@@ -241,14 +246,14 @@ def test_expired_and_revoked_credentials_are_not_active(
 def test_tunnel_actions_call_instance_operator_services(
     action: str,
     client: Client,
-    user_factory: Any,
+    user_factory: UserFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actor = user_factory()
     client.force_login(actor)
-    called: list[dict[str, Any]] = []
+    called: list[dict[str, object]] = []
 
-    def capture(**kwargs: Any) -> None:
+    def capture(**kwargs: object) -> None:
         called.append(kwargs)
 
     monkeypatch.setattr("site_app.views.execute_admin_operation", capture)
@@ -270,7 +275,7 @@ def test_tunnel_actions_call_instance_operator_services(
 
 
 def test_tunnel_rotate_returns_to_tunnel_board(
-    client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client.force_login(user_factory())
     monkeypatch.setattr(
@@ -286,7 +291,7 @@ def test_tunnel_rotate_returns_to_tunnel_board(
 
 
 def test_tunnel_page_maps_bad_input_and_domain_errors(
-    client: Client, user_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, user_factory: UserFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client.force_login(user_factory())
     assert client.post("/app/tunnels/", {"action": "bad", "tunnel_id": uuid4()}).status_code == 302

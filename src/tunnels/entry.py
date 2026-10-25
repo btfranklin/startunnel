@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TypedDict
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
@@ -16,7 +16,7 @@ from core.cursors import encode_cursor
 from core.errors import EntryBudgetTooSmall, InvalidCredential, InvalidRequest
 
 from .access import credential_is_active, resolve_tunnel
-from .message_data import cycle_payload, message_payload
+from .message_data import CycleData, MessageData, cycle_payload, message_payload
 from .models import Cycle, Message, Tunnel
 
 
@@ -34,7 +34,18 @@ class TunnelEntry:
     activity_cursor: str
 
 
-def _entry_message_payload(message: Message) -> dict[str, Any]:
+class EntryData(TypedDict):
+    status: str
+    cycle: CycleData | None
+    root: MessageData | None
+    recent_messages: list[MessageData]
+    snapshot_sequence: int | None
+    history_omitted: bool
+    history_cursor: str | None
+    activity_cursor: str
+
+
+def _entry_message_payload(message: Message) -> MessageData:
     payload = message_payload(message)
     # Keep datetime precision for Pydantic. Its output then matches the shared
     # JSON encoder's millisecond format, including timestamps with zero millis.
@@ -42,7 +53,7 @@ def _entry_message_payload(message: Message) -> dict[str, Any]:
     return payload
 
 
-def _entry_payload(entry: TunnelEntry, *, include_recent_messages: bool) -> dict[str, Any]:
+def _entry_payload(entry: TunnelEntry, *, include_recent_messages: bool) -> EntryData:
     return {
         "status": entry.tunnel.state,
         "cycle": cycle_payload(entry.cycle) if entry.cycle is not None else None,
@@ -59,7 +70,7 @@ def _entry_payload(entry: TunnelEntry, *, include_recent_messages: bool) -> dict
     }
 
 
-def entry_payload(entry: TunnelEntry) -> dict[str, Any]:
+def entry_payload(entry: TunnelEntry) -> EntryData:
     """Return the public entry payload used for exact UTF-8 byte accounting."""
 
     return _entry_payload(entry, include_recent_messages=True)
@@ -184,7 +195,8 @@ def enter_tunnel(
         activity_cursor=activity_cursor,
     )
     fixed_payload = _entry_payload(result, include_recent_messages=False)
-    fixed_payload.update(history_cursor=None, history_omitted=False)
+    fixed_payload["history_cursor"] = None
+    fixed_payload["history_omitted"] = False
     fixed_size = len(json.dumps(fixed_payload, cls=DjangoJSONEncoder).encode("utf-8"))
     chosen: list[Message] = []
     message_bytes = 0

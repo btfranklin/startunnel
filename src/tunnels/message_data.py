@@ -2,23 +2,79 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
+from datetime import datetime
+from typing import Literal, TypedDict
+from uuid import UUID
 
 from django.core.serializers.json import DjangoJSONEncoder
 
 from core.errors import InvalidRequest
+from core.json_types import JsonValue, load_json
 
 from .models import Cycle, Message
 
 
-def message_content(message: Message) -> dict[str, Any]:
+class TextContentData(TypedDict):
+    type: Literal["text"]
+    text: str
+
+
+class JsonContentData(TypedDict):
+    type: Literal["json"]
+    value: JsonValue
+
+
+type MessageContentData = TextContentData | JsonContentData
+
+
+class SenderData(TypedDict):
+    id: str
+    name: str
+    session: str | None
+
+
+class MentionData(TypedDict):
+    id: str
+    name: str
+
+
+class MessageData(TypedDict):
+    id: str
+    cycle_id: str
+    cycle_number: int
+    parent_id: str | None
+    sender: SenderData
+    content: MessageContentData
+    mentions: list[MentionData]
+    correlation_id: str | None
+    sequence: int
+    depth: int
+    created_at: str | datetime
+
+
+class CycleData(TypedDict):
+    id: UUID
+    number: int
+    label: str
+    state: str
+    root_id: UUID
+    created_at: datetime
+    expires_at: datetime
+    message_count: int
+    content_bytes: int
+
+
+def message_content(message: Message) -> MessageContentData:
     if message.payload_type == Message.PayloadType.TEXT:
+        assert message.text_payload is not None
         return {"type": "text", "text": message.text_payload}
-    return {"type": "json", "value": json.loads(message.json_payload or "null")}
+    return {"type": "json", "value": load_json(message.json_payload or "null")}
 
 
-def message_payload(message: Message) -> dict[str, Any]:
+def message_payload(message: Message) -> MessageData:
+    created_at: object = DjangoJSONEncoder().default(message.created_at)
+    # Django encodes datetimes as text; check its generic encoder return at this boundary.
+    assert isinstance(created_at, str)
     return {
         "id": str(message.id),
         "cycle_id": str(message.cycle_id),
@@ -40,11 +96,11 @@ def message_payload(message: Message) -> dict[str, Any]:
         "correlation_id": message.correlation_id or None,
         "sequence": message.sequence,
         "depth": message.depth,
-        "created_at": DjangoJSONEncoder().default(message.created_at),
+        "created_at": created_at,
     }
 
 
-def cycle_payload(cycle: Cycle) -> dict[str, Any]:
+def cycle_payload(cycle: Cycle) -> CycleData:
     if cycle.root_message_id is None:
         raise InvalidRequest("The cycle root is not available.")
     return {

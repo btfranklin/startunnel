@@ -9,10 +9,11 @@ authors = [
     { name = "B.T. Franklin" },
 ]
 dynamic = ["version"]
-dependencies = ["Django>=6.0.8", "django-ninja>=1.6.2", "django-htmx>=1.29.0", "psycopg[binary,pool]>=3.3.4", "uvicorn[standard]>=0.52.1", "argon2-cffi>=25.1.0", "prometheus-client>=0.26.0", "markdown-it-py>=4.2.0", "mdit-py-plugins>=0.6.1", "Pygments>=2.20.0", "dj-database-url>=3.1.2", "httpx>=0.28.1", "python-dotenv>=1.2.2", "cryptography>=50.0.1", "sqlparse>=0.6.0"]
+dependencies = ["Django>=6.0.8", "django-ninja>=1.6.2", "django-htmx>=1.29.0", "psycopg[binary,pool]>=3.3.4", "uvicorn[standard]>=0.52.1", "argon2-cffi>=25.1.0", "prometheus-client>=0.26.0", "markdown-it-py>=4.2.0", "mdit-py-plugins>=0.6.1", "Pygments>=2.20.0", "dj-database-url>=3.1.2", "httpx>=0.28.1", "python-dotenv>=1.2.2", "cryptography>=50.0.1", "sqlparse>=0.6.0", "pydantic>=2.14.1"]
 
 [dependency-groups]
 dev = [
+    { include-group = "live-agents" },
     "pytest>=9.1.1",
     "pytest-django>=4.13.0",
     "pytest-cov>=7.1.0",
@@ -31,6 +32,8 @@ dev = [
     "pip-audit>=2.10.1",
     "linkbust>=0.1.0",
     "PyYAML>=6.0.3",
+    "types-jsonschema>=4.26.0.20261006",
+    "types-Pygments>=2.21.0.20260819",
 ]
 live-agents = [
     "openai-agents>=0.20.0",
@@ -87,16 +90,23 @@ skip_covered = true
 [tool.mypy]
 python_version = "3.14"
 mypy_path = "src"
-plugins = ["mypy_django_plugin.main"]
+plugins = ["mypy_django_plugin.main", "pydantic.mypy"]
 strict = true
-exclude = ["src/.*/migrations/", "tests/fixtures/"]
+disallow_any_explicit = true
+disallow_any_unimported = true
+disallow_any_decorated = true
+enable_error_code = ["ignore-without-code"]
+
+[tool.pydantic-mypy]
+init_typed = true
+init_forbid_extra = true
 
 [tool.django-stubs]
 django_settings_module = "startunnel.settings.test"
 
 [[tool.mypy.overrides]]
-module = ["pygments.*"]
-ignore_missing_imports = true
+module = ["tests.load.profile", "tests.load.run_profile"]
+disallow_any_expr = true
 
 [tool.djlint]
 profile = "django"
@@ -117,6 +127,7 @@ test = "pytest"
 test-postgres = { composite = ["pytest tests/integration -m postgres --cov=src --cov-branch --cov-report=json:postgres-coverage.json --cov-fail-under=0", "python scripts/check_critical_coverage.py postgres-coverage.json --postgres", "pytest tests/unit tests/api --no-cov"] }
 check = "python scripts/check.py"
 mypy = { cmd = "mypy", env = { PYTHONPATH = "src" } }
+types = "python -m scripts.check_types"
 openapi = { composite = ["python manage.py export_openapi --output generated/openapi.json", "python scripts/generate_client_contract.py"] }
 inspect = "python manage.py inspect_runtime"
 load-profile = "python scripts/run_full_load_profile.py"

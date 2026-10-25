@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import pytest
 from django.test import Client
+from tests.api_data import CreateResponseData, create_response
+from tests.factories import CredentialFactory
 
 from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.cycles import create_tunnel
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -24,11 +30,11 @@ def isolate_api(monkeypatch: pytest.MonkeyPatch) -> None:
 def _post(
     client: Client,
     path: str,
-    body: dict[str, Any],
+    body: Mapping[str, object],
     *,
     key: str,
     idempotency_key: str | None = None,
-) -> Any:
+) -> _MonkeyPatchedWSGIResponse:
     headers = {"Authorization": f"Bearer {key}"}
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
@@ -45,7 +51,7 @@ def _create(
     key: str,
     *,
     idempotency_key: str = "api-lifecycle-create",
-) -> dict[str, Any]:
+) -> CreateResponseData:
     response = _post(
         client,
         "/api/v1/tunnels",
@@ -60,10 +66,10 @@ def _create(
         idempotency_key=idempotency_key,
     )
     assert response.status_code == 201, response.content
-    return cast(dict[str, Any], response.json())
+    return create_response(response.json())
 
 
-def _cycle_body(address: str, *, text: str) -> dict[str, Any]:
+def _cycle_body(address: str, *, text: str) -> dict[str, object]:
     return {
         "address": address,
         "expected_address_generation": 1,
@@ -86,7 +92,7 @@ def _cycle_body(address: str, *, text: str) -> dict[str, Any]:
     + [("text", "x", 0), ("json", "x", 2)],
 )
 def test_cycle_directory_preserves_content_previews_and_metadata(
-    client: Client, credential_factory: Any, kind: str, character: str, length: int
+    client: Client, credential_factory: CredentialFactory, kind: str, character: str, length: int
 ) -> None:
     creator, key = credential_factory(name="Coordinator")
     if kind == "text":
@@ -134,7 +140,9 @@ def test_cycle_directory_preserves_content_previews_and_metadata(
     assert item["delete_after"] is None
 
 
-def test_cycle_directory_preserves_json_null(client: Client, credential_factory: Any) -> None:
+def test_cycle_directory_preserves_json_null(
+    client: Client, credential_factory: CredentialFactory
+) -> None:
     creator, key = credential_factory()
     created = create_tunnel(
         credential=creator,
@@ -149,7 +157,7 @@ def test_cycle_directory_preserves_json_null(client: Client, credential_factory:
 
 
 def test_status_close_start_rollover_and_cycle_history(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, coordinator_key = credential_factory(name="Coordinator")
     _, reader_key = credential_factory(name="Reader")
@@ -247,7 +255,7 @@ def test_status_close_start_rollover_and_cycle_history(
 
 
 def test_lifecycle_writes_require_the_creator_and_current_expected_state(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, coordinator_key = credential_factory()
     _, outside_key = credential_factory()
@@ -286,9 +294,10 @@ def test_lifecycle_writes_require_the_creator_and_current_expected_state(
 
 
 def test_start_replay_keeps_its_original_response_until_address_rotation(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     coordinator, key = credential_factory()
+    assert coordinator.created_by is not None
     creation_replay_value = "api-exact-start-create"
     created = _create(client, key, idempotency_key=creation_replay_value)
     address = created["tunnel"]["address"]
@@ -348,9 +357,10 @@ def test_start_replay_keeps_its_original_response_until_address_rotation(
 
 
 def test_every_lifecycle_read_and_write_with_a_retired_address_is_unavailable(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     coordinator, coordinator_key = credential_factory()
+    assert coordinator.created_by is not None
     created = _create(client, coordinator_key)
     retired_address = created["tunnel"]["address"]
     rotate_address_as_admin(
@@ -358,7 +368,7 @@ def test_every_lifecycle_read_and_write_with_a_retired_address_is_unavailable(
         tunnel_id=UUID(created["tunnel"]["id"]),
         expected_address_generation=1,
     )
-    requests = [
+    requests: list[tuple[str, Mapping[str, object], str | None]] = [
         ("/api/v1/tunnel/status", {"address": retired_address}, None),
         ("/api/v1/cycles", {"address": retired_address}, None),
         (

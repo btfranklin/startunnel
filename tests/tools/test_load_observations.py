@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import pytest
+from prometheus_client import CollectorRegistry
 from scripts import load_observations, run_full_load_profile
-from scripts.compose_isolation import LaneError
+from scripts.compose_isolation import IsolatedComposeProject, LaneError
+from scripts.docker_stats import DockerStats
+from scripts.json_data import JsonObject
 from scripts.load_observations import container_counters, numeric_fields
 from scripts.proof_timing import PhaseTimings
 from tests.load import run_profile
 
 
 def test_counter_allowlists_drop_secrets_and_unknowns() -> None:
-    raw = {
+    raw: JsonObject = {
         "cpu_stats": {
             "cpu_usage": {"total_usage": 12, "query": "secret-sql"},
             "throttling_data": {"periods": 3, "throttled_periods": 1, "secret": "key"},
@@ -212,7 +216,7 @@ def test_collector_writes_each_sample_and_retains_safe_error(
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
-        def get(self, path: str) -> dict[str, Any]:
+        def get(self, path: str) -> dict[str, object]:
             return {"NCPU": 8, "MemTotal": 8192, "secret": "key"}
 
     class Stack:
@@ -289,7 +293,7 @@ def test_collector_requires_all_four_pool_samplers_and_records_failures(
     observations = load_observations.LoadObservations(Stack(), tmp_path / "samples.jsonl")  # type: ignore[arg-type]
     observations.identifiers = {name: "a" * 12 for name in load_observations.SERVICES}
     observations.pool_reader = cast(
-        Any,
+        load_observations.PoolReader,
         SimpleNamespace(
             snapshot=lambda: {
                 "pool": {"sampler_ok": ok, "sampler_missing": missing, "sampler_error": error},
@@ -476,7 +480,7 @@ def test_parallel_sample_finishes_under_one_second_and_caches_scoped_inventory(
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "sample.jsonl")  # type: ignore[arg-type]
     observations.pool_reader = cast(
-        Any,
+        load_observations.PoolReader,
         SimpleNamespace(
             snapshot=lambda: {
                 "pool": {"sampler_ok": 4, "sampler_missing": 0, "sampler_error": 0},
@@ -630,12 +634,16 @@ def test_persistent_pool_reader_stops_remote_process_and_rejects_stale_cache(
             os.kill(int(command[2]), signal.SIGTERM)
             return ""
 
-    reader = load_observations.PoolReader(cast(Any, Stack()), cast(Any, Stats()), "a" * 64)
+    reader = load_observations.PoolReader(
+        cast(IsolatedComposeProject, Stack()), cast(DockerStats, Stats()), "a" * 64
+    )
     reader.start()
     try:
         assert reader.pid is not None
         first = reader.snapshot()
+        assert first["cpu_seconds"] is not None
         assert first["cpu_seconds"] >= 0
+        assert first["peak_memory_bytes"] is not None
         assert first["peak_memory_bytes"] > 0
         assert first["pool"]["sampler_ok"] is None
         with reader.lock:
@@ -656,8 +664,12 @@ def test_persistent_pool_reader_stops_remote_process_and_rejects_stale_cache(
 def test_persistent_reader_rejects_invalid_process_header_without_kill(pid: object) -> None:
     import io
 
-    reader = load_observations.PoolReader(cast(Any, None), cast(Any, None), "a" * 64)
-    reader.process = cast(Any, SimpleNamespace(stdout=io.StringIO(json.dumps({"pid": pid}) + "\n")))
+    reader = load_observations.PoolReader(
+        cast(IsolatedComposeProject, None), cast(DockerStats, None), "a" * 64
+    )
+    reader.process = cast(
+        subprocess.Popen[str], SimpleNamespace(stdout=io.StringIO(json.dumps({"pid": pid}) + "\n"))
+    )
     reader._read()
     assert reader.failed
     assert reader.pid is None
@@ -700,12 +712,15 @@ def test_collector_startup_interrupt_stops_reader_and_closes_resources(
 
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     monkeypatch.setattr(load_observations, "PoolReader", Reader)
-    observations = load_observations.LoadObservations(cast(Any, Stack()), tmp_path / "sample.jsonl")
+    observations = load_observations.LoadObservations(
+        cast(IsolatedComposeProject, Stack()), tmp_path / "sample.jsonl"
+    )
     observations.identifiers = {"web": "a" * 64}
     with pytest.raises(failure):
         observations.__enter__()
     assert closed == [True]
     assert observations.executor._shutdown
+    assert observations._output is not None
     assert observations._output.closed
     assert not observations.thread.is_alive()
 
@@ -721,7 +736,7 @@ def test_pool_reader_ignores_unrelated_metric_names_and_labels() -> None:
         SimpleNamespace(name="startunnel_database_pool_waiting", labels={}, value=2),
     ]
     registry = SimpleNamespace(collect=lambda: [SimpleNamespace(samples=samples)])
-    result = read_pool(cast(Any, registry))
+    result = read_pool(cast(CollectorRegistry, registry))
     assert result["size"] is None
     assert result["available"] is None
     assert result["waiting"] == 2

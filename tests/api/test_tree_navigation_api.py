@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 import pytest
 from django.test import Client
+from tests.api_data import CreateResponseData, ReplyResponseData, create_response, reply_response
+from tests.factories import CredentialFactory
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -23,11 +30,11 @@ def _auth(key: str) -> dict[str, str]:
 def _post(
     client: Client,
     path: str,
-    body: dict[str, Any],
+    body: Mapping[str, object],
     *,
     key: str,
     idempotency_key: str | None = None,
-) -> Any:
+) -> _MonkeyPatchedWSGIResponse:
     headers = _auth(key)
     if idempotency_key is not None:
         headers["Idempotency-Key"] = idempotency_key
@@ -44,7 +51,7 @@ def _create(
     *,
     key: str,
     operation: str,
-) -> dict[str, Any]:
+) -> CreateResponseData:
     response = _post(
         client,
         "/api/v1/tunnels",
@@ -59,7 +66,7 @@ def _create(
         idempotency_key=f"{operation}-create",
     )
     assert response.status_code == 201, response.content
-    return cast(dict[str, Any], response.json())
+    return create_response(response.json())
 
 
 def _reply(
@@ -69,7 +76,7 @@ def _reply(
     address: str,
     parent_id: str,
     operation: str,
-) -> dict[str, Any]:
+) -> ReplyResponseData:
     response = _post(
         client,
         "/api/v1/messages",
@@ -82,10 +89,10 @@ def _reply(
         idempotency_key=f"{operation}-reply",
     )
     assert response.status_code == 201, response.content
-    return cast(dict[str, Any], response.json())
+    return reply_response(response.json())
 
 
-def _safe_error(response: Any, *, status: int, code: str) -> None:
+def _safe_error(response: _MonkeyPatchedWSGIResponse, *, status: int, code: str) -> None:
     assert response.status_code == status, response.content
     body = response.json()
     assert body["error"]["code"] == code
@@ -95,7 +102,7 @@ def _safe_error(response: Any, *, status: int, code: str) -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_reply_replay_preserves_original_activity_cursor_after_later_writes(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create(client, key=key, operation="reply-replay-cursor")
@@ -130,7 +137,7 @@ def test_reply_replay_preserves_original_activity_cursor_after_later_writes(
 
 @pytest.mark.django_db(transaction=True)
 def test_navigation_routes_return_coherent_tree_activity_and_context(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, sender_key = credential_factory(name="Navigation sender")
     _, reader_key = credential_factory(name="Navigation reader")
@@ -218,7 +225,7 @@ def test_navigation_routes_return_coherent_tree_activity_and_context(
 
 
 def test_subtree_pages_keep_preorder_snapshot_during_a_later_reply(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create(client, key=key, operation="subtree-page")
@@ -277,7 +284,7 @@ def test_subtree_pages_keep_preorder_snapshot_during_a_later_reply(
 
 
 def test_leaf_pages_keep_leaf_status_at_the_first_snapshot(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create(client, key=key, operation="leaves-page")
@@ -334,7 +341,7 @@ def test_leaf_pages_keep_leaf_status_at_the_first_snapshot(
 
 @pytest.mark.django_db(transaction=True)
 def test_cursors_reject_tampering_wrong_purpose_oversize_and_wrong_tunnel(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     first = _create(client, key=key, operation="cursor-first")
@@ -399,7 +406,7 @@ def test_cursors_reject_tampering_wrong_purpose_oversize_and_wrong_tunnel(
 @pytest.mark.django_db(transaction=True)
 def test_activity_rejects_another_tunnels_cursor_before_registering_a_wait(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
     wait_seconds: int,
 ) -> None:
@@ -407,7 +414,7 @@ def test_activity_rejects_another_tunnels_cursor_before_registering_a_wait(
     first = _create(client, key=key, operation="cursor-source")
     second = _create(client, key=key, operation="cursor-target")
 
-    def reject_wait(tunnel_id: Any) -> None:
+    def reject_wait(tunnel_id: UUID) -> None:
         pytest.fail("An invalid cursor must not register an activity wait.")
 
     monkeypatch.setattr("tunnels.activity.activity_listener.register", reject_wait)
@@ -425,7 +432,7 @@ def test_activity_rejects_another_tunnels_cursor_before_registering_a_wait(
 
 
 def test_checkpoint_accepts_forward_and_exact_positions_but_rejects_regression(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create(client, key=key, operation="checkpoint")
@@ -476,7 +483,7 @@ def test_checkpoint_accepts_forward_and_exact_positions_but_rejects_regression(
 
 
 def test_context_reports_selection_reasons_and_required_branch_budget_failure(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create(client, key=key, operation="context")
@@ -553,7 +560,7 @@ def test_context_reports_selection_reasons_and_required_branch_budget_failure(
     ],
 )
 def test_context_preserves_message_data_across_read_routes(
-    client: Client, credential_factory: Any, content: dict[str, Any]
+    client: Client, credential_factory: CredentialFactory, content: dict[str, object]
 ) -> None:
     _, key = credential_factory(name="Reviewer café")
     mentioned, _ = credential_factory(name="Reader 🜣")

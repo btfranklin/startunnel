@@ -13,6 +13,12 @@ import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, NotRequired, TypedDict
+
+if TYPE_CHECKING or __package__:
+    from .json_data import JsonObject, json_object, json_string
+else:
+    from json_data import JsonObject, json_object, json_string
 
 ROOT = Path(__file__).resolve().parents[1]
 GHA_CACHE_ENV = ("ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_RESULTS_URL")
@@ -23,6 +29,42 @@ SENSITIVE_LINE = re.compile(
     re.IGNORECASE,
 )
 CONNECTION_STRING = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s]+", re.IGNORECASE)
+
+
+BakeTarget = TypedDict(
+    "BakeTarget",
+    {
+        "context": str,
+        "dockerfile": str,
+        "target": str,
+        "args": JsonObject | None,
+        "labels": JsonObject,
+        "tags": list[str],
+        "no-cache": bool,
+        "cache-from": list[str],
+        "cache-to": list[str],
+    },
+    total=False,
+)
+
+
+class BuildProvenance(TypedDict):
+    started_at: str
+    duration_seconds: float
+    services: list[str]
+    image_ids: dict[str, str]
+    build_arguments: dict[str, dict[str, str]]
+    build_metadata: dict[str, dict[str, str]]
+    platform: str
+    source_revision: str
+    base_images: dict[str, str]
+    hashes: dict[str, str]
+    tool_versions: dict[str, str]
+    cache: str
+    cache_hits: int
+    cache_error_fallback: bool
+    no_cache_requested: bool
+    provenance_file: NotRequired[str]
 
 
 class ProofBuildError(RuntimeError):
@@ -102,7 +144,7 @@ def build_services(
     environment: Mapping[str, str],
     no_cache: bool = False,
     timeout_seconds: int = 2400,
-) -> dict[str, object]:
+) -> BuildProvenance:
     """Build named Compose services and write safe build provenance."""
 
     if not services or any(not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name) for name in services):
@@ -134,11 +176,11 @@ def build_services(
         and all(docker_environment.get(key) for key in GHA_CACHE_REQUIRED_ENV)
     )
     try:
-        model = json.loads(compose_model)
-    except json.JSONDecodeError as error:
+        model = json_object(json.loads(compose_model))
+    except ValueError as error:
         raise ProofBuildError("Docker Compose returned an invalid build model.") from error
     model_services = model.get("services") if isinstance(model, dict) else None
-    targets: dict[str, object] = {}
+    targets: dict[str, BakeTarget] = {}
     build_arguments: dict[str, dict[str, str]] = {}
     image_tags: dict[str, str] = {}
     for service in services:
@@ -149,11 +191,25 @@ def build_services(
             raise ProofBuildError(
                 f"Compose service {service} has no build definition or image tag."
             )
-        target = {
-            key: build[key]
-            for key in ("context", "dockerfile", "target", "args", "labels")
-            if key in build
-        }
+        target: BakeTarget = {}
+        try:
+            if "context" in build:
+                target["context"] = json_string(build["context"])
+            if "dockerfile" in build:
+                target["dockerfile"] = json_string(build["dockerfile"])
+            if "target" in build:
+                target["target"] = json_string(build["target"])
+            if "args" in build:
+                target["args"] = None if build["args"] is None else json_object(build["args"])
+            if "labels" in build:
+                labels_value = build["labels"]
+                target["labels"] = (
+                    json_object(labels_value) if isinstance(labels_value, dict) else {}
+                )
+        except ValueError as error:
+            raise ProofBuildError(
+                f"Compose service {service} has an invalid build definition."
+            ) from error
         target["tags"] = [image]
         image_tags[service] = image
         raw_args = target.get("args")
@@ -182,7 +238,7 @@ def build_services(
     started_at = datetime.now(UTC).isoformat()
     started = time.monotonic()
     command = ["docker", "buildx", "bake", "--load", "--progress", "plain"]
-    metadata: dict[str, object] = {}
+    metadata: dict[str, dict[str, str]] = {}
     cache_error = False
     cache_hits = 0
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8") as bake_file:
@@ -245,7 +301,9 @@ def build_services(
                 )
             if result.returncode == 0:
                 try:
-                    raw_metadata = json.loads(Path(metadata_file.name).read_text(encoding="utf-8"))
+                    raw_metadata: object = json.loads(
+                        Path(metadata_file.name).read_text(encoding="utf-8")
+                    )
                     if isinstance(raw_metadata, dict):
                         metadata = {
                             service: {
@@ -255,10 +313,10 @@ def build_services(
                                 and isinstance(value, str)
                                 and re.fullmatch(r"sha256:[0-9a-f]{64}", value)
                             }
-                            for service, entry in raw_metadata.items()
+                            for service, entry in json_object(raw_metadata).items()
                             if service in services and isinstance(entry, dict)
                         }
-                except json.JSONDecodeError:
+                except ValueError:
                     metadata = {}
     elapsed = round(time.monotonic() - started, 3)
     if result.returncode:
@@ -323,7 +381,7 @@ def build_services(
         match = re.match(r"ARG ([A-Z0-9_]+_IMAGE)=\"?([^\" ]+)", line)
         if match:
             base_images[match.group(1)] = match.group(2)
-    provenance: dict[str, object] = {
+    provenance: BuildProvenance = {
         "started_at": started_at,
         "duration_seconds": elapsed,
         "services": list(services),

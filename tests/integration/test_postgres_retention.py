@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TypedDict
+from uuid import UUID
 
 import pytest
 from django.utils import timezone
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import CycleUnavailable, TunnelUnavailable
 from core.models import AgentReceipt
 from tunnels.activity import commit_checkpoint
@@ -19,8 +23,34 @@ from tunnels.retention import delete_due_cycle_content
 pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
+class StartCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_address_generation: int
+    cycle_label: str
+    root_content: Mapping[str, object]
+    root_mentions: list[UUID] | None
+
+
+class PublishBeaconArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    text: str
+
+
+class PostReplyArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    parent_id: UUID
+    content: Mapping[str, object]
+    mentions: list[UUID] | None
+
+
 def test_retention_deletes_branched_content_and_preserves_retry_boundaries(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Retention publisher")
     responder, _ = credential_factory(name="Retention responder")
@@ -35,7 +65,7 @@ def test_retention_deletes_branched_content_and_preserves_retry_boundaries(
         address=created.address,
         expected_cycle_id=created.cycle.id,
     )
-    start_arguments = {
+    start_arguments: StartCycleArguments = {
         "credential": creator,
         "idempotency_key": "pg-retention-start",
         "address": created.address,
@@ -45,7 +75,7 @@ def test_retention_deletes_branched_content_and_preserves_retry_boundaries(
         "root_mentions": [responder.id],
     }
     started = start_cycle(**start_arguments)
-    beacon_arguments = {
+    beacon_arguments: PublishBeaconArguments = {
         "credential": creator,
         "idempotency_key": "pg-retention-publish",
         "address": created.address,
@@ -53,7 +83,7 @@ def test_retention_deletes_branched_content_and_preserves_retry_boundaries(
     }
     beacon, replay = publish_beacon(**beacon_arguments)
     assert not replay
-    reply_arguments = {
+    reply_arguments: PostReplyArguments = {
         "credential": responder,
         "idempotency_key": "pg-retention-reply",
         "address": created.address,

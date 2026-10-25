@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ninja import NinjaAPI
 from ninja.openapi.schema import OpenAPISchema
 
@@ -15,7 +13,7 @@ class ClientAwareAPI(NinjaAPI):
         self,
         *,
         path_prefix: str | None = None,
-        path_params: dict[str, Any] | None = None,
+        path_params: dict[str, object] | None = None,
     ) -> OpenAPISchema:
         schema = super().get_openapi_schema(path_prefix=path_prefix, path_params=path_params)
         headers = response_headers()

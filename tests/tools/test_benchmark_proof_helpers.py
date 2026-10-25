@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts import benchmark_proof_helpers as helpers
 from scripts.compose_isolation import LaneError
 from scripts.proof_timing import PhaseTimings
+from tests.json_values import json_at
 
 
 def test_comparison_uses_cold_full_cold_focused_then_warm(
@@ -49,12 +49,12 @@ def test_comparison_uses_cold_full_cold_focused_then_warm(
     )
     preflights: list[str] = []
     monkeypatch.setattr(helpers, "_preflight", lambda stack: preflights.append("passed"))
-    report: dict[str, Any] = {}
+    report: dict[str, object] = {}
     helpers.benchmark(Stack(), report, PhaseTimings())  # type: ignore[arg-type]
     assert calls == [(("tests",), True), (("load-profile",), True), (("load-profile",), False)]
     assert len(preflights) == 2
-    assert report["comparison"]["focused_image_smaller"] is True
-    assert report["comparison"]["warm_cache_hits"] == 4
+    assert json_at(report, "comparison", "focused_image_smaller") is True
+    assert json_at(report, "comparison", "warm_cache_hits") == 4
 
 
 @pytest.mark.parametrize("failure", ["inputs", "cache", "size"])

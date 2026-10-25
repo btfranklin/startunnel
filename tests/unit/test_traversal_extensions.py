@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import uuid4
 
 import pytest
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import CycleUnavailable, InvalidRequest
-from tunnels.cycles import create_tunnel
-from tunnels.messages import get_subtree, list_leaves, list_replies, post_reply
+from tunnels.cycles import CreatedTunnel, create_tunnel
+from tunnels.messages import (
+    LeafPage,
+    ReplyPage,
+    SubtreePage,
+    get_subtree,
+    list_leaves,
+    list_replies,
+    post_reply,
+)
+from tunnels.models import Message
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str) -> Any:
+def _create(credential: AgentCredential, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -22,7 +32,9 @@ def _create(credential: Any, key: str) -> Any:
     )
 
 
-def _reply(credential: Any, created: Any, parent: Any, key: str) -> Any:
+def _reply(
+    credential: AgentCredential, created: CreatedTunnel, parent: Message, key: str
+) -> Message:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -32,7 +44,9 @@ def _reply(credential: Any, created: Any, parent: Any, key: str) -> Any:
     ).message
 
 
-def _subtree_with_arguments(credential: Any, created: Any, arguments: dict[str, int]) -> Any:
+def _subtree_with_arguments(
+    credential: AgentCredential, created: CreatedTunnel, arguments: dict[str, int]
+) -> SubtreePage:
     return get_subtree(
         credential=credential,
         address=created.address,
@@ -45,7 +59,9 @@ def _subtree_with_arguments(credential: Any, created: Any, arguments: dict[str, 
     )
 
 
-def _leaves_with_arguments(credential: Any, created: Any, arguments: dict[str, int]) -> Any:
+def _leaves_with_arguments(
+    credential: AgentCredential, created: CreatedTunnel, arguments: dict[str, int]
+) -> LeafPage:
     return list_leaves(
         credential=credential,
         address=created.address,
@@ -56,7 +72,9 @@ def _leaves_with_arguments(credential: Any, created: Any, arguments: dict[str, i
     )
 
 
-def _replies_with_arguments(credential: Any, created: Any, arguments: dict[str, int]) -> Any:
+def _replies_with_arguments(
+    credential: AgentCredential, created: CreatedTunnel, arguments: dict[str, int]
+) -> ReplyPage:
     return list_replies(
         credential=credential,
         address=created.address,
@@ -68,7 +86,7 @@ def _replies_with_arguments(credential: Any, created: Any, arguments: dict[str, 
 
 
 def test_direct_reply_pages_keep_one_snapshot_during_later_sibling_replies(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "reply-page-create")
@@ -123,7 +141,7 @@ def test_direct_reply_pages_keep_one_snapshot_during_later_sibling_replies(
     ],
 )
 def test_direct_replies_reject_invalid_cursor_bounds(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     arguments: dict[str, int],
     message: str,
 ) -> None:
@@ -135,7 +153,7 @@ def test_direct_replies_reject_invalid_cursor_bounds(
 
 
 def test_subtree_uses_stable_preorder_and_relative_depth(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "subtree-preorder-create")
@@ -209,7 +227,7 @@ def test_subtree_uses_stable_preorder_and_relative_depth(
     ],
 )
 def test_subtree_rejects_invalid_depth_item_and_cursor_bounds(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     arguments: dict[str, int],
     message: str,
 ) -> None:
@@ -221,7 +239,7 @@ def test_subtree_rejects_invalid_depth_item_and_cursor_bounds(
 
 
 def test_subtree_pages_keep_one_snapshot_during_a_concurrent_addition(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "subtree-snapshot-create")
@@ -269,7 +287,7 @@ def test_subtree_pages_keep_one_snapshot_during_a_concurrent_addition(
 
 
 def test_subtree_and_leaves_reject_wrong_cycle_or_message_access(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     first = _create(credential, "traversal-scope-first")
@@ -298,7 +316,7 @@ def test_subtree_and_leaves_reject_wrong_cycle_or_message_access(
 
 
 def test_leaf_pages_are_sequence_ordered_and_keep_snapshot_leaf_semantics(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "leaf-snapshot-create")
@@ -348,7 +366,7 @@ def test_leaf_pages_are_sequence_ordered_and_keep_snapshot_leaf_semantics(
     ],
 )
 def test_leaves_reject_invalid_item_and_cursor_bounds(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     arguments: dict[str, int],
     message: str,
 ) -> None:

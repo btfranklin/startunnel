@@ -5,13 +5,14 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.factories import CredentialFactory
 
 from agents.models import AgentCredential
 from core import limits as instance_limits
@@ -19,7 +20,7 @@ from core.errors import InvalidCredential, InvalidRequest, QuotaExceeded
 from core.limits import Limits
 from tunnels.admin_actions import rotate_address_as_admin
 from tunnels.codec import parse_address
-from tunnels.context import get_context
+from tunnels.context import ContextReason, get_context
 from tunnels.cycles import close_cycle, create_tunnel
 from tunnels.messages import PostedReply, get_subtree, list_leaves, list_replies, post_reply
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
@@ -52,7 +53,7 @@ def _post_in_thread(
 
 
 def test_fifty_replies_to_one_parent_get_unique_order_and_exact_counters(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Tree creator")
     workers = [credential_factory(name=f"Tree worker {index}")[0] for index in range(50)]
@@ -103,8 +104,8 @@ def test_fifty_replies_to_one_parent_get_unique_order_and_exact_counters(
 
 
 def test_maximum_cycle_traversal_and_context_materialize_only_requested_pages(
-    credential_factory: Any,
-    django_assert_num_queries: Any,
+    credential_factory: CredentialFactory,
+    django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
     credential, _ = credential_factory(name="Maximum cycle reader")
     created = create_tunnel(
@@ -155,7 +156,7 @@ def test_maximum_cycle_traversal_and_context_materialize_only_requested_pages(
     created.cycle.refresh_from_db()
     created.tunnel.refresh_from_db()
 
-    with django_assert_num_queries(8, exact=False):
+    with django_assert_max_num_queries(8):
         subtree = get_subtree(
             credential=credential,
             address=created.address,
@@ -215,10 +216,11 @@ def test_maximum_cycle_traversal_and_context_materialize_only_requested_pages(
 
 
 def test_address_rotation_retries_one_database_collision(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credential, _ = credential_factory(name="Rotation collision owner")
+    assert credential.created_by is not None
     created = create_tunnel(
         credential=credential,
         idempotency_key="rotation-collision-create",
@@ -242,7 +244,7 @@ def test_address_rotation_retries_one_database_collision(
 
 
 def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     credential, _ = credential_factory(name="Create collision owner")
@@ -275,7 +277,7 @@ def test_tunnel_create_retries_collision_and_rolls_back_when_exhausted(
 
 
 def test_concurrent_exact_idempotency_retry_creates_one_reply(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Retry creator")
     worker, _ = credential_factory(name="Retry worker")
@@ -315,7 +317,7 @@ def test_concurrent_exact_idempotency_retry_creates_one_reply(
 
 
 def test_concurrent_posts_cannot_cross_the_message_limit(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     limits = replace(Limits(), messages_per_cycle=2)
@@ -364,7 +366,7 @@ def test_concurrent_posts_cannot_cross_the_message_limit(
 
 
 def test_postgresql_rejects_cross_cycle_parent_and_message_update(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     first_creator, _ = credential_factory(name="First guard creator")
     second_creator, _ = credential_factory(name="Second guard creator")
@@ -411,7 +413,7 @@ def test_postgresql_rejects_cross_cycle_parent_and_message_update(
 
 @pytest.mark.parametrize("after_sequence", [0, 1])
 def test_subtree_rejects_root_deleted_before_recursive_read(
-    credential_factory: Any, after_sequence: int
+    credential_factory: CredentialFactory, after_sequence: int
 ) -> None:
     from core.errors import CycleUnavailable
     from tunnels.messages import _postgresql_subtree_page
@@ -445,7 +447,7 @@ def test_subtree_rejects_root_deleted_before_recursive_read(
 
 
 def test_context_checks_revocation_before_returning_assembled_messages(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tunnels.context import _wire_bytes
 
@@ -456,7 +458,7 @@ def test_context_checks_revocation_before_returning_assembled_messages(
         root_content={"type": "text", "text": "Context root."},
     )
 
-    def revoke_during_assembly(message: Message, reason: Any) -> int:
+    def revoke_during_assembly(message: Message, reason: ContextReason) -> int:
         AgentCredential.objects.filter(pk=credential.pk).update(revoked_at=timezone.now())
         return _wire_bytes(message, reason)
 

@@ -11,20 +11,29 @@ import subprocess
 import sys
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from http.client import HTTPMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TypedDict, cast
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
+from cli import star_tunnel
+from jsonschema import Draft202012Validator, FormatChecker
+from scripts.json_data import JsonObject, json_object, json_string
 from scripts.stamp_client import stamp_client
+from tests.cli_types import CliModule
+from tests.schema_data import (
+    OpenApiDocument,
+    Schema,
+    openapi_document,
+    schema_output,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLI = PROJECT_ROOT / "cli" / "star_tunnel.py"
@@ -33,7 +42,7 @@ CLI = PROJECT_ROOT / "cli" / "star_tunnel.py"
 @dataclass
 class Response:
     status: int
-    value: dict[str, Any] | None = None
+    value: Mapping[str, object] | None = None
     headers: dict[str, str] = field(default_factory=dict)
     raw: bytes | None = None
     declared_content_length: str | None = None
@@ -41,10 +50,24 @@ class Response:
     chunked: bool = False
 
 
+class RequestCapture(TypedDict):
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: JsonObject | None
+
+
+@dataclass
+class ResponseBody:
+    headers: dict[str, str]
+    status: int
+    read: Callable[[int], bytes]
+
+
 @dataclass
 class Scenario:
     responses: list[Response]
-    requests: list[dict[str, Any]] = field(default_factory=list)
+    requests: list[RequestCapture] = field(default_factory=list)
 
 
 @contextmanager
@@ -66,7 +89,7 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
                     "method": self.command,
                     "path": self.path,
                     "headers": dict(self.headers),
-                    "body": json.loads(raw) if raw else None,
+                    "body": json_object(json.loads(raw)) if raw else None,
                 }
             )
             response = scenario.responses.pop(0)
@@ -123,7 +146,7 @@ def serve(*responses: Response) -> Iterator[tuple[str, Scenario]]:
 def run_cli(
     base_url: str,
     *arguments: str,
-    body: dict[str, Any] | None = None,
+    body: Mapping[str, object] | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
@@ -249,10 +272,10 @@ def run_cli(
 def test_commands_preserve_public_request_bodies_and_map_scope(
     action: str,
     arguments: list[str],
-    body: dict[str, Any],
+    body: JsonObject,
     suffix: str,
     status: int,
-    response: dict[str, Any],
+    response: JsonObject,
 ) -> None:
     with serve(Response(status, None if status == 204 else response)) as (base_url, scenario):
         result = run_cli(base_url, action, *arguments, body=body)
@@ -330,7 +353,10 @@ def test_complete_agent_commands_preserve_bodies_and_write_headers(
     assert request["headers"]["Authorization"] == "Bearer st_test-agent-key"
     if action in {"start", "rollover"}:
         assert request["headers"]["Idempotency-Key"] == "complete-command-001"
-        assert request["body"]["cycle"]["root"]["session"] == "review"
+        assert (
+            json_object(json_object(json_object(request["body"])["cycle"])["root"])["session"]
+            == "review"
+        )
     else:
         assert "Idempotency-Key" not in request["headers"]
 
@@ -555,8 +581,12 @@ def test_windows_closed_pipe_error_keeps_other_io_errors_visible(
 
     redirected: list[int] = []
     monkeypatch.setattr(cli, "print", fail_output, raising=False)
-    monkeypatch.setattr(cli, "sys", SimpleNamespace(platform=platform, stdout=sys.stdout))
-    monkeypatch.setattr(cli.os, "dup2", lambda source, target: redirected.append(target))
+    monkeypatch.setattr(
+        cli,
+        "sys",
+        SimpleNamespace(platform=platform, stdout=sys.stdout, version_info=sys.version_info),
+    )
+    monkeypatch.setattr(os, "dup2", lambda source, target: redirected.append(target))
     if handled:
         assert cli.main(["version"]) == 1
         assert redirected == [sys.stdout.fileno()]
@@ -827,7 +857,7 @@ def test_response_reader_bounds_each_read_and_total_bytes(
     limit = 64 * 1024 + 5
     stream = TrackedBody(b"x" * (limit + int(overflow)))
     headers = {} if declared is None else {"Content-Length": declared}
-    response = SimpleNamespace(headers=headers, status=200, read=stream.read)
+    response = ResponseBody(headers=headers, status=200, read=stream.read)
     if overflow:
         with pytest.raises(cli.CliError) as failure:
             cli._read_response_bytes(response, limit=limit)
@@ -843,7 +873,7 @@ def test_response_reader_bounds_each_read_and_total_bytes(
 def test_response_reader_rejects_a_large_declared_length_without_reading() -> None:
     cli = _load_cli_module()
     stream = TrackedBody(b"private-visible-marker")
-    response = SimpleNamespace(headers={"Content-Length": "33"}, status=200, read=stream.read)
+    response = ResponseBody(headers={"Content-Length": "33"}, status=200, read=stream.read)
     with pytest.raises(cli.CliError) as failure:
         cli._read_response_bytes(response, limit=32)
     assert failure.value.code == "invalid_response"
@@ -961,10 +991,10 @@ def test_response_decoder_recursion_errors_stay_structured(
 ) -> None:
     cli = _load_cli_module()
 
-    def fail_decode(value: str) -> Any:
+    def fail_decode(value: str) -> object:
         raise RecursionError("private-visible-marker")
 
-    monkeypatch.setattr(cli.json, "loads", fail_decode)
+    monkeypatch.setattr(json, "loads", fail_decode)
     with serve(Response(status, raw=b'{"message":"Example"}')) as (base_url, _scenario):
         transport = cli.StarTunnelTransport(base_url, "st_test-agent-key")
         with pytest.raises(cli.CliError) as failure:
@@ -1115,13 +1145,13 @@ def test_downloadable_cli_uses_python_3_10_syntax_and_only_the_standard_library(
     assert imports <= sys.stdlib_module_names
 
 
-def _load_cli_module() -> Any:
+def _load_cli_module() -> CliModule:
     spec = importlib.util.spec_from_file_location("startunnel_cli_contract", CLI)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module
+    return cast(CliModule, module)
 
 
 def test_client_version_is_offline_and_describes_the_running_file() -> None:
@@ -1200,7 +1230,7 @@ def test_agent_schema_is_offline_and_can_filter_one_command(command: str | None)
     assert schema["authentication"] == ["STARTUNNEL_AGENT_KEY", "STARTUNNEL_AGENT_KEY_FILE"]
     assert schema["base_url_environment"] == "STARTUNNEL_BASE_URL"
     assert schema["openapi_path"] == "/api/v1/openapi.json"
-    all_commands = cli.agent_schema()["commands"]
+    all_commands = schema_output(cli.agent_schema())["commands"]
     assert {item["command"] for item in all_commands} == {"me", *cli.ROUTES}
     assert schema["commands"] == [
         item for item in all_commands if command is None or item["command"] == command
@@ -1581,7 +1611,7 @@ def test_install_failure_preserves_existing_command_and_removes_temporary_files(
         del args
         raise OSError("private filesystem detail")
 
-    monkeypatch.setattr(cli.os, "fchmod" if operation == "write" else "replace", fail)
+    monkeypatch.setattr(os, "fchmod" if operation == "write" else "replace", fail)
     assert cli.main(["install", "--bin-dir", str(tmp_path)]) == 1
     output = capsys.readouterr()
     assert output.out == ""
@@ -1757,7 +1787,7 @@ def test_update_write_failure_preserves_the_command(
         del args
         raise OSError("private filesystem detail")
 
-    monkeypatch.setattr(cli.os, "replace", fail)
+    monkeypatch.setattr(os, "replace", fail)
     with serve(Response(200, raw=original)) as (base_url, _scenario):
         monkeypatch.setenv("STARTUNNEL_BASE_URL", base_url)
         assert cli.main(["update"]) == 1
@@ -1770,7 +1800,7 @@ def test_update_write_failure_preserves_the_command(
     assert list(tmp_path.iterdir()) == [command]
 
 
-def _resolve_schema(schema: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
+def _resolve_schema(schema: Schema, document: OpenApiDocument) -> Schema:
     reference = schema.get("$ref")
     if reference is None:
         return schema
@@ -1781,7 +1811,9 @@ def _resolve_schema(schema: dict[str, Any], document: dict[str, Any]) -> dict[st
 
 
 def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
-    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    document = openapi_document(
+        json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    )
     cli = _load_cli_module()
     commands = cli.AGENT_COMMANDS
     assert set(commands) == {"me", "tutorial", *cli.ROUTES}
@@ -1797,7 +1829,9 @@ def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
     assert {(method, "/api/v1" + suffix) for method, suffix, _expected in cli.ROUTES.values()} | {
         ("GET", "/api/v1/me")
     } == agent_operations
-    schema_commands = {item["command"]: item for item in cli.agent_schema()["commands"]}
+    schema_commands = {
+        item["command"]: item for item in schema_output(cli.agent_schema())["commands"]
+    }
     assert {(item["method"], item["path"]) for item in schema_commands.values()} == agent_operations
     for action, item in schema_commands.items():
         operation = document["paths"][item["path"]][item["method"].lower()]
@@ -1871,7 +1905,7 @@ def test_cli_help_fields_and_examples_match_generated_openapi() -> None:
 def test_admin_cycle_commands_forward_root_session(
     command: str,
     suffix: str,
-    body: dict[str, Any],
+    body: JsonObject,
 ) -> None:
     response = {"resource": {"cycle_id": "cycle-id"}, "operation": {"id": "receipt-id"}}
     with serve(Response(200, response)) as (base_url, scenario):
@@ -1933,7 +1967,9 @@ def _admin_contract_path(path: str) -> str:
 
 def test_admin_commands_cover_all_openapi_operations() -> None:
     cli = _load_cli_module()
-    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    document = openapi_document(
+        json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    )
     operations = {
         (method.upper(), _admin_contract_path(path))
         for path, routes in document["paths"].items()
@@ -1959,7 +1995,9 @@ def test_admin_get_commands_forward_all_openapi_query_fields(
     name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cli = _load_cli_module()
-    document = json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    document = openapi_document(
+        json.loads((PROJECT_ROOT / "generated" / "openapi.json").read_text())
+    )
     command = cli.ADMIN_COMMANDS[name]
     path = "/api/v1/admin/" + command.suffix
     operation = next(
@@ -1990,12 +2028,16 @@ def test_admin_get_commands_forward_all_openapi_query_fields(
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY_FILE", raising=False)
     calls = []
 
-    def request(self: Any, method: str, request_path: str, **kwargs: Any) -> dict[str, Any]:
+    def request(
+        self: star_tunnel.StarTunnelTransport, method: str, request_path: str, **kwargs: object
+    ) -> JsonObject:
         calls.append((self.agent_key, method, request_path, kwargs))
         return {"healthy": True}
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
-    assert cli.run_admin(cli.build_parser().parse_args(arguments)) == {"healthy": True}
+    assert cli.run_admin(
+        cli.build_parser().parse_args(arguments, namespace=star_tunnel.Arguments())
+    ) == {"healthy": True}
     assert len(calls) == 1
     key, method, request_path, kwargs = calls[0]
     assert key == "sta_test-admin-key"
@@ -2020,7 +2062,7 @@ def test_tutorial_failure_closes_its_cycle_with_a_stable_retry_key(
     monkeypatch.setenv("STARTUNNEL_RECEIVER_KEY", "st_receiver-test-key")
     failure = cli.CliError("connection_failed")
     calls = []
-    responses: dict[str, dict[str, Any]] = {
+    responses: dict[str, JsonObject] = {
         "/api/v1/tunnels": {
             "tunnel": {"address": "synthetic-address"},
             "cycle": {"id": "cycle-id", "root": {"id": "root-id"}},
@@ -2036,7 +2078,9 @@ def test_tutorial_failure_closes_its_cycle_with_a_stable_retry_key(
     }
     failed = False
 
-    def request(self: Any, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    def request(
+        self: star_tunnel.StarTunnelTransport, method: str, path: str, **kwargs: object
+    ) -> JsonObject:
         nonlocal failed
         calls.append({"key": self.agent_key, "method": method, "path": path, **kwargs})
         if path == failed_path and not failed:
@@ -2058,5 +2102,5 @@ def test_tutorial_failure_closes_its_cycle_with_a_stable_retry_key(
         assert close["method"] == "POST"
         assert close["body"] == {"address": "synthetic-address", "expected_cycle_id": "cycle-id"}
         assert close["expected"] == {204}
-        uuid.UUID(close["idempotency_key"])
+        uuid.UUID(json_string(close["idempotency_key"]))
     assert len({close["idempotency_key"] for close in closes}) == 1

@@ -4,12 +4,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier, Event
-from typing import Any
 from uuid import UUID
 
 import pytest
 from django.db import close_old_connections, connection, transaction
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 import tunnels.beacons as beacons
 from accounts.admin_commands import BeaconWithdraw
@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.postgres, pytest.mark.django_db(transaction=True)]
 
 
 def test_first_publications_on_different_tunnels_share_one_board_counter(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publishers = [credential_factory()[0] for _ in range(2)]
     tunnels = [
@@ -69,7 +69,9 @@ def test_first_publications_on_different_tunnels_share_one_board_counter(
     assert Beacon.objects.count() == 2
 
 
-def test_concurrent_distinct_responders_are_counted_once(credential_factory: Any) -> None:
+def test_concurrent_distinct_responders_are_counted_once(
+    credential_factory: CredentialFactory,
+) -> None:
     publisher, _ = credential_factory()
     responders = [credential_factory()[0] for _ in range(3)]
     created = create_tunnel(
@@ -111,7 +113,7 @@ def test_concurrent_distinct_responders_are_counted_once(credential_factory: Any
 
 
 def test_retention_clears_agent_and_admin_beacon_results(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     publisher, _ = credential_factory()
     actor = user_factory()
@@ -165,7 +167,7 @@ def test_retention_clears_agent_and_admin_beacon_results(
 
 
 def test_publication_rechecks_expiry_after_waiting_for_tunnel_lock(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     publisher, _ = credential_factory()
     created = create_tunnel(

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
 
 import pytest
 import time_machine
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.factories import UserFactory
 
 from accounts.admin_access import authenticate_admin_key, issue_admin_key, validate_actor
 from accounts.admin_data import key_resource
@@ -19,7 +20,7 @@ pytestmark = pytest.mark.django_db
 
 
 def test_admin_key_availability_and_revoked_lists_share_the_expiry_boundary(
-    user_factory: Any, django_assert_num_queries: Any
+    user_factory: UserFactory, django_assert_num_queries: DjangoAssertNumQueries
 ) -> None:
     now = timezone.now()
     cases = [

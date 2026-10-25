@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 from django.db import transaction
@@ -73,7 +73,7 @@ def _start_cycle_as_admin_locked(
     tunnel: Tunnel,
     actor: User,
     expected_address_generation: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str,
     expires_in_seconds: int | None,
     expected_cycle_id: UUID | None,
@@ -127,7 +127,7 @@ def start_cycle_as_admin(
     actor: User,
     tunnel_id: UUID,
     expected_address_generation: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
     root_session: str | None = None,
@@ -152,7 +152,7 @@ def rollover_cycle_as_admin(
     tunnel_id: UUID,
     expected_cycle_id: UUID,
     expected_address_generation: int,
-    root_content: dict[str, Any],
+    root_content: Mapping[str, object],
     cycle_label: str = "",
     expires_in_seconds: int | None = None,
     root_session: str | None = None,

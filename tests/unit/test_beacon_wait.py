@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any
 
 import pytest
 from asgiref.sync import async_to_sync
 from django.db import connection
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.factories import CredentialFactory
 
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
@@ -17,18 +19,22 @@ from core.cursors import decode_cursor, encode_cursor
 from core.errors import InvalidCredential, InvalidCursor, InvalidRequest
 from tunnels.beacons import (
     BOARD_WAIT_CURSOR_KIND,
+    BeaconData,
+    BoardWaitData,
     _read_board_wait_state_for_async,
     publish_beacon,
     read_board,
     wait_for_board,
 )
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.models import ActivityCheckpoint, Beacon, BoardState
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def _publish(credential: Any, key: str = "wait-beacon") -> Any:
+def _publish(
+    credential: AgentCredential, key: str = "wait-beacon"
+) -> tuple[CreatedTunnel, BeaconData]:
     created = create_tunnel(
         credential=credential,
         idempotency_key=f"{key}-create-0001",
@@ -44,7 +50,7 @@ def _publish(credential: Any, key: str = "wait-beacon") -> Any:
 
 
 def test_wait_cursor_is_shared_and_zero_wait_refreshes_without_checkpoint_changes(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     publisher, _ = credential_factory(name="Publisher")
     reader, _ = credential_factory(name="Reader")
@@ -62,7 +68,7 @@ def test_wait_cursor_is_shared_and_zero_wait_refreshes_without_checkpoint_change
 
 
 def test_wait_reports_a_new_revision_and_rejects_future_or_wrong_kind_cursors(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
@@ -91,7 +97,7 @@ def test_wait_reports_a_new_revision_and_rejects_future_or_wrong_kind_cursors(
 
 
 def test_wait_rechecks_active_credential_and_validates_timeout(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     reader, _ = credential_factory()
     cursor = read_board(credential=reader).board_cursor
@@ -107,7 +113,7 @@ def test_wait_rechecks_active_credential_and_validates_timeout(
 
 
 def test_wait_expiry_wakes_without_maintenance_and_unregisters(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
@@ -139,7 +145,7 @@ def test_wait_expiry_wakes_without_maintenance_and_unregisters(
     assert Beacon.objects.get(pk=result["id"]).ended_at is None
 
 
-def test_wait_cursor_has_required_expiry_field(credential_factory: Any) -> None:
+def test_wait_cursor_has_required_expiry_field(credential_factory: CredentialFactory) -> None:
     reader, _ = credential_factory()
     malformed = encode_cursor(BOARD_WAIT_CURSOR_KIND, board_position=0)
 
@@ -149,7 +155,7 @@ def test_wait_cursor_has_required_expiry_field(credential_factory: Any) -> None:
 
 @pytest.mark.parametrize("expiry", [42, "not-an-expiry", "2026-10-20T12:00:00"])
 def test_wait_rejects_nontext_invalid_or_naive_cursor_expiry(
-    credential_factory: Any, expiry: Any
+    credential_factory: CredentialFactory, expiry: object
 ) -> None:
     reader, _ = credential_factory()
     cursor = encode_cursor(BOARD_WAIT_CURSOR_KIND, board_position=0, next_expiry=expiry)
@@ -158,14 +164,14 @@ def test_wait_rejects_nontext_invalid_or_naive_cursor_expiry(
 
 
 def test_unchanged_board_wait_reaches_its_deadline_and_unregisters(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reader, _ = credential_factory()
     cursor = read_board(credential=reader).board_cursor
     listener = ActivityListener()
     monkeypatch.setattr("tunnels.beacons.activity_listener", listener)
 
-    async def wait() -> dict[str, Any]:
+    async def wait() -> BoardWaitData:
         try:
             return await wait_for_board(credential=reader, after_cursor=cursor, wait_seconds=1)
         finally:
@@ -176,14 +182,22 @@ def test_unchanged_board_wait_reaches_its_deadline_and_unregisters(
     assert not listener._board_waiters
 
 
-def test_wait_rejects_revocation_after_the_board_state_read(credential_factory: Any) -> None:
+def test_wait_rejects_revocation_after_the_board_state_read(
+    credential_factory: CredentialFactory,
+) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
     _publish(publisher)
     cursor = read_board(credential=reader).board_cursor
     revoked = False
 
-    def revoke_after_read(execute: Any, sql: str, params: Any, many: bool, context: Any) -> Any:
+    def revoke_after_read(
+        execute: Callable[[str, object, bool, dict[str, object]], object],
+        sql: str,
+        params: object,
+        many: bool,
+        context: dict[str, object],
+    ) -> object:
         nonlocal revoked
         result = execute(sql, params, many, context)
         if not revoked and sql.startswith("SELECT") and 'FROM "tunnels_boardstate"' in sql:
@@ -199,7 +213,9 @@ def test_wait_rejects_revocation_after_the_board_state_read(credential_factory: 
 
 @pytest.mark.parametrize("populated", [False, True])
 def test_wait_reads_board_state_and_current_authority_in_two_queries(
-    credential_factory: Any, django_assert_num_queries: Any, populated: bool
+    credential_factory: CredentialFactory,
+    django_assert_num_queries: DjangoAssertNumQueries,
+    populated: bool,
 ) -> None:
     reader, _ = credential_factory()
     if populated:
@@ -216,7 +232,9 @@ def test_wait_reads_board_state_and_current_authority_in_two_queries(
         assert seconds_until_expiry is None
 
 
-def test_wait_cursor_carries_global_revision_and_expiry(credential_factory: Any) -> None:
+def test_wait_cursor_carries_global_revision_and_expiry(
+    credential_factory: CredentialFactory,
+) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
     _publish(publisher)
@@ -228,7 +246,7 @@ def test_wait_cursor_carries_global_revision_and_expiry(credential_factory: Any)
 
 
 def test_board_page_cursor_preserves_earliest_expiry_across_pages(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     publisher, _ = credential_factory()
     reader, _ = credential_factory()
@@ -250,7 +268,7 @@ def test_board_page_cursor_preserves_earliest_expiry_across_pages(
 
 
 def test_wait_registers_before_reread_and_cleans_up_on_cancellation(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reader, _ = credential_factory()
     cursor = read_board(credential=reader).board_cursor
@@ -271,7 +289,7 @@ def test_wait_registers_before_reread_and_cleans_up_on_cancellation(
     listener = Listener()
     monkeypatch.setattr("tunnels.beacons.activity_listener", listener)
 
-    def read_state(*, credential: Any, after_cursor: str) -> tuple[bool, float | None]:
+    def read_state(*, credential: AgentCredential, after_cursor: str) -> tuple[bool, float | None]:
         assert waiters
         assert after_cursor == cursor
         return False, None

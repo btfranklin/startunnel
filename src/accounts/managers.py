@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import UserManager as DjangoUserManager
 
@@ -18,7 +18,7 @@ class UserManager(DjangoUserManager["User"]):
         username: str,
         email: str | None = None,
         password: str | None = None,
-        **extra_fields: Any,
+        **extra_fields: object,
     ) -> User:
         del email
         normalized_username = self.model.normalize_username(username).strip()
@@ -35,11 +35,11 @@ class UserManager(DjangoUserManager["User"]):
         username: str,
         email: str | None = None,
         password: str | None = None,
-        **extra_fields: Any,
+        **extra_fields: object,
     ) -> User:
         del email
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         if not extra_fields.get("is_staff") or not extra_fields.get("is_superuser"):
             raise ValueError("A superuser must have staff and superuser access.")
-        return self.create_user(username, password=password, **extra_fields)
+        return self.create_user(username, email=None, password=password, **extra_fields)

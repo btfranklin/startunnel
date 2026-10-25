@@ -10,9 +10,21 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_object,
+        json_string,
+    )
+else:
+    from json_data import (
+        json_object,
+        json_string,
+    )
+
+
+if TYPE_CHECKING or __package__:
     from .start_production import (
         ROOT,
         compose_command,
@@ -21,7 +33,7 @@ if __package__:
         validate_production_secret_files,
     )
 else:
-    from start_production import (  # type: ignore[import-not-found,no-redef]
+    from start_production import (
         ROOT,
         compose_command,
         production_secret_directory,
@@ -227,8 +239,8 @@ def prepare_replacement_files(directory: Path) -> tuple[Path, Path]:
 def read_rollback_bundle(path: Path) -> RollbackBundle:
     try:
         with path.open(encoding="utf-8") as source:
-            payload: Any = json.load(source)
-    except (UnicodeError, json.JSONDecodeError) as error:
+            payload = json_object(json.load(source))
+    except ValueError as error:
         raise ValueError("The rollback file is malformed.") from error
     required = {
         "previous_admin_password",
@@ -242,15 +254,15 @@ def read_rollback_bundle(path: Path) -> RollbackBundle:
         raise ValueError("The rollback file is malformed.")
     previous = validate_password_pair(
         PasswordPair(
-            admin=payload["previous_admin_password"],
-            runtime=payload["previous_runtime_password"],
+            admin=json_string(payload["previous_admin_password"]),
+            runtime=json_string(payload["previous_runtime_password"]),
         ),
         label="Rollback",
     )
     replacement = validate_password_pair(
         PasswordPair(
-            admin=payload["replacement_admin_password"],
-            runtime=payload["replacement_runtime_password"],
+            admin=json_string(payload["replacement_admin_password"]),
+            runtime=json_string(payload["replacement_runtime_password"]),
         ),
         label="Replacement",
     )

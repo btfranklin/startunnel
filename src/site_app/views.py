@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, TypedDict
 from uuid import UUID, uuid4
 
 from django.conf import settings
@@ -31,7 +31,7 @@ from accounts.admin_commands import (
 from accounts.admin_services import admin_status, execute_admin_operation, list_admin_resources
 from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
-from agents.models import AgentCredential
+from agents.models import AgentCredential, AgentCredentialQuerySet
 from core.errors import DomainError, InvalidRequest, TunnelUnavailable
 from tunnels.admin_actions import retirement_confirmation
 from tunnels.models import Cycle, Tunnel, TunnelAddress
@@ -81,7 +81,21 @@ def _authenticated_user(request: HttpRequest) -> User:
     return request.user
 
 
-def _credentials() -> Any:
+class SiteTunnelPrefetchData(TypedDict):
+    current_addresses: list[TunnelAddress]
+    active_cycles: list[Cycle]
+    history_cycles: list[Cycle]
+
+
+if TYPE_CHECKING:
+    from django_stubs_ext import WithAnnotations
+
+    type SitePrefetchedTunnel = WithAnnotations[Tunnel, SiteTunnelPrefetchData]
+else:
+    type SitePrefetchedTunnel = Tunnel
+
+
+def _credentials() -> AgentCredentialQuerySet:
     return AgentCredential.objects.order_by("name", "id")
 
 
@@ -275,7 +289,7 @@ def tunnels(request: HttpRequest) -> HttpResponse:
         action = request.POST.get("action", "close")
         try:
             tunnel_id = UUID(request.POST.get("tunnel_id", ""))
-            data: dict[str, Any] = {"tunnel_id": str(tunnel_id)}
+            data: dict[str, object] = {"tunnel_id": str(tunnel_id)}
             if action in {"close", "rollover"}:
                 data["expected_cycle_id"] = str(UUID(request.POST.get("expected_cycle_id", "")))
             if action in {"start", "rollover", "rotate", "retire"}:
@@ -360,7 +374,7 @@ def tunnels(request: HttpRequest) -> HttpResponse:
     ).get_page(request.GET.get("page"))
     tunnel_rows = []
     for tunnel in tunnel_page:
-        prefetched = cast(Any, tunnel)
+        prefetched: SitePrefetchedTunnel = tunnel
         active_cycles: list[Cycle] = prefetched.active_cycles
         history_cycles: list[Cycle] = prefetched.history_cycles
         current_addresses: list[TunnelAddress] = prefetched.current_addresses

@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import cast
 from uuid import UUID
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_commands import BeaconWithdraw
 from accounts.admin_data import AdminOperationResult
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminReceipt
+from agents.models import AgentCredential
 from core.cursors import decode_cursor, encode_cursor
 from core.errors import (
     IdempotencyConflict,
@@ -32,7 +34,7 @@ from tunnels.admin_actions import (
     start_cycle_as_admin,
 )
 from tunnels.beacons import publish_beacon, read_board, withdraw_beacon
-from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import Beacon, BoardState, Cycle, TunnelEvent
 from tunnels.retention import delete_due_cycle_content
@@ -40,7 +42,7 @@ from tunnels.retention import delete_due_cycle_content
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, suffix: str = "beacon") -> Any:
+def _create(credential: AgentCredential, suffix: str = "beacon") -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=f"{suffix}-create-0001",
@@ -49,11 +51,11 @@ def _create(credential: Any, suffix: str = "beacon") -> Any:
 
 
 def _reply(
-    created: Any,
-    credential: Any,
+    created: CreatedTunnel,
+    credential: AgentCredential,
     key: str,
     *,
-    mentions: list[Any] | None = None,
+    mentions: list[UUID] | None = None,
     session: str | None = None,
 ) -> None:
     post_reply(
@@ -68,7 +70,7 @@ def _reply(
 
 
 def test_publish_retry_is_exact_and_cycle_has_one_final_publication(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Beacon publisher")
     created = _create(creator)
@@ -122,7 +124,7 @@ def test_publish_retry_is_exact_and_cycle_has_one_final_publication(
 
 @pytest.mark.parametrize("text", ["", " leading", "trailing ", "line\nbreak", "x\u200by", "\ud800"])
 def test_beacon_text_rejects_empty_space_control_and_invalid_unicode(
-    credential_factory: Any, text: str
+    credential_factory: CredentialFactory, text: str
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-text")
@@ -136,14 +138,16 @@ def test_beacon_text_rejects_empty_space_control_and_invalid_unicode(
 
 
 @pytest.mark.parametrize("limit", [0, 101, True, 1.5])
-def test_board_rejects_invalid_page_limits(credential_factory: Any, limit: Any) -> None:
+def test_board_rejects_invalid_page_limits(
+    credential_factory: CredentialFactory, limit: object
+) -> None:
     reader, _ = credential_factory()
     with pytest.raises(InvalidRequest, match="limit"):
-        read_board(credential=reader, limit=limit)
+        read_board(credential=reader, limit=cast(int, limit))  # Keep the invalid test value.
 
 
 def test_board_counts_distinct_nonpublisher_credentials_that_reply_after_publish(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Publisher")
     responder, _ = credential_factory(name="Responder")
@@ -172,7 +176,7 @@ def test_board_counts_distinct_nonpublisher_credentials_that_reply_after_publish
 
 
 def test_board_cursor_keeps_snapshot_across_active_credentials_and_page_sizes(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Board publisher")
     reader, _ = credential_factory(name="Board reader")
@@ -236,7 +240,7 @@ def test_board_cursor_keeps_snapshot_across_active_credentials_and_page_sizes(
         )
 
 
-def test_cycle_close_ends_beacon_after_cycle_events(credential_factory: Any) -> None:
+def test_cycle_close_ends_beacon_after_cycle_events(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-close")
     result, _ = publish_beacon(
@@ -261,7 +265,9 @@ def test_cycle_close_ends_beacon_after_cycle_events(credential_factory: Any) -> 
     assert read_board(credential=creator).items == ()
 
 
-def test_new_cycle_can_publish_a_new_beacon(credential_factory: Any, user_factory: Any) -> None:
+def test_new_cycle_can_publish_a_new_beacon(
+    credential_factory: CredentialFactory, user_factory: UserFactory
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-new-cycle")
     first, _ = publish_beacon(
@@ -295,7 +301,7 @@ def test_new_cycle_can_publish_a_new_beacon(credential_factory: Any, user_factor
 
 
 def test_only_current_cycle_creator_can_publish_or_withdraw(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Cycle creator")
     other, _ = credential_factory(name="Other agent")
@@ -324,7 +330,7 @@ def test_only_current_cycle_creator_can_publish_or_withdraw(
 
 
 def test_expiry_hides_beacon_before_maintenance_and_cleanup_records_end(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-expiry")
@@ -347,7 +353,7 @@ def test_expiry_hides_beacon_before_maintenance_and_cleanup_records_end(
 
 
 def test_address_rotation_withdraws_beacon_and_retirement_keeps_it_hidden(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, _ = credential_factory(name="Address publisher")
     created = _create(creator, "beacon-address")
@@ -383,7 +389,9 @@ def test_address_rotation_withdraws_beacon_and_retirement_keeps_it_hidden(
     assert read_board(credential=creator).items == ()
 
 
-def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_factory: Any) -> None:
+def test_retention_deletes_beacon_text_and_keeps_retry_receipts(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-retention")
     result, _ = publish_beacon(
@@ -437,9 +445,10 @@ def test_retention_deletes_beacon_text_and_keeps_retry_receipts(credential_facto
 
 
 def test_retention_clears_admin_beacon_summary_and_rejects_replay(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
+    assert creator.created_by is not None
     created = _create(creator, "admin-beacon-retention")
     result, _ = publish_beacon(
         credential=creator,
@@ -448,10 +457,13 @@ def test_retention_clears_admin_beacon_summary_and_rejects_replay(
         text="Temporary Beacon text.",
     )
 
+    actor = creator.created_by
+    assert actor is not None
+
     def withdraw() -> AdminOperationResult:
         request_data = {"beacon_id": result["id"]}
         return execute_admin_operation(
-            actor=creator.created_by,
+            actor=actor,
             command=BeaconWithdraw.model_validate(request_data),
             key="withdraw-admin-retention",
             request_data=request_data,
@@ -480,7 +492,7 @@ def test_retention_clears_admin_beacon_summary_and_rejects_replay(
 
 @pytest.mark.parametrize("lifetime", [0, 86_401, True, 1.5])
 def test_publish_rejects_lifetime_outside_integer_bounds(
-    credential_factory: Any, lifetime: Any
+    credential_factory: CredentialFactory, lifetime: object
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-lifetime-bound")
@@ -490,11 +502,11 @@ def test_publish_rejects_lifetime_outside_integer_bounds(
             idempotency_key="publish-lifetime-bounds",
             address=created.address,
             text="Review.",
-            lifetime_seconds=lifetime,
+            lifetime_seconds=cast(int | None, lifetime),  # Keep the invalid test value.
         )
 
 
-def test_default_lifetime_and_cycle_deadline_cap(credential_factory: Any) -> None:
+def test_default_lifetime_and_cycle_deadline_cap(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     long_cycle = create_tunnel(
         credential=creator,
@@ -530,7 +542,9 @@ def test_default_lifetime_and_cycle_deadline_cap(credential_factory: Any) -> Non
     assert datetime.fromisoformat(capped["expires_at"]) == short_cycle.cycle.expires_at
 
 
-def test_query_count_is_constant_for_populated_board_pages(credential_factory: Any) -> None:
+def test_query_count_is_constant_for_populated_board_pages(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Query bound publisher")
     reader, _ = credential_factory(name="Query bound reader")
     for index in range(3):
@@ -553,7 +567,7 @@ def test_query_count_is_constant_for_populated_board_pages(credential_factory: A
 
 
 def test_beacon_ended_between_pages_disappears_from_continuation(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Removal publisher")
     reader, _ = credential_factory(name="Removal reader")
@@ -585,7 +599,9 @@ def test_beacon_ended_between_pages_disappears_from_continuation(
     assert continuation.complete is True
 
 
-def test_beacon_deadline_hides_it_without_maintenance(credential_factory: Any) -> None:
+def test_beacon_deadline_hides_it_without_maintenance(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "beacon-deadline")
     result, _ = publish_beacon(

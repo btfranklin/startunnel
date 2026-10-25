@@ -8,7 +8,6 @@ import socket
 import subprocess
 import sys
 import time
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -23,7 +22,7 @@ pytestmark = [
 ORIGIN = "https://proxy-proof.internal"
 
 
-def _database(code: str) -> Any:
+def _database(code: str) -> object:
     environment = os.environ.copy()
     environment["DJANGO_SETTINGS_MODULE"] = "startunnel.settings.development"
     environment["DATABASE_URL"] = environment["DATABASE_ADMIN_URL"]

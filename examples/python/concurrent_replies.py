@@ -6,7 +6,7 @@ import asyncio
 import os
 
 from startunnel_client import (
-    JsonObject,
+    PostReplyResponse,
     StarTunnelClient,
     load_env_file,
     new_idempotency_key,
@@ -49,7 +49,7 @@ async def run() -> None:
 
         start = asyncio.Event()
 
-        async def post(client: StarTunnelClient, worker: int) -> JsonObject:
+        async def post(client: StarTunnelClient, worker: int) -> PostReplyResponse:
             await start.wait()
             return await client.post_reply(
                 address=address,

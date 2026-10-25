@@ -11,10 +11,60 @@ import sys
 import tempfile
 import threading
 import unittest
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, cast
+from typing import TypeAlias, TypedDict
+
+JsonValue: TypeAlias = "bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None"
+JsonObject: TypeAlias = dict[str, JsonValue]
+
+
+class RequestCapture(TypedDict):
+    method: str
+    path: str
+    headers: Message
+    body: JsonObject | None
+
+
+def json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, list):
+        members: Sequence[object] = value
+        return [json_value(member) for member in members]
+    if isinstance(value, dict):
+        members_map: Mapping[object, object] = value
+        result: JsonObject = {}
+        for key, member in members_map.items():
+            if not isinstance(key, str):
+                raise AssertionError("Expected string JSON object keys.")
+            result[key] = json_value(member)
+        return result
+    raise AssertionError("Expected a JSON value.")
+
+
+def json_object(value: object) -> JsonObject:
+    checked = json_value(value)
+    if not isinstance(checked, dict):
+        raise AssertionError("Expected a JSON object.")
+    return checked
+
+
+def json_array(value: object) -> list[JsonValue]:
+    checked = json_value(value)
+    if not isinstance(checked, list):
+        raise AssertionError("Expected a JSON array.")
+    return checked
+
+
+def json_string(value: object) -> str:
+    if not isinstance(value, str):
+        raise AssertionError("Expected a JSON string.")
+    return value
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,7 +80,7 @@ class StandaloneClientTests(unittest.TestCase):
             key: value for key, value in os.environ.items() if not key.startswith("STARTUNNEL_")
         }
         self.environment["NO_PROXY"] = "127.0.0.1,localhost"
-        self.requests: list[dict[str, Any]] = []
+        self.requests: list[RequestCapture] = []
         self.api_response: tuple[int, bytes, dict[str, str], bool] | None = None
         self.download = self.client.read_bytes()
         test = self
@@ -44,7 +94,7 @@ class StandaloneClientTests(unittest.TestCase):
 
             def handle_request(self) -> None:
                 raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                body: Any = json.loads(raw) if raw else None
+                body = json_object(json.loads(raw)) if raw else None
                 test.requests.append(
                     {
                         "method": self.command,
@@ -57,9 +107,9 @@ class StandaloneClientTests(unittest.TestCase):
                 if self.path == "/downloads/star_tunnel.py":
                     encoded = test.download
                 else:
-                    value: dict[str, Any]
+                    value: dict[str, object]
                     if self.path == "/api/v1/messages":
-                        value = {"content": body["content"], "name": "代理"}
+                        value = {"content": json_object(body)["content"], "name": "代理"}
                         status = 201
                     elif self.path == "/api/v1/admin/me":
                         value = {"admin": {"id": "test-admin"}}
@@ -114,7 +164,7 @@ class StandaloneClientTests(unittest.TestCase):
     def run_client(
         self,
         *arguments: str,
-        body: dict[str, Any] | None = None,
+        body: Mapping[str, object] | None = None,
         environment: dict[str, str] | None = None,
         installed: Path | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
@@ -133,10 +183,10 @@ class StandaloneClientTests(unittest.TestCase):
             check=False,
         )
 
-    def successful_json(self, result: subprocess.CompletedProcess[bytes]) -> dict[str, Any]:
+    def successful_json(self, result: subprocess.CompletedProcess[bytes]) -> JsonObject:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, b"")
-        return cast(dict[str, Any], json.loads(result.stdout.decode("ascii")))
+        return json_object(json.loads(result.stdout.decode("ascii")))
 
     def test_offline_version_schema_and_help(self) -> None:
         version = self.successful_json(self.run_client("version"))
@@ -145,26 +195,41 @@ class StandaloneClientTests(unittest.TestCase):
         self.assertEqual(version["command_path"], str(self.client.resolve()))
         self.assertEqual(version["sha256"], hashlib.sha256(self.client.read_bytes()).hexdigest())
         schema = self.successful_json(self.run_client("schema"))
-        names = {command["command"] for command in schema["commands"]}
+        names = {
+            json_string(json_object(command)["command"])
+            for command in json_array(schema["commands"])
+        }
         self.assertTrue({"me", "read-tree", "start", "rollover", "beacon-board"} <= names)
         filtered = self.successful_json(self.run_client("schema", "read-tree"))
         self.assertEqual(
-            filtered["commands"], [c for c in schema["commands"] if c["command"] == "read-tree"]
+            filtered["commands"],
+            [c for c in json_array(schema["commands"]) if json_object(c)["command"] == "read-tree"],
         )
-        self.assertEqual(filtered["client"]["version"], version["version"])
+        self.assertEqual(json_object(filtered["client"])["version"], version["version"])
         self.assertEqual(filtered["contract_source"], "bundled")
         self.assertFalse(filtered["remote_server_verified"])
         self.assertEqual(
-            filtered["commands"][0]["stdout_schemas"]["200"],
+            json_object(
+                json_object(json_object(json_array(filtered["commands"])[0])["stdout_schemas"])[
+                    "200"
+                ]
+            ),
             {"$ref": "#/components/schemas/TreeResponse"},
         )
-        tree = filtered["components"]["schemas"]["TreeResponse"]
-        self.assertIn("next_page_cursor", tree["required"])
-        self.assertIn({"type": "null"}, tree["properties"]["next_page_cursor"]["anyOf"])
+        tree = json_object(
+            json_object(json_object(filtered["components"])["schemas"])["TreeResponse"]
+        )
+        self.assertIn("next_page_cursor", json_array(tree["required"]))
+        self.assertIn(
+            {"type": "null"},
+            json_array(json_object(json_object(tree["properties"])["next_page_cursor"])["anyOf"]),
+        )
         admin = self.successful_json(self.run_client("admin", "schema", "agents", "create"))
-        output = admin["commands"][0]["stdout_schemas"]["200"]
-        self.assertIn("secret_output", output["required"])
-        self.assertNotIn("secret", output["properties"])
+        output = json_object(
+            json_object(json_object(json_array(admin["commands"])[0])["stdout_schemas"])["200"]
+        )
+        self.assertIn("secret_output", json_array(output["required"]))
+        self.assertNotIn("secret", json_object(output["properties"]))
         help_result = self.run_client("--help")
         self.assertEqual(help_result.returncode, 0)
         self.assertEqual(help_result.stderr, b"")
@@ -209,7 +274,7 @@ class StandaloneClientTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.successful_json(result), {"content": content, "name": "代理"})
-        self.assertEqual(self.requests[0]["body"]["content"], content)
+        self.assertEqual(json_object(self.requests[0]["body"])["content"], content)
         self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer st_agent-test-key")
         self.assertEqual(self.requests[0]["headers"]["X-StarTunnel-Client-Version"], "unreleased")
         self.assertEqual(self.requests[0]["headers"]["Idempotency-Key"], "standalone-reply-001")
@@ -289,7 +354,7 @@ class StandaloneClientTests(unittest.TestCase):
             str(output),
         )
         created = self.run_client(*arguments, body={"name": "smoke-agent"}, environment=environment)
-        self.assertEqual(self.successful_json(created)["resource"]["id"], "test-agent")
+        self.assertEqual(json_object(self.successful_json(created)["resource"])["id"], "test-agent")
         self.assertNotIn(b"st_issued-test-key", created.stdout)
         self.assertEqual(output.read_text(encoding="utf-8"), "st_issued-test-key\n")
         if os.name == "posix":
@@ -401,7 +466,7 @@ class StandaloneClientTests(unittest.TestCase):
         artifacts.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="cli-smoke-", dir=artifacts) as directory:
             installed = self.successful_json(self.run_client("install", "--bin-dir", directory))
-            command = Path(installed["command_path"])
+            command = Path(json_string(installed["command_path"]))
             before = self.successful_json(self.run_client("version", installed=command))
             self.download += b"\n# Standalone update proof.\n"
             updated = self.successful_json(

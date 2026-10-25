@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from uuid import UUID
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import ContextBudgetTooSmall, CycleUnavailable
 from tunnels.activity import commit_checkpoint
-from tunnels.context import context_item_payload, get_context
-from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.context import ContextItem, context_item_payload, get_context
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
 from tunnels.messages import get_branch, get_message, load_branch, post_reply, read_tree
-from tunnels.models import ActivityCheckpoint
+from tunnels.models import ActivityCheckpoint, Message
 from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str = "context-create-0001") -> Any:
+def _create(credential: AgentCredential, key: str = "context-create-0001") -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -28,7 +31,13 @@ def _create(credential: Any, key: str = "context-create-0001") -> Any:
     )
 
 
-def _reply(created: Any, credential: Any, key: str, text: str, parent_id: Any = None) -> Any:
+def _reply(
+    created: CreatedTunnel,
+    credential: AgentCredential,
+    key: str,
+    text: str,
+    parent_id: UUID | None = None,
+) -> Message:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -38,7 +47,7 @@ def _reply(created: Any, credential: Any, key: str, text: str, parent_id: Any = 
     ).message
 
 
-def _canonical_size(item: Any) -> int:
+def _canonical_size(item: ContextItem) -> int:
     return len(
         json.dumps(
             context_item_payload(item.message, item.reason),
@@ -49,7 +58,7 @@ def _canonical_size(item: Any) -> int:
     )
 
 
-def test_context_reports_exact_canonical_utf8_bytes(credential_factory: Any) -> None:
+def test_context_reports_exact_canonical_utf8_bytes(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Créator")
     created = _create(creator)
     _reply(created, creator, "context-unicode-reply", "Copper 🜣 and café")
@@ -64,7 +73,7 @@ def test_context_reports_exact_canonical_utf8_bytes(credential_factory: Any) -> 
     assert view.used_items == len(view.items) == 2
 
 
-def test_root_context_stays_within_its_query_budget(credential_factory: Any) -> None:
+def test_root_context_stays_within_its_query_budget(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
     with CaptureQueriesContext(connection) as queries:
@@ -79,7 +88,9 @@ def test_root_context_stays_within_its_query_budget(credential_factory: Any) -> 
     assert len(queries) <= 7
 
 
-def test_context_requires_the_complete_root_to_focus_branch(credential_factory: Any) -> None:
+def test_context_requires_the_complete_root_to_focus_branch(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Creator")
     created = _create(creator)
     child = _reply(created, creator, "context-child", "Child")
@@ -94,7 +105,7 @@ def test_context_requires_the_complete_root_to_focus_branch(credential_factory: 
         )
 
 
-def test_context_snapshot_excludes_later_replies(credential_factory: Any) -> None:
+def test_context_snapshot_excludes_later_replies(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory(name="Creator")
     created = _create(creator)
     first = _reply(created, creator, "context-before", "Before snapshot")
@@ -112,7 +123,7 @@ def test_context_snapshot_excludes_later_replies(credential_factory: Any) -> Non
 
 
 def test_explicit_references_keep_request_order_and_deduplicate_other_sources(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Creator")
     created = _create(creator)
@@ -145,7 +156,9 @@ def test_explicit_references_keep_request_order_and_deduplicate_other_sources(
     assert ids == [created.root.id, first.id, second.id]
 
 
-def test_context_uses_deterministic_greedy_truncation(credential_factory: Any) -> None:
+def test_context_uses_deterministic_greedy_truncation(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Creator")
     created = _create(creator)
     first = _reply(created, creator, "context-greedy-first", "Small")
@@ -171,7 +184,9 @@ def test_context_uses_deterministic_greedy_truncation(credential_factory: Any) -
 
 
 @pytest.mark.parametrize("foreign_cycle", [True, False])
-def test_context_rejects_wrong_cycle(credential_factory: Any, foreign_cycle: bool) -> None:
+def test_context_rejects_wrong_cycle(
+    credential_factory: CredentialFactory, foreign_cycle: bool
+) -> None:
     creator, _ = credential_factory(name="Creator")
     other, _ = credential_factory(name="Other")
     first = _create(creator)
@@ -185,7 +200,9 @@ def test_context_rejects_wrong_cycle(credential_factory: Any, foreign_cycle: boo
         )
 
 
-def test_context_does_not_advance_the_saved_checkpoint(credential_factory: Any) -> None:
+def test_context_does_not_advance_the_saved_checkpoint(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Creator")
     worker, _ = credential_factory(name="Worker")
     created = _create(creator)
@@ -208,7 +225,7 @@ def test_context_does_not_advance_the_saved_checkpoint(credential_factory: Any) 
 
 @pytest.mark.parametrize("depth", [1, 32])
 def test_branch_and_context_query_counts_do_not_grow_with_depth(
-    credential_factory: Any, depth: int
+    credential_factory: CredentialFactory, depth: int
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
@@ -237,7 +254,9 @@ def test_branch_and_context_query_counts_do_not_grow_with_depth(
     assert len(context_queries) <= 10
 
 
-def test_tree_counts_match_current_and_older_snapshots(credential_factory: Any) -> None:
+def test_tree_counts_match_current_and_older_snapshots(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
     first = _reply(created, creator, "tree-count-first", "Café 🜣.")
@@ -261,7 +280,7 @@ def test_tree_counts_match_current_and_older_snapshots(credential_factory: Any) 
 
 
 def test_branch_reports_unavailable_when_retention_removes_its_focus(
-    credential_factory: Any, settings: Any
+    credential_factory: CredentialFactory, settings: Settings
 ) -> None:
     settings.STARTUNNEL_HISTORY_RETENTION_SECONDS = 60
     creator, _ = credential_factory()

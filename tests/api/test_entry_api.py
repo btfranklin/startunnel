@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 import time_machine
 from django.test import Client
+from tests.factories import CredentialFactory, UserFactory
 
+from agents.models import AgentCredential
 from tunnels.admin_actions import (
     retire_tunnel_as_admin,
     retirement_confirmation,
     rotate_address_as_admin,
 )
-from tunnels.cycles import close_cycle, create_tunnel
-from tunnels.messages import post_reply
+from tunnels.cycles import CreatedTunnel, close_cycle, create_tunnel
+from tunnels.messages import PostedReply, post_reply
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -26,7 +32,9 @@ def isolate_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("api.auth.consume_api_operation", lambda credential, limits: None)
 
 
-def _post(client: Client, path: str, body: dict[str, Any], *, key: str) -> Any:
+def _post(
+    client: Client, path: str, body: Mapping[str, object], *, key: str
+) -> _MonkeyPatchedWSGIResponse:
     return client.post(
         path,
         data=json.dumps(body),
@@ -35,7 +43,7 @@ def _post(client: Client, path: str, body: dict[str, Any], *, key: str) -> Any:
     )
 
 
-def _create(credential: Any, key: str = "entry-api-create") -> Any:
+def _create(credential: AgentCredential, key: str = "entry-api-create") -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -43,7 +51,7 @@ def _create(credential: Any, key: str = "entry-api-create") -> Any:
     )
 
 
-def _reply(created: Any, credential: Any, key: str, text: str) -> Any:
+def _reply(created: CreatedTunnel, credential: AgentCredential, key: str, text: str) -> PostedReply:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -56,7 +64,7 @@ def _reply(created: Any, credential: Any, key: str, text: str) -> Any:
 @pytest.mark.django_db(transaction=True)
 def test_enter_returns_root_once_and_a_continuation_before_recent_messages(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, key = credential_factory(name="Entry API creator")
     created = _create(creator)
@@ -115,7 +123,7 @@ def test_enter_returns_root_once_and_a_continuation_before_recent_messages(
 
 def test_enter_enforces_full_response_bytes_and_fails_when_root_cannot_fit(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, key = credential_factory(name="Entry budget creator")
     created = _create(creator, "entry-budget-create")
@@ -148,7 +156,7 @@ def test_enter_enforces_full_response_bytes_and_fails_when_root_cannot_fit(
 @time_machine.travel(datetime(2026, 10, 18, 1, 2, 3, 123, tzinfo=UTC), tick=False)
 def test_enter_accepts_exact_wire_size_and_trims_one_byte_below(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     creator, key = credential_factory(name="Exact entry budget creator")
@@ -182,7 +190,7 @@ def test_enter_accepts_exact_wire_size_and_trims_one_byte_below(
 
 
 def test_enter_returns_status_without_closed_history(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     creator, key = credential_factory(name="Closed entry creator")
     created = _create(creator, "entry-closed-create")
@@ -208,8 +216,8 @@ def test_enter_returns_status_without_closed_history(
 
 def test_entry_rechecks_rotated_and_retired_addresses(
     client: Client,
-    credential_factory: Any,
-    user_factory: Any,
+    credential_factory: CredentialFactory,
+    user_factory: UserFactory,
 ) -> None:
     creator, key = credential_factory(name="Lifecycle entry creator")
     operator = user_factory()
@@ -237,7 +245,7 @@ def test_entry_rechecks_rotated_and_retired_addresses(
 
 
 def test_entry_history_and_activity_cursors_work_after_one_hour(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     creator, key = credential_factory(name="Delayed entry creator")
     created = _create(creator, "entry-delayed-create")
@@ -262,7 +270,7 @@ def test_entry_history_and_activity_cursors_work_after_one_hour(
 
 
 def test_expired_entry_and_status_agree_before_maintenance(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     creator, key = credential_factory()
     created = _create(creator, "entry-status-expiry-create")

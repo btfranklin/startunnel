@@ -3,54 +3,43 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Mapping
-from typing import Any
+from collections.abc import AsyncIterator
 
 import pytest
+from asgiref.typing import ASGIReceiveEvent, ASGISendEvent, HTTPRequestEvent, HTTPScope, Scope
+from tests.asgi import http_scope, response_body, response_start
 
 from core.asgi import ASGIReceive, ASGISend, RequestBodyLimitMiddleware
 
 
-def _scope(*, content_length: int | None = None) -> dict[str, Any]:
+def _scope(*, content_length: int | None = None) -> HTTPScope:
     headers = [] if content_length is None else [(b"content-length", str(content_length).encode())]
-    return {
-        "type": "http",
-        "asgi": {"version": "3.0"},
-        "http_version": "1.1",
-        "method": "POST",
-        "scheme": "http",
-        "path": "/api/v1/messages",
-        "raw_path": b"/api/v1/messages",
-        "query_string": b"",
-        "headers": headers,
-        "client": ("127.0.0.1", 12345),
-        "server": ("testserver", 80),
-    }
+    return http_scope(path="/api/v1/messages", method="POST", headers=headers)
 
 
 async def _run(
     *,
     content_length: int | None,
-    messages: list[dict[str, Any]],
+    messages: list[HTTPRequestEvent],
     maximum: int = 16,
-) -> tuple[bool, list[dict[str, Any]]]:
+) -> tuple[bool, list[ASGISendEvent]]:
     called = False
-    sent: list[dict[str, Any]] = []
-    iterator: AsyncIterator[dict[str, Any]]
+    sent: list[ASGISendEvent] = []
+    iterator: AsyncIterator[ASGIReceiveEvent]
 
-    async def events() -> AsyncIterator[dict[str, Any]]:
+    async def events() -> AsyncIterator[ASGIReceiveEvent]:
         for message in messages:
             yield message
 
     iterator = events()
 
-    async def receive() -> dict[str, Any]:
+    async def receive() -> ASGIReceiveEvent:
         return await anext(iterator)
 
-    async def send(message: Mapping[str, Any]) -> None:
-        sent.append(dict(message))
+    async def send(message: ASGISendEvent) -> None:
+        sent.append(message)
 
-    async def downstream(scope: dict[str, Any], receive: ASGIReceive, send: ASGISend) -> None:
+    async def downstream(scope: Scope, receive: ASGIReceive, send: ASGISend) -> None:
         nonlocal called
         del scope, receive, send
         called = True
@@ -68,10 +57,10 @@ async def test_declared_large_body_is_rejected_before_downstream() -> None:
     )
 
     assert not called
-    assert sent[0]["status"] == 413
-    body = json.loads(sent[1]["body"])
+    assert response_start(sent[0])["status"] == 413
+    body = json.loads(response_body(sent[1])["body"])
     assert body["error"]["code"] == "payload_too_large"
-    headers = dict(sent[0]["headers"])
+    headers = dict(response_start(sent[0])["headers"])
     assert body["error"]["request_id"] == headers[b"x-request-id"].decode()
     assert headers[b"cache-control"] == b"no-store"
 
@@ -87,7 +76,7 @@ async def test_chunked_large_body_is_rejected_before_downstream() -> None:
     )
 
     assert not called
-    assert sent[0]["status"] == 413
+    assert response_start(sent[0])["status"] == 413
 
 
 @pytest.mark.asyncio

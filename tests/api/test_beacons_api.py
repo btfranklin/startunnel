@@ -3,24 +3,34 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import pytest
+from django.test import Client
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.admin_access import issue_admin_key
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
 
-def _post(client: Any, path: str, body: dict[str, Any], key: str, retry: str | None = None) -> Any:
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
+def _post(
+    client: Client, path: str, body: Mapping[str, object], key: str, retry: str | None = None
+) -> _MonkeyPatchedWSGIResponse:
+    headers = {"Authorization": "Bearer " + key}
     if retry is not None:
-        headers["HTTP_IDEMPOTENCY_KEY"] = retry
-    return client.post(path, data=json.dumps(body), content_type="application/json", **headers)
+        headers["Idempotency-Key"] = retry
+    return client.post(
+        path, data=json.dumps(body), content_type="application/json", headers=headers
+    )
 
 
 def test_agent_board_publication_and_withdrawal(
-    client: Any, credential_factory: Any, user_factory: Any
+    client: Client, credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, creator_key = credential_factory()
     _, reader_key = credential_factory()
@@ -90,7 +100,7 @@ def test_agent_board_publication_and_withdrawal(
 
 
 def test_admin_withdraws_beacon_with_receipt(
-    client: Any, credential_factory: Any, user_factory: Any
+    client: Client, credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     _, creator_key = credential_factory()
     owner = user_factory()
@@ -134,7 +144,7 @@ def test_admin_withdraws_beacon_with_receipt(
 
 
 def test_beacon_routes_require_an_active_agent_and_preserve_publication_on_revocation(
-    client: Any, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     from django.utils import timezone
 
@@ -176,7 +186,7 @@ def test_beacon_routes_require_an_active_agent_and_preserve_publication_on_revoc
 
 @pytest.mark.django_db(transaction=True)
 def test_beacon_events_are_available_through_normal_activity_and_retry_is_not_a_republication(
-    client: Any, credential_factory: Any, caplog: pytest.LogCaptureFixture
+    client: Client, credential_factory: CredentialFactory, caplog: pytest.LogCaptureFixture
 ) -> None:
     _, key = credential_factory()
     created = _post(
@@ -215,7 +225,7 @@ def test_beacon_events_are_available_through_normal_activity_and_retry_is_not_a_
 
 
 def test_beacon_board_uses_the_agent_request_allowance(
-    client: Any, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from dataclasses import replace
 
@@ -232,7 +242,7 @@ def test_beacon_board_uses_the_agent_request_allowance(
 
 @pytest.mark.django_db(transaction=True)
 def test_board_wait_returns_explicit_refresh_and_accepts_another_active_reader(
-    client: Any, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, publisher_key = credential_factory()
     _, reader_key = credential_factory()
@@ -287,7 +297,7 @@ def test_board_wait_returns_explicit_refresh_and_accepts_another_active_reader(
 
 @pytest.mark.django_db(transaction=True)
 def test_board_wait_observes_expiry_without_maintenance(
-    client: Any, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     from tunnels.beacons import publish_beacon
     from tunnels.cycles import create_tunnel
@@ -325,14 +335,14 @@ def test_board_wait_observes_expiry_without_maintenance(
     [{}, {"after_cursor": "invalid"}, {"after_cursor": "invalid", "wait_seconds": 21}],
 )
 def test_board_wait_rejects_invalid_requests(
-    client: Any, credential_factory: Any, body: dict[str, Any]
+    client: Client, credential_factory: CredentialFactory, body: Mapping[str, object]
 ) -> None:
     _, key = credential_factory()
     assert _post(client, "/api/v1/beacons/wait", body, key).status_code == 400
 
 
 def test_admin_beacon_reads_apply_deadlines_without_maintenance(
-    client: Any, credential_factory: Any, user_factory: Any
+    client: Client, credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     from datetime import timedelta
 
@@ -358,8 +368,8 @@ def test_admin_beacon_reads_apply_deadlines_without_maintenance(
     beacon_id = published["id"]
     expiry = timezone.now() - timedelta(seconds=1)
     Beacon.objects.filter(pk=beacon_id).update(expires_at=expiry)
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
-    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", **headers)
+    headers = {"Authorization": "Bearer " + key}
+    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", headers=headers)
     assert detail.status_code == 200
     assert detail.json()["text"] == "Retained summary"
     assert detail.json()["end_reason"] == "expired"
@@ -370,8 +380,8 @@ def test_admin_beacon_reads_apply_deadlines_without_maintenance(
         expires_at=expiry,
         retention_seconds=0,
     )
-    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", **headers)
-    listing = client.get("/api/v1/admin/beacons", **headers)
+    detail = client.get(f"/api/v1/admin/beacons/{beacon_id}", headers=headers)
+    listing = client.get("/api/v1/admin/beacons", headers=headers)
     assert detail.json()["text"] == ""
     assert listing.json()["items"][0]["text"] == ""
     assert Beacon.objects.get(pk=beacon_id).text == "Retained summary"
@@ -388,7 +398,7 @@ def test_admin_beacon_reads_apply_deadlines_without_maintenance(
 
 
 def test_admin_beacon_receipt_stops_at_cycle_read_deadline(
-    client: Any, credential_factory: Any, user_factory: Any
+    client: Client, credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     from datetime import timedelta
 
@@ -416,13 +426,13 @@ def test_admin_beacon_receipt_stops_at_cycle_read_deadline(
     assert withdrawn.status_code == 200
     operation_id = withdrawn.json()["operation"]["id"]
     operation_url = f"/api/v1/admin/operations/{operation_id}"
-    headers = {"HTTP_AUTHORIZATION": "Bearer " + key}
-    assert client.get(operation_url, **headers).status_code == 200
+    headers = {"Authorization": "Bearer " + key}
+    assert client.get(operation_url, headers=headers).status_code == 200
     Cycle.objects.filter(pk=created.cycle.id).update(
         expires_at=timezone.now() - timedelta(seconds=1),
         retention_seconds=0,
     )
-    assert client.get(operation_url, **headers).status_code == 400
+    assert client.get(operation_url, headers=headers).status_code == 400
     assert (
         _post(client, "/api/v1/admin/beacons/withdraw", body, key, "deadline-withdraw").status_code
         == 400

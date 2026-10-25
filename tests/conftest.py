@@ -6,15 +6,19 @@ import base64
 import hmac
 import re
 import secrets
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 from django.conf import settings
 
 from accounts.models import User
 from agents.models import AgentCredential
+
+if TYPE_CHECKING:
+    from tests.factories import CredentialFactory, UserFactory
 
 
 @pytest.hookimpl(trylast=True)
@@ -38,7 +42,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture
-def user_factory(db: object) -> Callable[..., User]:
+def user_factory(db: object) -> UserFactory:
     def create(*, username: str | None = None, password: str = "test-password-42") -> User:
         user = User.objects.create_user(
             username=username or f"user-{secrets.token_hex(4)}",
@@ -50,9 +54,7 @@ def user_factory(db: object) -> Callable[..., User]:
 
 
 @pytest.fixture
-def credential_factory(
-    db: object, user_factory: Callable[..., User]
-) -> Callable[..., tuple[AgentCredential, str]]:
+def credential_factory(db: object, user_factory: UserFactory) -> CredentialFactory:
     def create(
         *, user: User | None = None, name: str = "Test agent"
     ) -> tuple[AgentCredential, str]:

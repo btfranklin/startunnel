@@ -90,6 +90,7 @@ def test_json_rejects_values_that_are_not_canonical_json(value: object) -> None:
         validate_content({"type": "json", "value": value})
 
 
+# Hypothesis exposes a generated Callable[..., None]; the test body remains typed.
 @given(
     st.text(max_size=512).filter(
         lambda value: (
@@ -98,12 +99,15 @@ def test_json_rejects_values_that_are_not_canonical_json(value: object) -> None:
         )
     )
 )
-def test_text_byte_count_matches_utf8(value: str) -> None:
+def test_text_byte_count_matches_utf8(  # type: ignore[misc]
+    value: str,
+) -> None:
     assert validate_content({"type": "text", "text": value}).byte_count == len(
         value.encode("utf-8")
     )
 
 
+# Hypothesis exposes a generated Callable[..., None]; the test body remains typed.
 @given(
     st.recursive(
         st.none() | st.booleans() | st.integers() | st.text(max_size=20),
@@ -113,6 +117,8 @@ def test_text_byte_count_matches_utf8(value: str) -> None:
         max_leaves=20,
     )
 )
-def test_supported_json_values_have_a_stable_nonnegative_size(value: object) -> None:
+def test_supported_json_values_have_a_stable_nonnegative_size(  # type: ignore[misc]
+    value: object,
+) -> None:
     payload = validate_content({"type": "json", "value": value})
     assert 0 <= payload.byte_count <= 65_536

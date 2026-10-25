@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from .logging import current_request_id
@@ -37,7 +37,7 @@ def record_event(
     target_id: UUID | None,
     actor_user: User | None = None,
     actor_credential: AgentCredential | None = None,
-    metadata: dict[str, Any] | None = None,
+    metadata: Mapping[str, object] | None = None,
     actor_admin_credential: AdminCredential | None = None,
     channel: str = "",
     request_id: UUID | None = None,

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 from uuid import UUID
 
 from asgiref.sync import sync_to_async
@@ -15,6 +16,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
 from django.utils import timezone
+from pydantic import TypeAdapter
 
 from accounts.models import User
 from agents.models import AgentCredential
@@ -53,9 +55,48 @@ BOARD_PAGE_CURSOR_KIND = "beacon_board_page"
 BOARD_WAIT_CURSOR_KIND = "beacon_board_wait"
 
 
+class PublisherData(TypedDict):
+    id: str
+    name: str
+
+
+class BeaconData(TypedDict):
+    id: str
+    tunnel_id: str
+    cycle_id: str
+    publisher: PublisherData
+    text: str
+    publication_sequence: int
+    board_position: int
+    published_at: str
+    expires_at: str
+    ended_at: str | None
+    end_reason: str
+    response_count: int
+    address: NotRequired[str]
+
+
+class BeaconAnnotations(TypedDict):
+    response_count: int | None
+
+
+if TYPE_CHECKING:
+    from django_stubs_ext import WithAnnotations
+
+    type CountedBeacon = WithAnnotations[Beacon, BeaconAnnotations]
+else:
+    type CountedBeacon = Beacon
+_BEACON_DATA = TypeAdapter(BeaconData)
+
+
+class BoardWaitData(TypedDict):
+    refresh_required: bool
+    board_cursor: str
+
+
 @dataclass(frozen=True, slots=True)
 class BoardPage:
-    items: tuple[dict[str, Any], ...]
+    items: tuple[BeaconData, ...]
     snapshot_position: int
     board_cursor: str
     next_cursor: str | None
@@ -72,7 +113,7 @@ def _advance_board_position() -> int:
     return state.position
 
 
-def beacon_queryset() -> QuerySet[Beacon]:
+def beacon_queryset() -> QuerySet[CountedBeacon]:
     """Return Beacon rows with their publisher and live distinct-reply count."""
 
     responders = (
@@ -129,10 +170,10 @@ def note_beacon_response(*, cycle: Cycle, message: Message) -> None:
         _advance_board_position()
 
 
-def beacon_data(beacon: Beacon) -> dict[str, Any]:
+def beacon_data(beacon: CountedBeacon) -> BeaconData:
     """Serialize the public summary without an address."""
 
-    response_count = beacon.response_count or 0  # type: ignore[attr-defined]
+    response_count = beacon.response_count or 0
     ended_at = beacon.ended_at
     end_reason = beacon.end_reason
     if ended_at is None and beacon.expires_at <= timezone.now():
@@ -154,7 +195,7 @@ def beacon_data(beacon: Beacon) -> dict[str, Any]:
     }
 
 
-def _cursor_expiry(cursor: dict[str, Any]) -> datetime | None:
+def _cursor_expiry(cursor: Mapping[str, object]) -> datetime | None:
     if "next_expiry" not in cursor:
         raise InvalidCursor()
     value = cursor["next_expiry"]
@@ -264,13 +305,13 @@ def end_beacon_for_cycle_locked(
         _end_locked(tunnel=tunnel, cycle=cycle, beacon=beacon, reason=reason)
 
 
-def _replayed_beacon(record: AgentReceipt) -> dict[str, Any]:
+def _replayed_beacon(record: AgentReceipt) -> BeaconData:
     if record.resource_id is None:
         raise TunnelUnavailable()
     beacon = Beacon.objects.select_related("cycle").filter(pk=record.resource_id).first()
     if beacon is None or not cycle_is_readable(beacon.cycle):
         raise TunnelUnavailable()
-    return dict(record.response)
+    return _BEACON_DATA.validate_python(record.response)
 
 
 @transaction.atomic
@@ -281,7 +322,7 @@ def publish_beacon(
     address: str,
     text: str,
     lifetime_seconds: int | None = None,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[BeaconData, bool]:
     """Publish the one Beacon allowed in the current cycle."""
 
     _validate_beacon_text(text)
@@ -355,7 +396,7 @@ def withdraw_beacon(
     idempotency_key: str,
     address: str,
     beacon_id: UUID,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[BeaconData, bool]:
     """Withdraw the publisher's current-cycle Beacon."""
 
     canonical = canonical_address(address)
@@ -394,7 +435,7 @@ def withdraw_beacon(
 
 
 @transaction.atomic
-def withdraw_beacon_as_admin(*, actor: User, beacon_id: UUID) -> dict[str, Any]:
+def withdraw_beacon_as_admin(*, actor: User, beacon_id: UUID) -> BeaconData:
     """Withdraw one Beacon after the caller has checked admin-credential access."""
 
     if not User.objects.filter(pk=actor.pk, is_active=True).exists():
@@ -477,7 +518,12 @@ def read_board(
     )
     has_more = len(rows) > limit
     selected = rows[:limit]
-    items = tuple({**beacon_data(row), "address": row.current_address} for row in selected)
+    items_list: list[BeaconData] = []
+    for row in selected:
+        item = beacon_data(row)
+        item["address"] = row.current_address
+        items_list.append(item)
+    items = tuple(items_list)
     next_cursor = None
     next_expiry_value = next_expiry.isoformat() if next_expiry is not None else None
     board_cursor = encode_cursor(
@@ -536,7 +582,7 @@ async def wait_for_board(
     credential: AgentCredential,
     after_cursor: str,
     wait_seconds: int = 20,
-) -> dict[str, Any]:
+) -> BoardWaitData:
     """Wait for a shared board revision or its captured expiry boundary."""
 
     limits = instance_limits.effective_limits()

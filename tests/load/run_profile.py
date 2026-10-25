@@ -26,13 +26,27 @@ from tests.load.profile import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+class _Arguments(argparse.Namespace):
+    report: Path
+    base_url: str
+    host_header: str
+    duration_seconds: float
+    sends_per_second: float
+    concurrent_activity_readers: int
+    drain_seconds: float
+    credentials: int
+    diagnostic_lock_seconds: int
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run provider-neutral HTTP load against a local StarTunnel stack."
     )
+    base_url_default: str = os.getenv("STARTUNNEL_BASE_URL", "")
+    host_header_default: str = os.getenv("STARTUNNEL_HTTP_HOST", "")
     parser.add_argument("--report", type=Path, required=True)
-    parser.add_argument("--base-url", default=os.getenv("STARTUNNEL_BASE_URL", ""))
-    parser.add_argument("--host-header", default=os.getenv("STARTUNNEL_HTTP_HOST", ""))
+    parser.add_argument("--base-url", default=base_url_default)
+    parser.add_argument("--host-header", default=host_header_default)
     parser.add_argument("--duration-seconds", type=float, default=300.0)
     parser.add_argument("--sends-per-second", type=float, default=50.0)
     parser.add_argument("--concurrent-activity-readers", type=int, default=100)
@@ -60,7 +74,7 @@ def _run_fixture_command(arguments: list[str]) -> subprocess.CompletedProcess[st
     )
 
 
-def _provision(path: Path, arguments: argparse.Namespace) -> None:
+def _provision(path: Path, arguments: _Arguments) -> None:
     result = _run_fixture_command(
         [
             "--output",
@@ -81,7 +95,7 @@ def _cleanup(path: Path) -> bool:
     return result.returncode == 0 and not path.exists()
 
 
-def _config(arguments: argparse.Namespace) -> LoadConfig:
+def _config(arguments: _Arguments) -> LoadConfig:
     return LoadConfig(
         duration_seconds=arguments.duration_seconds,
         sends_per_second=arguments.sends_per_second,
@@ -91,7 +105,7 @@ def _config(arguments: argparse.Namespace) -> LoadConfig:
 
 
 def _main(raw_arguments: list[str] | None = None) -> int:
-    arguments = _parser().parse_args(raw_arguments)
+    arguments = _parser().parse_args(raw_arguments, namespace=_Arguments())
     if os.getenv("STARTUNNEL_LOAD_TESTS") != "1":
         print("Set STARTUNNEL_LOAD_TESTS=1 to run the opt-in load proof.", file=sys.stderr)
         return 2

@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 
 from startunnel_client import (
-    JsonObject,
+    CreateTunnelResponse,
+    PostReplyResponse,
     StarTunnelClient,
     StarTunnelError,
     load_env_file,
@@ -24,7 +25,7 @@ async def run() -> None:
     try:
         create_key = new_idempotency_key()
 
-        async def create_once() -> JsonObject:
+        async def create_once() -> CreateTunnelResponse:
             return await client.create_tunnel(
                 label="Idempotent retry example",
                 cycle_label="Retry proof",
@@ -65,7 +66,7 @@ async def run() -> None:
 
         reply_key = new_idempotency_key()
 
-        async def post_once() -> JsonObject:
+        async def post_once() -> PostReplyResponse:
             return await client.post_reply(
                 address=address,
                 parent_id=root_id,

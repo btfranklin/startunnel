@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import io
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -24,12 +25,14 @@ def configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY_FILE", raising=False)
 
 
-def stdin(monkeypatch: pytest.MonkeyPatch, value: dict[str, Any]) -> None:
+def stdin(monkeypatch: pytest.MonkeyPatch, value: Mapping[str, object]) -> None:
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(value).encode())))
 
 
-def arguments(*values: str) -> Any:
-    return cli.build_parser().parse_args(["admin", *values])
+def arguments(*values: str) -> argparse.Namespace:
+    parsed = cli.build_parser().parse_args(["admin", *values])
+    assert isinstance(parsed, argparse.Namespace)
+    return parsed
 
 
 def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,7 +93,7 @@ def test_admin_key_file_reports_unreadable_file_safely(
     monkeypatch.delenv("STARTUNNEL_ADMIN_KEY", raising=False)
     monkeypatch.setenv("STARTUNNEL_ADMIN_KEY_FILE", str(filename))
 
-    def fail_open(*args: Any, **kwargs: Any) -> int:
+    def fail_open(*args: object, **kwargs: object) -> int:
         del args, kwargs
         raise PermissionError("private path")
 
@@ -150,9 +153,9 @@ def test_password_account_creation_needs_no_secret_file(
     filename.write_text("keep this key file")
     filename.chmod(0o400)
     stdin(monkeypatch, {"username": "password-admin", "password": "valid-password"})
-    calls: list[Any] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    def request(*args: object, **kwargs: object) -> dict[str, object]:
         calls.append((args, kwargs))
         return {"resource": {"id": "safe-id"}}
 
@@ -197,9 +200,9 @@ def test_bulk_retirement_sends_only_explicit_selections(
         ],
     }
     stdin(monkeypatch, body)
-    calls: list[Any] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    def request(*args: object, **kwargs: object) -> dict[str, object]:
         calls.append((args, kwargs))
         return {"resource": {"credential_id": "revoked-key-id", "retired_tunnel_ids": []}}
 
@@ -216,15 +219,15 @@ def test_bulk_retirement_sends_only_explicit_selections(
 def test_tunnel_creator_filter_is_sent_with_list_request(
     configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[Any] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def request(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        calls.append(args)
+    def request(*args: object, **kwargs: object) -> dict[str, object]:
+        calls.append((args, kwargs))
         return {"items": []}
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
     cli.run_admin(arguments("tunnels", "list", "--creator-id", "revoked-key-id"))
-    assert calls[0][2] == "/api/v1/admin/tunnels?creator_id=revoked-key-id"
+    assert calls[0][0][2] == "/api/v1/admin/tunnels?creator_id=revoked-key-id"
 
 
 def test_key_account_creation_requires_secret_file_before_request(
@@ -288,7 +291,7 @@ def test_existing_secret_file_never_deleted_or_requested(
     filename.write_text("keep this")
     stdin(monkeypatch, {"name": "worker"})
 
-    def unexpected(*args: Any, **kwargs: Any) -> Any:
+    def unexpected(*args: object, **kwargs: object) -> object:
         pytest.fail("No HTTP request may precede secret file reservation.")
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", unexpected)
@@ -341,7 +344,7 @@ def test_failed_request_removes_reserved_file(
     filename = tmp_path / "issued.key"
     stdin(monkeypatch, {"name": "worker"})
 
-    def fail(*args: Any, **kwargs: Any) -> Any:
+    def fail(*args: object, **kwargs: object) -> object:
         raise cli.CliError("state_conflict", status=409)
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", fail)
@@ -365,7 +368,7 @@ def test_transient_retry_retains_body_and_key(monkeypatch: pytest.MonkeyPatch, s
     calls = []
     sleeps: list[float] = []
 
-    def request(*args: Any, **kwargs: Any) -> Any:
+    def request(*args: object, **kwargs: object) -> object:
         calls.append((args, kwargs))
         if len(calls) < 3:
             raise cli.CliError("http_error", status=status, retry_after=0.25)
@@ -391,8 +394,8 @@ def test_permanent_failure_is_not_retried(monkeypatch: pytest.MonkeyPatch, statu
     transport = cli.StarTunnelTransport("http://127.0.0.1:8000", "test")
     calls = []
 
-    def request(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
+    def request(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
         raise cli.CliError("http_error", status=status)
 
     monkeypatch.setattr(transport, "_request_once", request)
@@ -425,8 +428,8 @@ def test_connection_retry_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     transport = cli.StarTunnelTransport("http://127.0.0.1:8000", "test")
     calls = []
 
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
+    def fail(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
         raise cli.CliError("connection_failed")
 
     monkeypatch.setattr(transport, "_request_once", fail)
@@ -471,8 +474,8 @@ def test_secret_file_write_failure_is_safe(
 def test_list_filters_are_encoded(configured: None, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def request(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
+    def request(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
         return {"items": []}
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
@@ -490,7 +493,7 @@ def test_list_filters_are_encoded(configured: None, monkeypatch: pytest.MonkeyPa
             "active",
         )
     )
-    assert calls[0][2] == (
+    assert calls[0][0][2] == (
         "/api/v1/admin/keys?limit=20&cursor=a%2Bb%2Fc&admin_id=test-admin&state=active"
     )
 
@@ -500,8 +503,8 @@ def test_audit_action_filter_preserves_admin_dispatch(
 ) -> None:
     calls = []
 
-    def request(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
+    def request(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
         return {"items": []}
 
     monkeypatch.setattr(cli.StarTunnelTransport, "request", request)
@@ -509,17 +512,17 @@ def test_audit_action_filter_preserves_admin_dispatch(
     output = capsys.readouterr()
     assert output.err == ""
     assert json.loads(output.out) == {"items": []}
-    assert calls[0][2] == "/api/v1/admin/audit?action=keys.revoke"
+    assert calls[0][0][2] == "/api/v1/admin/audit?action=keys.revoke"
 
 
 def test_long_retry_after_returns_control_without_early_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     transport = cli.StarTunnelTransport("http://127.0.0.1:8000", "test")
-    calls: list[object] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args)
+    def fail(*args: object, **kwargs: object) -> object:
+        calls.append((args, kwargs))
         raise cli.CliError("http_error", status=429, retry_after=60)
 
     monkeypatch.setattr(transport, "_request_once", fail)

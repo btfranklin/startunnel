@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Literal
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
@@ -85,7 +85,7 @@ def add_compatibility_headers(request: HttpRequest, response: HttpResponse) -> N
     response[COMPATIBILITY_HEADER] = compatibility(request)
 
 
-def response_headers() -> dict[str, Any]:
+def response_headers() -> dict[str, object]:
     """Describe headers added by the API transport in the authoritative schema."""
 
     return {

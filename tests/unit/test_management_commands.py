@@ -6,7 +6,6 @@ import json
 import os
 from io import StringIO
 from pathlib import Path
-from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
@@ -15,16 +14,16 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import OperationalError
 from django.test import override_settings
+from pytest_django.fixtures import Settings
+from tests.factories import CredentialFactory
 
 from accounts.models import User
 from agents.models import AgentCredential
 from agents.services import CredentialError, authenticate_key
+from core.database_options import postgres_connection_options
 from core.management.commands import provision_live_agent_proof, provision_load_profile
 from core.management.commands.maintenance_loop import (
     Command as MaintenanceCommand,
-)
-from core.management.commands.maintenance_loop import (
-    _connection_kwargs as maintenance_connection_kwargs,
 )
 from core.management.commands.maintenance_loop import (
     _should_report_cycle,
@@ -45,7 +44,7 @@ def test_export_openapi_writes_valid_document(tmp_path: Path) -> None:
     assert "Wrote" in output.getvalue()
 
 
-def test_runtime_inspection_redacts_secrets(settings: Any) -> None:
+def test_runtime_inspection_redacts_secrets(settings: Settings) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 75
     output = StringIO()
     call_command("inspect_runtime", stdout=output)
@@ -90,7 +89,7 @@ def test_maintenance_once_outputs_safe_counts(monkeypatch: pytest.MonkeyPatch) -
     assert _should_report_cycle({"cycles_closed": 1}, once=False) is True
 
 
-def test_maintenance_connection_shape(settings: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_maintenance_connection_shape(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
     for name, value in {
         "NAME": "db",
         "USER": "user",
@@ -99,7 +98,7 @@ def test_maintenance_connection_shape(settings: Any, monkeypatch: pytest.MonkeyP
         "PORT": "5432",
     }.items():
         monkeypatch.setitem(settings.DATABASES["default"], name, value)
-    assert maintenance_connection_kwargs() == {
+    assert postgres_connection_options() == {
         "dbname": "db",
         "user": "user",
         "password": "pass",
@@ -110,7 +109,7 @@ def test_maintenance_connection_shape(settings: Any, monkeypatch: pytest.MonkeyP
 
 
 def test_sqlite_maintenance_loop_waits_until_deadline(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.sqlite3")
     waits: list[float] = []
@@ -229,7 +228,7 @@ def test_postgres_loop_does_not_busy_loop_after_delete_failure(
 
 
 def test_maintenance_recovers_from_orm_errors_with_backoff(
-    settings: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr(
         "core.management.commands.maintenance_loop._wait_for_notification",
@@ -264,16 +263,16 @@ def test_maintenance_recovers_from_orm_errors_with_backoff(
         def __enter__(self) -> Listener:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        def __exit__(self, *args: object) -> None:
             return None
 
-        def execute(self, *args: Any) -> Listener:
+        def execute(self, *args: object) -> Listener:
             return self
 
         def fetchone(self) -> tuple[bool]:
             return (True,)
 
-        def notifies(self, **kwargs: Any) -> list[object]:
+        def notifies(self, **kwargs: object) -> list[object]:
             return []
 
     stop = Stop()
@@ -304,7 +303,7 @@ def test_maintenance_recovers_from_orm_errors_with_backoff(
 
 
 def test_maintenance_handle_backs_off_after_postgres_error(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")
     waits: list[float] = []
@@ -441,13 +440,15 @@ def test_live_proof_removes_partial_output_after_failure(
     ("credentials", "message"),
     [(0, "--credentials"), (5001, "--credentials")],
 )
-def test_load_fixture_counts_are_bounded(credentials: int, message: str, settings: Any) -> None:
+def test_load_fixture_counts_are_bounded(
+    credentials: int, message: str, settings: Settings
+) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 5000
     with pytest.raises(CommandError, match=message):
         provision_load_profile._validate_counts(credentials=credentials)
 
 
-def test_load_fixture_count_respects_instance_limit(settings: Any) -> None:
+def test_load_fixture_count_respects_instance_limit(settings: Settings) -> None:
     settings.STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT = 1
     with pytest.raises(CommandError, match="instance credential limit"):
         provision_load_profile._validate_counts(credentials=2)
@@ -497,7 +498,7 @@ def test_load_manifest_paths_and_parser_fail_closed(tmp_path: Path) -> None:
 def test_load_fixture_command_provisions_and_cleans_up(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     monkeypatch.setenv("STARTUNNEL_LOAD_TESTS", "1")
     path = tmp_path / "load.json"

@@ -8,6 +8,17 @@ import socket
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        json_integer,
+    )
+else:
+    from json_data import (
+        json_integer,
+    )
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PORT = 8000
@@ -32,7 +43,7 @@ def choose_port() -> int:
         return DEFAULT_PORT
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
-        return listener.getsockname()[1]
+        return json_integer(listener.getsockname()[1])
 
 
 def compose_command(arguments: Sequence[str]) -> list[str]:

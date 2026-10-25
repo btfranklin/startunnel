@@ -18,6 +18,7 @@ from core import cursors
 from core import limits as instance_limits
 from core.errors import (
     DomainError,
+    InvalidCredential,
     InvalidCursor,
     InvalidRequest,
     PublicErrorCode,
@@ -245,7 +246,10 @@ def interface_error_handler(request: HttpRequest, error: InterfaceError) -> Http
 
 
 def _credential(request: HttpRequest) -> AgentCredential:
-    return request.auth  # type: ignore[no-any-return,attr-defined]
+    credential: object = getattr(request, "auth", None)
+    if not isinstance(credential, AgentCredential):
+        raise InvalidCredential()
+    return credential
 
 
 def _activity_cursor(tunnel: Tunnel, position: int) -> str:

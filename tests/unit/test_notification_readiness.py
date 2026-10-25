@@ -6,9 +6,9 @@ import asyncio
 import signal
 import socket
 import threading
-from typing import Any
 
 import pytest
+from pytest_django.fixtures import Settings
 
 from core.activity_listener import _wait_readable
 from core.management.commands.maintenance_loop import Command, _wait_for_notification
@@ -103,7 +103,7 @@ async def test_async_socket_wait_wakes_for_data_and_removes_reader_on_cancel(
 
 
 def test_maintenance_stop_wakes_socket_and_restores_handlers_after_failure(
-    settings: Any,
+    settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")

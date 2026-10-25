@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+
+from django.apps.registry import Apps
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 MESSAGE_GUARDS = r"""
 ALTER TABLE public.tunnels_message
@@ -368,13 +370,13 @@ FOR EACH ROW EXECUTE FUNCTION public.startunnel_check_tunnel_lifecycle();
 REVOKE_HISTORY_DELETE = Path(__file__).with_name("history-grants.sql").read_text(encoding="utf-8")
 
 
-def revoke_runtime_history_delete(apps: Any, schema_editor: Any) -> None:
+def revoke_runtime_history_delete(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
         schema_editor.execute(REVOKE_HISTORY_DELETE, params=None)
 
 
-def install_guards(apps: Any, schema_editor: Any) -> None:
+def install_guards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     if schema_editor.connection.vendor == "postgresql":
         schema_editor.execute(
             "\n".join((MESSAGE_GUARDS, ADDRESS_GUARDS, ACTIVITY_GUARDS, LIFECYCLE_GUARDS))
@@ -382,14 +384,14 @@ def install_guards(apps: Any, schema_editor: Any) -> None:
         revoke_runtime_history_delete(apps, schema_editor)
 
 
-def remove_guards(apps: Any, schema_editor: Any) -> None:
+def remove_guards(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
     schema_editor.execute(REVERSE_SQL)
 
 
-def create_search_index(apps: Any, schema_editor: Any) -> None:
+def create_search_index(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
         schema_editor.execute(
@@ -399,7 +401,7 @@ def create_search_index(apps: Any, schema_editor: Any) -> None:
         )
 
 
-def drop_search_index(apps: Any, schema_editor: Any) -> None:
+def drop_search_index(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     del apps
     if schema_editor.connection.vendor == "postgresql":
         schema_editor.execute("DROP INDEX IF EXISTS public.message_content_search")

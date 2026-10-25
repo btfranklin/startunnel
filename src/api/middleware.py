@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import cast
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -35,7 +35,7 @@ def _has_error_envelope(response: HttpResponse) -> bool:
     if not response.get("Content-Type", "").startswith("application/json"):
         return False
     try:
-        payload: Any = json.loads(response.content)
+        payload: object = json.loads(response.content)
     except TypeError, ValueError:
         return False
     return isinstance(payload, dict) and isinstance(payload.get("error"), dict)
@@ -54,7 +54,9 @@ class ApiErrorEnvelopeMiddleware:
         self.get_response = get_response
         self.async_mode = iscoroutinefunction(get_response)
         if self.async_mode:
-            markcoroutinefunction(cast(Any, self))
+            markcoroutinefunction(
+                cast(Callable[[HttpRequest], HttpResponse | Awaitable[HttpResponse]], self)
+            )
 
     @staticmethod
     def _replace(request: HttpRequest, response: HttpResponse) -> HttpResponse:
@@ -87,7 +89,7 @@ class ApiErrorEnvelopeMiddleware:
                 replacement[header] = response[header]
         return replacement
 
-    def __call__(self, request: HttpRequest) -> Any:
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
         if self.async_mode:
             return self.__acall__(request)
         response = (

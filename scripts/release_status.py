@@ -7,31 +7,169 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
-if __package__:
-    from .release_candidate import _download, git_commit, github_api, verify_evidence
-    from .release_record import candidate_version
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonObject,
+        json_array,
+        json_boolean,
+        json_integer,
+        json_object,
+        json_string,
+        object_array,
+    )
 else:
-    from release_candidate import (  # type: ignore[import-not-found,no-redef]
+    from json_data import (
+        JsonObject,
+        json_array,
+        json_boolean,
+        json_integer,
+        json_object,
+        json_string,
+        object_array,
+    )
+
+
+if TYPE_CHECKING or __package__:
+    from .release_candidate import (
+        CandidateData,
         _download,
+        candidate_data,
         git_commit,
         github_api,
         verify_evidence,
     )
-    from release_record import candidate_version  # type: ignore[import-not-found,no-redef]
+    from .release_record import candidate_version
+else:
+    from release_candidate import (
+        CandidateData,
+        _download,
+        candidate_data,
+        git_commit,
+        github_api,
+        verify_evidence,
+    )
+    from release_record import candidate_version
+
+
+def _github_object(repository: str, path: str) -> JsonObject:
+    return json_object(github_api(repository, path))
+
+
+def _github_pages(repository: str, path: str) -> list[JsonObject]:
+    return object_array(github_api(repository, path, paginate=True))
+
+
+class ActionJob(TypedDict):
+    id: int
+    name: str
+    run_attempt: NotRequired[int]
+    status: NotRequired[str | None]
+    conclusion: NotRequired[str | None]
+    started_at: NotRequired[str | None]
+    completed_at: NotRequired[str | None]
+    created_at: NotRequired[str | None]
+
+
+class JobTiming(TypedDict):
+    job_id: int
+    attempt: int
+    status: str | None
+    conclusion: str | None
+    started_at: str | None
+    finished_at: str | None
+    duration_seconds: float | None
+    queue_seconds: float | None
+    dependency_ready_to_start_seconds: float | None
+
+
+class WorkflowTiming(TypedDict):
+    elapsed_seconds: float | None
+    complete: bool
+    longest_observed_dependency_path: list[str]
+    longest_path_seconds: float | None
+    longest_path_calculation: str
+    jobs: dict[str, JobTiming]
+    unavailable: str
+
+
+class ArtifactSummary(TypedDict):
+    id: int | None
+    name: str | None
+    digest: str | None
+    expired: bool | None
+    created_at: str | None
+    expires_at: str | None
+
+
+class WorkflowStatus(TypedDict):
+    run_id: int
+    source_commit: str
+    url: str
+    workflow: str
+    status: str
+    conclusion: str | None
+    attempt: int
+    queue_seconds: float | None
+    timing: WorkflowTiming
+    artifacts: list[ArtifactSummary]
+
+
+class ProofDetails(TypedDict):
+    phases: list[JsonObject]
+    builds: list[JsonObject]
+
+
+class ReleaseStatus(TypedDict):
+    source_commit: str
+    workflows: list[WorkflowStatus]
+    candidate: NotRequired[CandidateData]
+    proof_details: NotRequired[dict[str, ProofDetails]]
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else json_string(value)
+
+
+def _action_job(value: Mapping[str, object]) -> ActionJob:
+    result: ActionJob = {"id": json_integer(value["id"]), "name": json_string(value["name"])}
+    if "run_attempt" in value:
+        result["run_attempt"] = json_integer(value["run_attempt"])
+    result["status"] = _optional_text(value.get("status"))
+    result["conclusion"] = _optional_text(value.get("conclusion"))
+    result["started_at"] = _optional_text(value.get("started_at"))
+    result["completed_at"] = _optional_text(value.get("completed_at"))
+    result["created_at"] = _optional_text(value.get("created_at"))
+    return result
+
+
+def _artifact_summary(value: JsonObject) -> ArtifactSummary:
+    return {
+        "id": None if value.get("id") is None else json_integer(value["id"]),
+        "name": _optional_text(value.get("name")),
+        "digest": _optional_text(value.get("digest")),
+        "expired": None if value.get("expired") is None else json_boolean(value["expired"]),
+        "created_at": _optional_text(value.get("created_at")),
+        "expires_at": _optional_text(value.get("expires_at")),
+    }
 
 
 def _time(value: str | None) -> float | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() if value else None
 
 
-def job_timings(jobs: list[dict[str, Any]], dependencies: dict[str, list[str]]) -> dict[str, Any]:
+def job_timings(
+    jobs: Sequence[Mapping[str, object]], dependencies: dict[str, list[str]]
+) -> WorkflowTiming:
     """Use observed boundaries, including gaps, without adding parallel jobs."""
-    selected: dict[str, dict[str, Any]] = {}
-    for job in sorted(jobs, key=lambda item: item.get("run_attempt", 1)):
+    selected: dict[str, ActionJob] = {}
+    for job in sorted(
+        (_action_job(job) for job in jobs), key=lambda item: item.get("run_attempt", 1)
+    ):
         name = job["name"]
         if job.get("conclusion") != "skipped" or name not in selected:
             selected[name] = job
@@ -39,7 +177,7 @@ def job_timings(jobs: list[dict[str, Any]], dependencies: dict[str, list[str]]) 
     ends = [_time(job.get("completed_at")) for job in selected.values()]
     valid_starts = [value for value in starts if value is not None]
     valid_ends = [value for value in ends if value is not None]
-    results: dict[str, Any] = {}
+    results: dict[str, JobTiming] = {}
     paths: dict[str, list[str]] = {}
     path_durations: dict[str, float] = {}
     visiting: set[str] = set()
@@ -60,7 +198,8 @@ def job_timings(jobs: list[dict[str, Any]], dependencies: dict[str, list[str]]) 
             default=None,
         )
         start, end, created = (
-            _time(job.get(field)) for field in ("started_at", "completed_at", "created_at")
+            _time(_optional_text(job.get(field)))
+            for field in ("started_at", "completed_at", "created_at")
         )
         path_parent = max(parents, key=lambda parent: path_durations.get(parent, 0), default=None)
         paths[name] = [*paths[path_parent], name] if path_parent else [name]
@@ -109,8 +248,8 @@ def job_timings(jobs: list[dict[str, Any]], dependencies: dict[str, list[str]]) 
     }
 
 
-def _dependencies(jobs: list[dict[str, Any]], workflow: str) -> dict[str, list[str]]:
-    names = {job["name"] for job in jobs}
+def _dependencies(jobs: Sequence[Mapping[str, object]], workflow: str) -> dict[str, list[str]]:
+    names = {json_string(job["name"]) for job in jobs}
     result: dict[str, list[str]] = {}
     if workflow == "ci.yml":
         canonical = next((name for name in names if name == "Canonical locked gate"), None)
@@ -137,47 +276,41 @@ def _dependencies(jobs: list[dict[str, Any]], workflow: str) -> dict[str, list[s
     return result
 
 
-def workflow_status(repository: str, run_id: int) -> dict[str, Any]:
-    run = github_api(repository, f"actions/runs/{run_id}")
+def workflow_status(repository: str, run_id: int) -> WorkflowStatus:
+    run = _github_object(repository, f"actions/runs/{run_id}")
     jobs = [
         job
-        for page in github_api(
-            repository, f"actions/runs/{run_id}/jobs?filter=all&per_page=100", paginate=True
-        )
-        for job in page["jobs"]
+        for page in _github_pages(repository, f"actions/runs/{run_id}/jobs?filter=all&per_page=100")
+        for job in object_array(page["jobs"])
     ]
     artifacts = [
         artifact
-        for page in github_api(
-            repository, f"actions/runs/{run_id}/artifacts?per_page=100", paginate=True
-        )
-        for artifact in page["artifacts"]
+        for page in _github_pages(repository, f"actions/runs/{run_id}/artifacts?per_page=100")
+        for artifact in object_array(page["artifacts"])
     ]
     return {
         "run_id": run_id,
-        "source_commit": run["head_sha"],
-        "url": run["html_url"],
-        "workflow": run["path"],
-        "status": run["status"],
-        "conclusion": run.get("conclusion"),
-        "attempt": run["run_attempt"],
+        "source_commit": json_string(run["head_sha"]),
+        "url": json_string(run["html_url"]),
+        "workflow": json_string(run["path"]),
+        "status": json_string(run["status"]),
+        "conclusion": _optional_text(run.get("conclusion")),
+        "attempt": json_integer(run["run_attempt"]),
         "queue_seconds": max(
-            0, (_time(run.get("run_started_at")) or 0) - (_time(run.get("created_at")) or 0)
+            0,
+            (_time(_optional_text(run.get("run_started_at"))) or 0)
+            - (_time(_optional_text(run.get("created_at"))) or 0),
         )
         if run.get("run_attempt") == 1 and run.get("run_started_at") and run.get("created_at")
         else None,
-        "timing": job_timings(jobs, _dependencies(jobs, run["path"].rsplit("/", 1)[-1])),
-        "artifacts": [
-            {
-                key: item.get(key)
-                for key in ("id", "name", "digest", "expired", "created_at", "expires_at")
-            }
-            for item in artifacts
-        ],
+        "timing": job_timings(
+            jobs, _dependencies(jobs, json_string(run["path"]).rsplit("/", 1)[-1])
+        ),
+        "artifacts": [_artifact_summary(item) for item in artifacts],
     }
 
 
-def render_summary(status: dict[str, Any]) -> str:
+def render_summary(status: ReleaseStatus) -> str:
     lines = [f"Release source: `{status['source_commit']}`", ""]
     for workflow in status["workflows"]:
         lines += [
@@ -221,9 +354,9 @@ def render_summary(status: dict[str, Any]) -> str:
     for kind, details in status.get("proof_details", {}).items():
         lines += ["", f"{kind} phase times:"]
         for phase in details["phases"]:
-            name = phase.get("phase", phase.get("name", "unknown"))
+            phase_name = phase.get("phase", phase.get("name", "unknown"))
             seconds = phase.get("elapsed_seconds", phase.get("duration_seconds"))
-            lines.append(f"- {name}: {seconds} seconds; {phase.get('status', 'unknown')}.")
+            lines.append(f"- {phase_name}: {seconds} seconds; {phase.get('status', 'unknown')}.")
         for build in details["builds"]:
             lines.append(
                 f"- Helper cache: {build.get('cache')}; hits={build.get('cache_hits')}; "
@@ -253,13 +386,13 @@ def main() -> int:
     if arguments.run_id:
         run_ids.append(arguments.run_id)
     else:
-        runs = github_api(
+        runs = _github_object(
             arguments.repository,
             f"actions/workflows/release-candidate.yml/runs?branch=main&head_sha={commit}&per_page=1",
         )["workflow_runs"]
         if runs:
-            run_ids.append(int(runs[0]["id"]))
-    status: dict[str, Any] = {"source_commit": commit, "workflows": []}
+            run_ids.append(json_integer(json_object(json_array(runs)[0])["id"]))
+    status: ReleaseStatus = {"source_commit": commit, "workflows": []}
     if arguments.directory:
         candidate = verify_evidence(arguments.directory, commit=commit, version=candidate_version())
         status["candidate"] = candidate
@@ -272,14 +405,18 @@ def main() -> int:
         images = [
             item
             for item in latest["artifacts"]
-            if re.fullmatch(r"candidate-image-[0-9]+-[12]", item.get("name", ""))
+            if re.fullmatch(r"candidate-image-[0-9]+-[12]", (item.get("name") or ""))
             and item.get("expired") is False
         ]
         if images:
-            selected = max(images, key=lambda item: int(item["name"].rsplit("-", 1)[1]))
+            selected = max(
+                images, key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1])
+            )
             with tempfile.TemporaryDirectory(prefix="startunnel-status-") as temporary:
                 _download(arguments.repository, latest["run_id"], selected, Path(temporary))
-                identity = json.loads((Path(temporary) / "candidate-image.json").read_text())
+                identity = candidate_data(
+                    json_object(json.loads((Path(temporary) / "candidate-image.json").read_text()))
+                )
             if identity.get("source_commit") != commit:
                 raise ValueError("Candidate identity belongs to a different source commit.")
             status["candidate"] = identity
@@ -287,29 +424,43 @@ def main() -> int:
             if source_id not in run_ids:
                 status["workflows"].insert(0, workflow_status(arguments.repository, source_id))
     if not status.get("candidate"):
-        source_runs = github_api(
+        source_runs = _github_object(
             arguments.repository,
             f"actions/workflows/ci.yml/runs?branch=main&head_sha={commit}&per_page=1",
         )["workflow_runs"]
-        if source_runs and int(source_runs[0]["id"]) not in run_ids:
+        if (
+            source_runs
+            and json_integer(json_object(json_array(source_runs)[0])["id"]) not in run_ids
+        ):
             status["workflows"].insert(
-                0, workflow_status(arguments.repository, int(source_runs[0]["id"]))
+                0,
+                workflow_status(
+                    arguments.repository,
+                    json_integer(json_object(json_array(source_runs)[0])["id"]),
+                ),
             )
     if arguments.directory:
-        details = {}
+        details: dict[str, ProofDetails] = {}
         for kind, reference in status["candidate"]["proofs"].items():
             manifest_path = arguments.directory / reference["manifest"]
-            proof = json.loads(manifest_path.read_text())
+            proof = json_object(json.loads(manifest_path.read_text()))
             builds = [
-                json.loads((manifest_path.parent / name).read_text())
-                for name in proof["files"]
+                json_object(json.loads((manifest_path.parent / name).read_text()))
+                for name in json_object(proof["files"])
                 if Path(name).name.startswith("proof-build-")
             ]
-            phases = []
+            phases: list[JsonObject] = []
             for key in ("execution", "workload", "system"):
-                if key in proof["reports"]:
-                    report = json.loads((manifest_path.parent / proof["reports"][key]).read_text())
-                    phases.extend(report.get("phases", report.get("steps", [])))
+                if key in json_object(proof["reports"]):
+                    report = json_object(
+                        json.loads(
+                            (
+                                manifest_path.parent
+                                / json_string(json_object(proof["reports"])[key])
+                            ).read_text()
+                        )
+                    )
+                    phases.extend(object_array(report.get("phases", report.get("steps", []))))
             details[kind] = {"phases": phases, "builds": builds}
         status["proof_details"] = details
     if any(workflow["source_commit"] != commit for workflow in status["workflows"]):

@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import Token
 from ipaddress import ip_address, ip_network
-from typing import Any, cast
+from typing import cast
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from django.conf import settings
@@ -20,6 +20,13 @@ from .security import CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY
 
 SAFE_HTTP_METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
 logger = logging.getLogger("startunnel.request")
+
+
+class _MetadataRequest(HttpRequest):
+    """Fields that this module sets before downstream request handling."""
+
+    request_id: str
+    startunnel_trusted_proxy: bool
 
 
 class _DualModeMiddleware:
@@ -35,7 +42,9 @@ class _DualModeMiddleware:
         self.get_response = get_response
         self.async_mode = iscoroutinefunction(get_response)
         if self.async_mode:
-            markcoroutinefunction(cast(Any, self))
+            markcoroutinefunction(
+                cast(Callable[[HttpRequest], HttpResponse | Awaitable[HttpResponse]], self)
+            )
 
     def _sync_response(self, request: HttpRequest) -> HttpResponse:
         return cast(HttpResponse, self.get_response(request))
@@ -77,12 +86,12 @@ class TrustedProxyMiddleware(_DualModeMiddleware):
             trusted = False
         else:
             trusted = any(remote in network for network in self.networks)
-        request.startunnel_trusted_proxy = trusted  # type: ignore[attr-defined]
+        cast(_MetadataRequest, request).startunnel_trusted_proxy = trusted
         if not trusted:
             for field in self.forwarded_fields:
                 request.META.pop(field, None)
 
-    def __call__(self, request: HttpRequest) -> Any:
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
         if self.async_mode:
             return self.__acall__(request)
         self._prepare_request(request)
@@ -97,16 +106,17 @@ class RequestIdMiddleware(_DualModeMiddleware):
     @staticmethod
     def _begin(request: HttpRequest) -> tuple[Token[str], float]:
         request_id = str(uuid.uuid4())
-        request.request_id = request_id  # type: ignore[attr-defined]
+        cast(_MetadataRequest, request).request_id = request_id
         return request_id_var.set(request_id), time.monotonic()
 
     @staticmethod
     def _complete(request: HttpRequest, response: HttpResponse, started_at: float) -> HttpResponse:
-        resolver_match = getattr(request, "resolver_match", None)
-        operation = str(getattr(resolver_match, "view_name", "unmatched") or "unmatched")
+        resolver_match: object = getattr(request, "resolver_match", None)
+        view_name: object = getattr(resolver_match, "view_name", "unmatched")
+        operation = str(view_name or "unmatched")
         status_class = f"{response.status_code // 100}xx"
         duration_seconds = time.monotonic() - started_at
-        response["X-Request-ID"] = str(request.request_id)  # type: ignore[attr-defined]
+        response["X-Request-ID"] = cast(_MetadataRequest, request).request_id
         if request.path.startswith("/api/"):
             response["Cache-Control"] = "no-store"
             API_REQUESTS.labels(operation=operation, status_class=status_class).inc()
@@ -125,7 +135,7 @@ class RequestIdMiddleware(_DualModeMiddleware):
         )
         return response
 
-    def __call__(self, request: HttpRequest) -> Any:
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
         if self.async_mode:
             return self.__acall__(request)
         token, started_at = self._begin(request)
@@ -150,7 +160,7 @@ class SecurityHeadersMiddleware(_DualModeMiddleware):
         response["X-Frame-Options"] = "DENY"
         return response
 
-    def __call__(self, request: HttpRequest) -> Any:
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
         if self.async_mode:
             return self.__acall__(request)
         return self._add_headers(self._sync_response(request))

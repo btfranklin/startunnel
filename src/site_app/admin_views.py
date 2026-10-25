@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -32,7 +32,7 @@ def private_download(
 
 
 def browser_operation(
-    request: HttpRequest, command_type: type[AdminCommand], data: dict[str, Any]
+    request: HttpRequest, command_type: type[AdminCommand], data: Mapping[str, object]
 ) -> AdminOperationResult:
     if not isinstance(request.user, User):
         raise Http404

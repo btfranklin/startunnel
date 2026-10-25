@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from asgiref.sync import async_to_sync
+from pytest_django.fixtures import DjangoAssertNumQueries, Settings
+from tests.factories import CredentialFactory, UserFactory
 
 from agents.models import AgentCredential
 from core.activity_listener import ActivityListener
@@ -28,14 +29,14 @@ from tunnels.activity import (
     read_activity_async,
 )
 from tunnels.admin_actions import rotate_address_as_admin
-from tunnels.cycles import create_tunnel
-from tunnels.messages import post_reply
+from tunnels.cycles import CreatedTunnel, create_tunnel
+from tunnels.messages import PostedReply, post_reply
 from tunnels.models import ActivityCheckpoint, Tunnel, TunnelEvent
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str = "activity-create") -> Any:
+def _create(credential: AgentCredential, key: str = "activity-create") -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -43,7 +44,9 @@ def _create(credential: Any, key: str = "activity-create") -> Any:
     )
 
 
-def _reply(created: Any, credential: Any, key: str = "activity-reply") -> Any:
+def _reply(
+    created: CreatedTunnel, credential: AgentCredential, key: str = "activity-reply"
+) -> PostedReply:
     return post_reply(
         credential=credential,
         idempotency_key=key,
@@ -55,7 +58,7 @@ def _reply(created: Any, credential: Any, key: str = "activity-reply") -> Any:
 
 @pytest.mark.django_db(transaction=True)
 def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
@@ -88,8 +91,8 @@ def test_immediate_activity_orders_pages_and_advances_filtered_cursor(
 )
 @pytest.mark.django_db(transaction=True)
 def test_activity_workers_keep_cursor_progress_and_query_bounds(
-    credential_factory: Any,
-    django_assert_num_queries: Any,
+    credential_factory: CredentialFactory,
+    django_assert_num_queries: DjangoAssertNumQueries,
     event_types: tuple[str, ...] | None,
     expected_positions: list[int],
     expected_next: int,
@@ -147,7 +150,7 @@ def test_activity_workers_keep_cursor_progress_and_query_bounds(
 
 @pytest.mark.django_db(transaction=True)
 def test_activity_validation_rejects_bad_positions_limits_and_types(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "activity-validation")
@@ -172,7 +175,9 @@ def test_activity_validation_rejects_bad_positions_limits_and_types(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_checkpoint_resume_exact_forward_and_regression(credential_factory: Any) -> None:
+def test_checkpoint_resume_exact_forward_and_regression(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
     created = _create(creator, "activity-checkpoint")
@@ -189,7 +194,7 @@ def test_checkpoint_resume_exact_forward_and_regression(credential_factory: Any)
         commit_checkpoint(credential=reader, address=created.address, position=2)
 
 
-def test_checkpoint_validation(credential_factory: Any) -> None:
+def test_checkpoint_validation(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = _create(creator, "activity-checkpoint-validation")
     with pytest.raises(InvalidRequest, match="negative"):
@@ -208,7 +213,7 @@ def test_checkpoint_validation(credential_factory: Any) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_mentions_are_prefetched_only_when_needed(credential_factory: Any) -> None:
+def test_mentions_are_prefetched_only_when_needed(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     mentioned, _ = credential_factory()
     created = _create(creator, "activity-mentions")
@@ -230,7 +235,7 @@ def test_mentions_are_prefetched_only_when_needed(credential_factory: Any) -> No
 
 @pytest.mark.django_db(transaction=True)
 def test_async_helpers_revalidate_revocation_and_address_rotation(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
@@ -274,7 +279,9 @@ def test_async_helpers_revalidate_revocation_and_address_rotation(
         _confirm_activity_page_for_async(page=page, credential=creator, address=created.address)
 
 
-def test_async_wait_start_uses_checkpoint_and_validates_inputs(credential_factory: Any) -> None:
+def test_async_wait_start_uses_checkpoint_and_validates_inputs(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
     created = _create(creator, "activity-async-start")
@@ -307,17 +314,17 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
     empty = ActivityPage(tunnel, (), 2, 2, 2, False)
     ready = ActivityPage(tunnel, (event,), 2, 3, 3, False, True)
     pages = [empty, ready]
-    registered: list[Any] = []
+    registered: list[object] = []
 
     class Listener:
-        def register(self, tunnel_id: Any) -> asyncio.Event:
+        def register(self, tunnel_id: UUID) -> asyncio.Event:
             registered.append(tunnel_id)
             return asyncio.Event()
 
         async def wait(self, waiter: asyncio.Event, timeout: float) -> None:
             assert registered and timeout > 0
 
-        def unregister(self, tunnel_id: Any, waiter: asyncio.Event) -> None:
+        def unregister(self, tunnel_id: UUID, waiter: asyncio.Event) -> None:
             registered.append((tunnel_id, waiter))
 
     monkeypatch.setattr("tunnels.activity.activity_listener", Listener())
@@ -326,7 +333,7 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
         lambda **kwargs: _ActivityStart(tunnel=tunnel, position=2, high_water_position=2),
     )
 
-    def reread(**kwargs: Any) -> ActivityPage:
+    def reread(**kwargs: object) -> ActivityPage:
         assert registered == [tunnel.id]
         return pages.pop(0)
 
@@ -343,7 +350,7 @@ async def test_async_wait_registers_before_read_and_returns_notified_page(
 
 @pytest.mark.asyncio
 async def test_activity_listener_registration_fallback_and_wakeup(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     listener = ActivityListener()
     tunnel_id = uuid4()

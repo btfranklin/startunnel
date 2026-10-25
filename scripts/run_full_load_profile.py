@@ -9,7 +9,7 @@ import re
 import sys
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import (
@@ -21,8 +21,9 @@ if TYPE_CHECKING or __package__:
         termination_signals,
         validate_project_name,
     )
-    from scripts.load_observations import LoadObservations
-    from scripts.proof_timing import PhaseTimings
+    from scripts.json_data import JsonObject, json_object
+    from scripts.load_observations import LoadObservations, ObservationSummary
+    from scripts.proof_timing import PhaseRecord, PhaseTimings
 else:
     from compose_isolation import (
         IsolatedComposeProject,
@@ -33,10 +34,44 @@ else:
         termination_signals,
         validate_project_name,
     )
-    from load_observations import LoadObservations
-    from proof_timing import PhaseTimings
+    from json_data import JsonObject, json_object
+    from load_observations import LoadObservations, ObservationSummary
+    from proof_timing import PhaseRecord, PhaseTimings
 
 SERVICES = ("postgres", "web", "maintenance", "load-profile")
+
+
+class LoadHelperData(TypedDict):
+    image_id: str
+    source_commit: str
+    platform: str
+    imports_passed: bool
+
+
+class LoadProvenance(TypedDict):
+    build_mode: str
+    image_ids: str
+    docker_version: str
+
+
+class LoadExecutionReport(TypedDict):
+    status: str
+    candidate_image: str
+    project: str
+    release_evidence_eligible: bool
+    diagnostic_lock_seconds: int
+    disposable_volumes_removed: bool
+    workload_report: str
+    observations_file: str
+    source_commit: str
+    platform: str
+    phases: list[PhaseRecord]
+    helper: NotRequired[LoadHelperData]
+    provenance: NotRequired[LoadProvenance]
+    failure: NotRequired[str]
+    observations: NotRequired[ObservationSummary]
+    configuration: NotRequired[JsonObject]
+    driver_observations_file: NotRequired[str]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -123,7 +158,7 @@ def _assert_reusable_images(stack: IsolatedComposeProject) -> None:
             )
 
 
-def _verify_helper(stack: IsolatedComposeProject, commit: str, platform: str) -> dict[str, object]:
+def _verify_helper(stack: IsolatedComposeProject, commit: str, platform: str) -> LoadHelperData:
     identifier = _image_id(stack, "load-profile")
     identity = required_output(
         [
@@ -192,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     timings = PhaseTimings()
-    report: dict[str, object] = {
+    report: LoadExecutionReport = {
         "status": "failed",
         "candidate_image": arguments.candidate_image,
         "project": project_name,
@@ -361,8 +396,10 @@ def main(argv: list[str] | None = None) -> int:
         if observations is not None:
             report["observations"] = observations.summary()
         try:
-            workload = json.loads((artifacts / workload_name).read_text(encoding="utf-8"))
-            report["configuration"] = workload.get("configuration", {})
+            workload = json_object(
+                json.loads((artifacts / workload_name).read_text(encoding="utf-8"))
+            )
+            report["configuration"] = json_object(workload.get("configuration", {}))
             driver_name = workload.get("driver_observations_file")
             if (
                 not isinstance(driver_name, str)

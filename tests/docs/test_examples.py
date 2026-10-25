@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import httpx
 import pytest
 from examples.python.startunnel_client import StarTunnelClient, StarTunnelError
 from scripts import run_tutorial
+from scripts.json_data import JsonValue, json_object
+from tests.docs.test_example_client_contracts import _response_body
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class CapturedRun(TypedDict, total=False):
+    command: list[str]
+    cwd: Path
+    env: dict[str, str]
+    check: bool
 
 
 @pytest.mark.asyncio
@@ -27,7 +37,17 @@ async def test_reference_client_keeps_tree_values_in_request_bodies() -> None:
         return httpx.Response(
             200,
             request=request,
-            json={"nodes": [], "snapshot_cursor": "private-cursor", "page_cursor": None},
+            json={
+                **json_object(
+                    _response_body(
+                        json_object(json.loads((ROOT / "generated/openapi.json").read_text())),
+                        "POST",
+                        "/api/v1/tree",
+                        200,
+                    )
+                ),
+                "snapshot_cursor": "private-cursor",
+            },
         )
 
     client = StarTunnelClient("https://startunnel.example", "safe-placeholder")
@@ -85,6 +105,29 @@ async def test_reference_client_error_has_request_id_but_not_bearer_values() -> 
     assert address not in str(captured.value)
     assert parent_id not in str(captured.value)
     assert "private payload" not in str(captured.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nodes", ["private-invalid-nodes", [{"id": "private-incomplete-message"}]])
+async def test_reference_client_rejects_malformed_success_responses(nodes: JsonValue) -> None:
+    document = json_object(json.loads((ROOT / "generated/openapi.json").read_text()))
+    body = json_object(_response_body(document, "POST", "/api/v1/tree", 200))
+    body["nodes"] = nodes
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body, headers={"X-Request-ID": "safe-validation-request"})
+
+    client = StarTunnelClient("https://startunnel.example", "safe-placeholder")
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(
+        base_url="https://startunnel.example", transport=httpx.MockTransport(handler)
+    )
+    async with client:
+        with pytest.raises(StarTunnelError) as captured:
+            await client.read_tree(address="private-address")
+    assert captured.value.code == "invalid_response"
+    assert captured.value.request_id == "safe-validation-request"
+    assert "private" not in str(captured.value)
 
 
 def test_tutorial_environment_file_declares_its_client_settings() -> None:
@@ -154,7 +197,7 @@ def test_tutorial_runner_constructs_the_profile_gated_compose_command(
     )
     env_path.chmod(0o600)
     monkeypatch.setattr(run_tutorial, "TUTORIAL_ENV", env_path)
-    captured: dict[str, Any] = {}
+    captured: CapturedRun = {}
 
     def fake_run(
         command: list[str],
@@ -163,7 +206,7 @@ def test_tutorial_runner_constructs_the_profile_gated_compose_command(
         env: dict[str, str],
         check: bool,
     ) -> subprocess.CompletedProcess[str]:
-        captured.update(command=command, cwd=cwd, env=env, check=check)
+        captured.update({"command": command, "cwd": cwd, "env": env, "check": check})
         return subprocess.CompletedProcess(command, returncode=7)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -202,7 +245,7 @@ def test_tutorial_runner_does_not_start_local_dependencies_for_a_hosted_service(
     )
     env_path.chmod(0o600)
     monkeypatch.setattr(run_tutorial, "TUTORIAL_ENV", env_path)
-    captured: dict[str, Any] = {}
+    captured: CapturedRun = {}
 
     def fake_run(
         command: list[str],
@@ -211,7 +254,7 @@ def test_tutorial_runner_does_not_start_local_dependencies_for_a_hosted_service(
         env: dict[str, str],
         check: bool,
     ) -> subprocess.CompletedProcess[str]:
-        captured.update(command=command, cwd=cwd, env=env, check=check)
+        captured.update({"command": command, "cwd": cwd, "env": env, "check": check})
         return subprocess.CompletedProcess(command, returncode=0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)

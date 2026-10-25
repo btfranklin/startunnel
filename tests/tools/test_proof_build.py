@@ -233,3 +233,24 @@ def test_failure_report_redacts_cache_token_and_limits_output_to_80_lines() -> N
     assert len(safe.splitlines()) == 80
     assert "cache-token" not in safe
     assert "[redacted sensitive build output]" in safe
+
+
+@pytest.mark.parametrize(
+    "compose_model",
+    ["[]", "null", '{"services": []}', '{"services": {"load-profile": null}}'],
+)
+def test_invalid_compose_shape_uses_the_safe_build_error(
+    monkeypatch: pytest.MonkeyPatch, compose_model: str
+) -> None:
+    def run(
+        command: Sequence[str], environment: Mapping[str, str], timeout_seconds: int
+    ) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["docker", "info", "--format"]:
+            return subprocess.CompletedProcess(command, 0, "linux/amd64", "")
+        if command[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(command, 0, "a" * 40, "")
+        raise AssertionError("An invalid model must fail before the image build.")
+
+    monkeypatch.setattr(proof_build, "_run", run)
+    with pytest.raises(proof_build.ProofBuildError):
+        proof_build.build_services(("load-profile",), compose_model=compose_model, environment={})

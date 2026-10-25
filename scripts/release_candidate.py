@@ -8,10 +8,35 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, NotRequired, TypedDict
 
-if __package__:
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonObject,
+        JsonValue,
+        json_array,
+        json_integer,
+        json_object,
+        json_string,
+        json_value,
+        object_array,
+    )
+else:
+    from json_data import (
+        JsonObject,
+        JsonValue,
+        json_array,
+        json_integer,
+        json_object,
+        json_string,
+        json_value,
+        object_array,
+    )
+
+
+if TYPE_CHECKING or __package__:
     from .proof_evidence import (
         KINDS,
         checksum,
@@ -22,7 +47,7 @@ if __package__:
     )
     from .release_record import ROOT, candidate_version
 else:
-    from proof_evidence import (  # type: ignore[import-not-found,no-redef]
+    from proof_evidence import (
         KINDS,
         checksum,
         read_object,
@@ -30,19 +55,95 @@ else:
         referenced_file,
         validate_proof,
     )
-    from release_record import ROOT, candidate_version  # type: ignore[import-not-found,no-redef]
+    from release_record import ROOT, candidate_version
 
 OFFICIAL_IMAGE = re.compile(r"ghcr\.io/btfranklin/startunnel@sha256:[0-9a-f]{64}")
+
+
+class ProofReference(TypedDict):
+    kind: str
+    run_id: int
+    attempt: int
+    artifact_id: int
+    artifact_digest: str | None
+    manifest: str
+    sha256: str
+    status: str
+
+
+class ProofSelection(TypedDict):
+    selected: dict[str, ProofReference]
+    history: list[ProofReference]
+
+
+class CandidateData(TypedDict):
+    version: str
+    source_commit: str
+    image: str
+    platform: str
+    source_validation_run_id: int
+    evidence: NotRequired[dict[str, str]]
+    proofs: NotRequired[dict[str, ProofReference]]
+    attempts: NotRequired[list[ProofReference]]
+    status: NotRequired[str]
+
+
+def proof_reference(value: object) -> ProofReference:
+    data = json_object(value)
+    digest = data.get("artifact_digest")
+    if digest is not None:
+        digest = json_string(digest)
+    return {
+        "kind": json_string(data["kind"]),
+        "run_id": json_integer(data["run_id"]),
+        "attempt": json_integer(data["attempt"]),
+        "artifact_id": json_integer(data["artifact_id"]),
+        "artifact_digest": digest,
+        "manifest": json_string(data["manifest"]),
+        "sha256": json_string(data["sha256"]),
+        "status": json_string(data["status"]),
+    }
+
+
+def candidate_data(value: Mapping[str, object]) -> CandidateData:
+    result: CandidateData = {
+        "version": json_string(value["version"]),
+        "source_commit": json_string(value["source_commit"]),
+        "image": json_string(value["image"]),
+        "platform": json_string(value["platform"]),
+        "source_validation_run_id": json_integer(value["source_validation_run_id"]),
+    }
+    if "evidence" in value:
+        result["evidence"] = {
+            key: json_string(item) for key, item in json_object(value["evidence"]).items()
+        }
+    if "proofs" in value:
+        result["proofs"] = {
+            key: proof_reference(item) for key, item in json_object(value["proofs"]).items()
+        }
+    if "attempts" in value:
+        result["attempts"] = [proof_reference(item) for item in json_array(value["attempts"])]
+    if "status" in value:
+        result["status"] = json_string(value["status"])
+    return result
+
+
+def github_object(repository: str, path: str) -> JsonObject:
+    return json_object(github_api(repository, path))
+
+
+def github_pages(repository: str, path: str) -> list[JsonObject]:
+    return object_array(github_api(repository, path, paginate=True))
 
 
 def git_commit() -> str:
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
 
 
-def validate_candidate(candidate: dict[str, Any], *, commit: str, version: str) -> None:
+def validate_candidate(candidate: Mapping[str, object], *, commit: str, version: str) -> None:
     if candidate.get("source_commit") != commit or candidate.get("version") != version:
         raise ValueError("Candidate must match the exact source commit and VERSION.")
-    if not OFFICIAL_IMAGE.fullmatch(candidate.get("image", "")):
+    if not OFFICIAL_IMAGE.fullmatch(json_string(candidate.get("image", ""))):
         raise ValueError("Candidate must use the official repository and an immutable digest.")
     if candidate.get("platform") != "linux/amd64":
         raise ValueError("Candidate platform must be linux/amd64.")
@@ -52,7 +153,7 @@ def validate_candidate(candidate: dict[str, Any], *, commit: str, version: str) 
 
 
 def successful_run(
-    run: dict[str, Any], commit: str, workflow: str, *, events: tuple[str, ...]
+    run: Mapping[str, object], commit: str, workflow: str, *, events: tuple[str, ...]
 ) -> bool:
     return (
         run.get("head_sha") == commit
@@ -64,40 +165,42 @@ def successful_run(
     )
 
 
-def github_api(repository: str, path: str, *, paginate: bool = False) -> Any:
+def github_api(repository: str, path: str, *, paginate: bool = False) -> JsonValue:
     command = ["gh", "api", f"repos/{repository}/{path}"]
     if paginate:
         command.extend(["--paginate", "--slurp"])
-    return json.loads(subprocess.check_output(command, text=True))
+    return json_value(json.loads(subprocess.check_output(command, text=True)))
 
 
 def source_run(repository: str, commit: str) -> int:
-    response = github_api(
+    response = github_object(
         repository,
         f"actions/workflows/ci.yml/runs?branch=main&head_sha={commit}&status=success&per_page=100",
     )
-    for run in response["workflow_runs"]:
+    for run in object_array(response["workflow_runs"]):
         if successful_run(run, commit, "ci.yml", events=("push", "workflow_dispatch")):
-            return int(run["id"])
+            return json_integer(run["id"])
     raise ValueError(
         "Wait for successful source CI on main for this exact commit, or rerun ci.yml."
     )
 
 
 def validated_run(repository: str, commit: str) -> int | None:
-    pages = github_api(repository, "actions/artifacts?per_page=100", paginate=True)
+    pages = github_pages(repository, "actions/artifacts?per_page=100")
     for page in pages:
-        for artifact in page["artifacts"]:
-            source = artifact.get("workflow_run", {})
+        for artifact in object_array(page["artifacts"]):
+            source = json_object(artifact.get("workflow_run", {}))
             if (
-                not re.fullmatch(r"release-candidate-[0-9]+-[12]", artifact.get("name", ""))
+                not re.fullmatch(
+                    r"release-candidate-[0-9]+-[12]", json_string(artifact.get("name", ""))
+                )
                 or artifact.get("expired") is not False
                 or source.get("head_sha") != commit
                 or source.get("head_branch") != "main"
             ):
                 continue
-            run_id = int(source["id"])
-            run = github_api(repository, f"actions/runs/{run_id}")
+            run_id = json_integer(source["id"])
+            run = github_object(repository, f"actions/runs/{run_id}")
             if successful_run(run, commit, "release-candidate.yml", events=("workflow_dispatch",)):
                 return run_id
     return None
@@ -116,7 +219,7 @@ def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
                     "--repo",
                     repository,
                     "--name",
-                    retained_artifact(repository, run_id)["name"],
+                    json_string(retained_artifact(repository, run_id)["name"]),
                     "--dir",
                     directory,
                 ],
@@ -130,24 +233,24 @@ def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
     return {"reuse_run_id": "", "source_run_id": run_id}
 
 
-def retained_artifact(repository: str, run_id: int) -> dict[str, Any]:
+def retained_artifact(repository: str, run_id: int) -> JsonObject:
     artifacts = [
         item
-        for page in github_api(
-            repository, f"actions/runs/{run_id}/artifacts?per_page=100", paginate=True
-        )
-        for item in page["artifacts"]
-        if re.fullmatch(rf"release-candidate-{run_id}-[12]", item.get("name", ""))
+        for page in github_pages(repository, f"actions/runs/{run_id}/artifacts?per_page=100")
+        for item in object_array(page["artifacts"])
+        if re.fullmatch(rf"release-candidate-{run_id}-[12]", json_string(item.get("name", "")))
     ]
     if not artifacts:
         raise ValueError("The selected run has no retained candidate artifact.")
-    artifact = max(artifacts, key=lambda item: int(item["name"].rsplit("-", 1)[1]))
+    artifact = max(artifacts, key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1]))
     if artifact.get("expired") is not False:
         raise ValueError("Retained candidate evidence has expired.")
-    return cast(dict[str, Any], artifact)
+    return artifact
 
 
-def _download(repository: str, run_id: int, artifact: dict[str, Any], directory: Path) -> None:
+def _download(
+    repository: str, run_id: int, artifact: Mapping[str, object], directory: Path
+) -> None:
     subprocess.run(
         [
             "gh",
@@ -157,7 +260,7 @@ def _download(repository: str, run_id: int, artifact: dict[str, Any], directory:
             "--repo",
             repository,
             "--name",
-            artifact["name"],
+            json_string(artifact["name"]),
             "--dir",
             str(directory),
         ],
@@ -169,12 +272,10 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
     """Select attempts explicitly and retain failed attempts beside them."""
     artifacts = [
         item
-        for page in github_api(
-            repository, f"actions/runs/{run_id}/artifacts?per_page=100", paginate=True
-        )
-        for item in page["artifacts"]
+        for page in github_pages(repository, f"actions/runs/{run_id}/artifacts?per_page=100")
+        for item in object_array(page["artifacts"])
     ]
-    named = {item["name"]: item for item in artifacts}
+    named = {json_string(item["name"]): item for item in artifacts}
     if len(named) != len(artifacts):
         raise ValueError("The workflow contains duplicate artifact names.")
     directory.mkdir(parents=True, exist_ok=True)
@@ -185,11 +286,13 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
     ]
     if not candidates:
         raise ValueError("The candidate image artifact is missing.")
-    candidate_artifact = max(candidates, key=lambda item: int(item["name"].rsplit("-", 1)[1]))
+    candidate_artifact = max(
+        candidates, key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1])
+    )
     if candidate_artifact.get("expired") is not False:
         raise ValueError("The candidate image artifact has expired.")
     _download(repository, run_id, candidate_artifact, directory)
-    selection: dict[str, Any] = {"selected": {}, "history": []}
+    selection: ProofSelection = {"selected": {}, "history": []}
     for kind in KINDS:
         attempts = sorted(
             (
@@ -197,12 +300,12 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
                 for name, item in named.items()
                 if re.fullmatch(rf"proof-{kind}-{run_id}-[0-9]+", name)
             ),
-            key=lambda item: int(item["name"].rsplit("-", 1)[1]),
+            key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1]),
         )
         if not attempts or len(attempts) > 2:
             raise ValueError(f"The {kind} proof is missing or exceeds the bounded retry limit.")
         for artifact in attempts:
-            attempt = int(artifact["name"].rsplit("-", 1)[1])
+            attempt = int(json_string(artifact["name"]).rsplit("-", 1)[1])
             if attempt not in (1, 2) or artifact.get("expired") is not False:
                 raise ValueError("A required proof attempt is expired or outside the retry limit.")
             destination = directory / "proofs" / kind / str(attempt)
@@ -215,15 +318,17 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
                 or record.get("kind") != kind
             ):
                 raise ValueError("Proof attempt metadata differs from its artifact name.")
-            reference = {
+            reference: ProofReference = {
                 "kind": kind,
                 "run_id": run_id,
                 "attempt": attempt,
-                "artifact_id": artifact["id"],
-                "artifact_digest": artifact.get("digest"),
+                "artifact_id": json_integer(artifact["id"]),
+                "artifact_digest": json_string(artifact["digest"])
+                if artifact.get("digest") is not None
+                else None,
                 "manifest": str(path.relative_to(directory)),
                 "sha256": checksum(path),
-                "status": record.get("status"),
+                "status": json_string(record.get("status")),
             }
             selection["history"].append(reference)
         latest = selection["history"][-1]
@@ -235,16 +340,23 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
     )
 
 
-def verify_evidence(directory: Path, *, commit: str, version: str) -> dict[str, Any]:
-    candidate = read_object(referenced_file(directory, "candidate-image.json"))
+def verify_evidence(directory: Path, *, commit: str, version: str) -> CandidateData:
+    candidate = candidate_data(read_object(referenced_file(directory, "candidate-image.json")))
     validate_candidate(candidate, commit=commit, version=version)
     selection_path = referenced_file(directory, "proof-selection.json")
-    selection = read_object(selection_path)
-    if set(selection.get("selected", {})) != set(KINDS):
+    selection_raw = read_object(selection_path)
+    selection: ProofSelection = {
+        "selected": {
+            key: proof_reference(item)
+            for key, item in json_object(selection_raw.get("selected", {})).items()
+        },
+        "history": [proof_reference(item) for item in json_array(selection_raw.get("history", []))],
+    }
+    if set(selection["selected"]) != set(KINDS):
         raise ValueError("Candidate evidence must select all required proofs.")
     evidence: dict[str, str] = {"proof-selection.json": checksum(selection_path)}
     runtime_ids: dict[str, str] = {}
-    history = selection.get("history")
+    history = selection["history"]
     if not isinstance(history, list) or not history:
         raise ValueError("Candidate proof attempt history is missing.")
     seen: set[tuple[str, int]] = set()
@@ -262,7 +374,7 @@ def verify_evidence(directory: Path, *, commit: str, version: str) -> dict[str, 
         if (
             type(reference.get("artifact_id")) is not int
             or reference["artifact_id"] <= 0
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", reference.get("artifact_digest", ""))
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", reference.get("artifact_digest") or "")
         ):
             raise ValueError("Proof artifact identity and digest are required.")
         manifest_path = referenced_file(directory, reference["manifest"])
@@ -279,11 +391,11 @@ def verify_evidence(directory: Path, *, commit: str, version: str) -> dict[str, 
         ):
             raise ValueError("Retained attempt belongs to another source or image.")
         evidence[reference["manifest"]] = checksum(manifest_path)
-        for name, expected in proof.get("files", {}).items():
+        for name, expected in json_object(proof.get("files", {})).items():
             path = referenced_file(manifest_path.parent, name)
             if checksum(path) != expected:
                 raise ValueError("Retained evidence checksums do not match.")
-            evidence[str(path.relative_to(directory))] = expected
+            evidence[str(path.relative_to(directory))] = json_string(expected)
     for kind, reference in selection["selected"].items():
         if reference not in history or reference["attempt"] != max(
             attempt for recorded_kind, attempt in seen if recorded_kind == kind
@@ -295,21 +407,33 @@ def verify_evidence(directory: Path, *, commit: str, version: str) -> dict[str, 
             proof, manifest_path.parent, kind=kind, commit=commit, image=candidate["image"]
         )
         if kind == "system":
-            system = read_object(referenced_file(manifest_path.parent, proof["reports"]["system"]))
-            runtime_ids = system["image_ids"]
+            system = read_object(
+                referenced_file(
+                    manifest_path.parent, json_string(json_object(proof["reports"])["system"])
+                )
+            )
+            runtime_ids = {
+                key: json_string(item) for key, item in json_object(system["image_ids"]).items()
+            }
         if kind == "load":
-            load = read_object(referenced_file(manifest_path.parent, proof["reports"]["workload"]))
+            load = read_object(
+                referenced_file(
+                    manifest_path.parent, json_string(json_object(proof["reports"])["workload"])
+                )
+            )
             load_ids = dict(
-                pair.split("=", 1) for pair in load["provenance"]["image_ids"].split(",")
+                pair.split("=", 1)
+                for pair in json_string(json_object(load["provenance"])["image_ids"]).split(",")
             )
     if any(
         runtime_ids.get(service) != runtime_ids["web"]
         for service in ("migrate", "maintenance", "proxy-web")
     ) or any(load_ids.get(service) != runtime_ids["web"] for service in ("web", "maintenance")):
         raise ValueError("System and load proofs ran different runtime images.")
-    candidate.update(
-        evidence=evidence, proofs=selection["selected"], attempts=history, status="validated"
-    )
+    candidate["evidence"] = evidence
+    candidate["proofs"] = selection["selected"]
+    candidate["attempts"] = history
+    candidate["status"] = "validated"
     retained = directory / "release-candidate.json"
     if retained.exists() and read_object(retained) != candidate:
         raise ValueError("Retained promotion record does not match its evidence checksums.")
@@ -397,7 +521,7 @@ def main() -> int:
                     )
                 outputs = {
                     "run_id": run_id,
-                    "artifact_name": retained_artifact(repository, run_id)["name"],
+                    "artifact_name": json_string(retained_artifact(repository, run_id)["name"]),
                 }
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as destination:
                 for name, value in outputs.items():

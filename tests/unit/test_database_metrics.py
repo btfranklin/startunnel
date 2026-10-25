@@ -1,11 +1,10 @@
 """Database metrics include queries made by ASGI request threads."""
 
-from typing import Any
-
 import pytest
 from asgiref.sync import sync_to_async
 from django.db import connection
 from django.test import AsyncClient
+from pytest_django.fixtures import Settings
 
 from core.metrics import DB_OPERATION_SECONDS
 
@@ -37,7 +36,7 @@ def read_database() -> None:
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.asyncio
-async def test_asgi_health_query_updates_database_metrics(settings: Any) -> None:
+async def test_asgi_health_query_updates_database_metrics(settings: Settings) -> None:
     settings.ALLOWED_HOSTS = ["testserver"]
     before = select_count()
     try:

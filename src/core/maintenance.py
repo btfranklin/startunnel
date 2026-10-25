@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
 
 from django.contrib.sessions.models import Session
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 
@@ -176,7 +175,7 @@ def _delete_due_cycles(*, now: datetime) -> tuple[int, int, int]:
     return deleted, failures, len(cycle_ids)
 
 
-def _delete_batch(query: QuerySet[Any], *, ordered_field: str) -> int:
+def _delete_batch(query: QuerySet[models.Model], *, ordered_field: str) -> int:
     ids = list(
         query.order_by(ordered_field, "pk").values_list("pk", flat=True)[:MAINTENANCE_BATCH_SIZE]
     )

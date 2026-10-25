@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from django.db import IntegrityError, OperationalError, connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries
+from tests.api_data import CreateResponseData, ErrorResponseData, create_response, error_response
+from tests.factories import CredentialFactory
 
 from agents.models import AgentCredential
 from agents.services import authenticate_key
 from api.schemas import ErrorResponse
+from core.json_types import json_object
 from core.limits import Limits
 from tunnels.codec import encode_token
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -35,11 +43,11 @@ def _auth(key: str) -> dict[str, str]:
 def _post(
     client: Client,
     path: str,
-    data: dict[str, Any],
+    data: Mapping[str, object],
     *,
     key: str,
     idempotency_key: str | None = None,
-) -> Any:
+) -> _MonkeyPatchedWSGIResponse:
     headers = _auth(key)
     if idempotency_key is not None:
         headers["Idempotency-Key"] = idempotency_key
@@ -51,7 +59,7 @@ def _post(
     )
 
 
-def _create_request(*, text: str = "Coordinate the release review.") -> dict[str, Any]:
+def _create_request(*, text: str = "Coordinate the release review.") -> dict[str, object]:
     return {
         "label": "Release review",
         "cycle": {
@@ -68,7 +76,7 @@ def _create_request(*, text: str = "Coordinate the release review.") -> dict[str
 
 def _create_global(
     client: Client, key: str, idempotency_key: str = "api-create-0001"
-) -> dict[str, Any]:
+) -> CreateResponseData:
     response = _post(
         client,
         "/api/v1/tunnels",
@@ -77,7 +85,7 @@ def _create_global(
         idempotency_key=idempotency_key,
     )
     assert response.status_code == 201, response.content
-    return cast(dict[str, Any], response.json())
+    return create_response(response.json())
 
 
 def _reply(
@@ -89,7 +97,7 @@ def _reply(
     idempotency_key: str,
     text: str,
     path: str = "/api/v1/messages",
-) -> Any:
+) -> _MonkeyPatchedWSGIResponse:
     return _post(
         client,
         path,
@@ -104,10 +112,13 @@ def _reply(
     )
 
 
-def _assert_safe_error(response: Any, *, status: int, code: str) -> dict[str, Any]:
+def _assert_safe_error(
+    response: _MonkeyPatchedWSGIResponse, *, status: int, code: str
+) -> ErrorResponseData:
     assert response.status_code == status
-    body = cast(dict[str, Any], response.json())
-    assert set(body) == {"error"}
+    raw_body = json_object(response.json())
+    assert set(raw_body) == {"error"}
+    body = error_response(raw_body)
     assert body["error"]["code"] == code
     assert body["error"]["message"]
     assert body["error"]["request_id"] == response["X-Request-ID"]
@@ -119,9 +130,10 @@ def _assert_safe_error(response: Any, *, status: int, code: str) -> dict[str, An
 
 
 def test_me_returns_tree_limits_usage_and_security_headers(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     credential, key = credential_factory(name="Status agent")
+    assert credential.created_by is not None
     response = client.get("/api/v1/me", headers=_auth(key))
     assert response.status_code == 200
     body = response.json()
@@ -142,7 +154,7 @@ def test_me_returns_tree_limits_usage_and_security_headers(
 
 
 def test_creation_cap_returns_safe_error_and_reports_creator_usage(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     limits = replace(Limits(), non_retired_tunnels=3, non_retired_tunnels_per_credential=1)
     monkeypatch.setattr("core.limits.effective_limits", lambda: limits)
@@ -172,7 +184,7 @@ def test_creation_cap_returns_safe_error_and_reports_creator_usage(
 
 
 def test_instance_creation_cap_returns_safe_error(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "core.limits.effective_limits", lambda: replace(Limits(), non_retired_tunnels=0)
@@ -190,7 +202,7 @@ def test_instance_creation_cap_returns_safe_error(
 
 
 def test_missing_malformed_and_unavailable_credentials_use_safe_errors(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _assert_safe_error(client.get("/api/v1/me"), status=401, code="invalid_credential")
     malformed = client.get("/api/v1/me", headers=_auth("not-a-key"))
@@ -203,7 +215,9 @@ def test_missing_malformed_and_unavailable_credentials_use_safe_errors(
     _assert_safe_error(revoked, status=401, code="invalid_credential")
 
 
-def test_create_is_atomic_rooted_and_idempotent(client: Client, credential_factory: Any) -> None:
+def test_create_is_atomic_rooted_and_idempotent(
+    client: Client, credential_factory: CredentialFactory
+) -> None:
     credential, key = credential_factory(name="Coordinator")
     created = _create_global(client, key, "api-create-rooted")
     assert created["tunnel"]["state"] == "active"
@@ -252,7 +266,7 @@ def test_create_is_atomic_rooted_and_idempotent(client: Client, credential_facto
 
 
 def test_creation_uses_each_agents_normal_request_limit(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import limits as instance_limits
     from core.rate_limits import consume_api_operation
@@ -278,7 +292,7 @@ def test_creation_uses_each_agents_normal_request_limit(
 
 
 def test_address_misses_use_only_each_agents_normal_request_limit(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import limits as instance_limits
     from core.rate_limits import consume_api_operation
@@ -286,6 +300,7 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
     from tunnels.cycles import create_tunnel
 
     first, first_key = credential_factory()
+    assert first.created_by is not None
     _, second_key = credential_factory()
     created = create_tunnel(
         credential=first,
@@ -318,7 +333,7 @@ def test_address_misses_use_only_each_agents_normal_request_limit(
 
 
 def test_create_replay_keeps_the_original_wire_state_after_later_activity(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     request = _create_request()
@@ -367,7 +382,7 @@ def test_create_replay_keeps_the_original_wire_state_after_later_activity(
 
 
 def test_agents_build_and_navigate_one_immutable_tree(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, coordinator_key = credential_factory(name="Coordinator")
     worker, worker_key = credential_factory(name="Worker")
@@ -447,7 +462,7 @@ def test_agents_build_and_navigate_one_immutable_tree(
 
 
 def test_tree_snapshot_pagination_excludes_later_replies(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, "api-snapshot-create")
@@ -505,7 +520,7 @@ def test_tree_snapshot_pagination_excludes_later_replies(
 
 
 def test_direct_reply_pagination_is_complete_and_excludes_later_siblings(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, "api-reply-page-create")
@@ -578,8 +593,8 @@ def test_direct_reply_pagination_is_complete_and_excludes_later_siblings(
 
 def test_direct_reply_page_serialization_has_one_bounded_query_budget(
     client: Client,
-    credential_factory: Any,
-    django_assert_num_queries: Any,
+    credential_factory: CredentialFactory,
+    django_assert_max_num_queries: DjangoAssertNumQueries,
 ) -> None:
     _, key = credential_factory(name="Query-bound reader")
     created = _create_global(client, key, "api-reply-query-create")
@@ -596,7 +611,7 @@ def test_direct_reply_page_serialization_has_one_bounded_query_budget(
         )
         assert response.status_code == 201
 
-    with django_assert_num_queries(15, exact=False):
+    with django_assert_max_num_queries(15):
         response = _post(
             client,
             "/api/v1/tree/replies",
@@ -608,7 +623,9 @@ def test_direct_reply_page_serialization_has_one_bounded_query_budget(
     assert len(response.json()["messages"]) == 25
 
 
-def test_reply_requires_parent_in_current_tunnel(client: Client, credential_factory: Any) -> None:
+def test_reply_requires_parent_in_current_tunnel(
+    client: Client, credential_factory: CredentialFactory
+) -> None:
     _, key = credential_factory()
     first = _create_global(client, key, "api-parent-first")
     second = _create_global(client, key, "api-parent-second")
@@ -625,7 +642,7 @@ def test_reply_requires_parent_in_current_tunnel(client: Client, credential_fact
 
 
 def test_reply_is_idempotent_and_same_agent_can_reply_to_itself(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory(name="Solo agent")
     created = _create_global(client, key, "api-self-create")
@@ -666,7 +683,7 @@ def test_reply_is_idempotent_and_same_agent_can_reply_to_itself(
 
 
 def test_cycle_close_is_creator_only_and_tree_remains_read_only(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, creator_key = credential_factory(name="Creator")
     _, outsider_key = credential_factory(name="Outsider")
@@ -717,7 +734,7 @@ def test_cycle_close_is_creator_only_and_tree_remains_read_only(
 
 
 def test_invalid_unknown_and_tampered_cursor_errors_are_safe(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     invalid = _post(
@@ -746,7 +763,7 @@ def test_invalid_unknown_and_tampered_cursor_errors_are_safe(
 
 
 def test_create_post_and_close_require_idempotency_key(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     create = _post(client, "/api/v1/tunnels", _create_request(), key=key)
@@ -775,7 +792,9 @@ def test_create_post_and_close_require_idempotency_key(
     _assert_safe_error(close, status=400, code="invalid_request")
 
 
-def test_root_and_reply_payload_limits_return_413(client: Client, credential_factory: Any) -> None:
+def test_root_and_reply_payload_limits_return_413(
+    client: Client, credential_factory: CredentialFactory
+) -> None:
     _, key = credential_factory()
     oversized_root = _post(
         client,
@@ -800,12 +819,14 @@ def test_root_and_reply_payload_limits_return_413(client: Client, credential_fac
 
 def test_validation_framework_and_dependency_errors_use_public_envelope(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, key = credential_factory()
     bad_label = _create_request()
-    bad_label["cycle"]["label"] = []
+    cycle = bad_label["cycle"]
+    assert isinstance(cycle, dict)
+    cycle["label"] = []
     validation = _post(
         client,
         "/api/v1/tunnels",
@@ -830,13 +851,13 @@ def test_validation_framework_and_dependency_errors_use_public_envelope(
 
 def test_integrity_failure_is_not_reported_as_dependency_outage(
     client: Client,
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, "api-integrity-create")
 
-    def fail_read(**kwargs: Any) -> None:
+    def fail_read(**kwargs: object) -> None:
         del kwargs
         raise IntegrityError("safe test invariant failure")
 
@@ -853,7 +874,7 @@ def test_integrity_failure_is_not_reported_as_dependency_outage(
 
 
 def test_expired_cycle_rejects_reply_without_mutation(
-    client: Client, credential_factory: Any
+    client: Client, credential_factory: CredentialFactory
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, "api-expired-cycle")
@@ -874,7 +895,7 @@ def test_expired_cycle_rejects_reply_without_mutation(
 
 @pytest.mark.parametrize(("path", "expected_checks"), [("tree", 2), ("enter", 3)])
 def test_address_reads_check_credentials_without_a_separate_limits_query(
-    client: Client, credential_factory: Any, path: str, expected_checks: int
+    client: Client, credential_factory: CredentialFactory, path: str, expected_checks: int
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, f"api-credential-query-{path}")
@@ -896,7 +917,7 @@ def test_address_reads_check_credentials_without_a_separate_limits_query(
 
 
 def test_address_read_rechecks_a_key_revoked_after_authentication(
-    client: Client, credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, key = credential_factory()
     created = _create_global(client, key, "api-revoke-after-auth-create")

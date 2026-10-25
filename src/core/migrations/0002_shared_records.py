@@ -3,11 +3,21 @@
 import uuid
 
 import django.db.models.deletion
+from django.apps.registry import Apps
 from django.conf import settings
 from django.db import migrations, models
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 
-def _move_content_type(apps, schema_editor, old_app, old_model, new_app, new_model, verbose_name):
+def _move_content_type(
+    apps: Apps,
+    schema_editor: BaseDatabaseSchemaEditor,
+    old_app: str,
+    old_model: str,
+    new_app: str,
+    new_model: str,
+    verbose_name: str,
+) -> None:
     content_types = apps.get_model("contenttypes", "ContentType")
     permissions = apps.get_model("auth", "Permission")
     database = schema_editor.connection.alias
@@ -23,7 +33,7 @@ def _move_content_type(apps, schema_editor, old_app, old_model, new_app, new_mod
         ).update(codename=f"{action}_{new_model}", name=f"Can {action} {verbose_name}")
 
 
-def move_content_types(apps, schema_editor):
+def move_content_types(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     _move_content_type(
         apps, schema_editor, "tunnels", "auditevent", "core", "auditevent", "audit event"
     )
@@ -32,7 +42,7 @@ def move_content_types(apps, schema_editor):
     )
 
 
-def restore_content_types(apps, schema_editor):
+def restore_content_types(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     _move_content_type(
         apps, schema_editor, "core", "auditevent", "tunnels", "auditevent", "audit event"
     )

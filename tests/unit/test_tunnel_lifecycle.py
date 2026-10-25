@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Mapping
 from datetime import timedelta
-from typing import Any
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from django.db import IntegrityError, ProgrammingError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from pytest_django.fixtures import DjangoAssertNumQueries, Settings
+from tests.factories import CredentialFactory
 
 from agents.models import AgentCredential
 from core.errors import (
@@ -21,25 +23,47 @@ from core.errors import (
     InvalidRequest,
     TunnelUnavailable,
 )
-from tunnels.cycles import close_cycle, create_tunnel
+from tunnels.cycles import CreatedTunnel, StartedCycle, close_cycle, create_tunnel
 from tunnels.messages import _resolve_mentions, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel, TunnelAddress, TunnelEvent
 
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str = "create-tree-0001", **kwargs: Any) -> Any:
+class PostReplyArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    parent_id: UUID
+    content: Mapping[str, object]
+
+
+class CloseCycleArguments(TypedDict):
+    credential: AgentCredential
+    address: str
+    expected_cycle_id: UUID
+    idempotency_key: str
+
+
+def _create(
+    credential: AgentCredential,
+    key: str = "create-tree-0001",
+    *,
+    expires_in_seconds: int | None = None,
+) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
         label="Release coordination",
         cycle_label="Initial review",
         root_content={"type": "text", "text": "Review release 42."},
-        **kwargs,
+        expires_in_seconds=expires_in_seconds,
     )
 
 
-def test_create_is_atomic_and_builds_one_rooted_cycle(credential_factory: Any) -> None:
+def test_create_is_atomic_and_builds_one_rooted_cycle(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory(name="Coordinator")
 
     created = _create(creator)
@@ -65,7 +89,7 @@ def test_create_is_atomic_and_builds_one_rooted_cycle(credential_factory: Any) -
 
 
 def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
 
@@ -108,7 +132,7 @@ def test_create_replay_returns_same_tree_and_keeps_address_out_of_receipt(
     ],
 )
 def test_create_replay_rejects_an_invalid_historical_response(
-    credential_factory: Any, field: str, value: Any
+    credential_factory: CredentialFactory, field: str, value: object
 ) -> None:
     creator, _ = credential_factory()
     _create(creator, key="create-invalid-response")
@@ -121,11 +145,11 @@ def test_create_replay_rejects_an_invalid_historical_response(
 
 
 def test_failed_root_creation_rolls_back_every_resource(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     creator, _ = credential_factory()
 
-    def fail_store(message: Message, mentions: list[Any]) -> None:
+    def fail_store(message: Message, mentions: list[AgentCredential]) -> None:
         del message, mentions
         raise RuntimeError("injected root failure")
 
@@ -142,7 +166,7 @@ def test_failed_root_creation_rolls_back_every_resource(
 
 
 def test_replies_form_an_immutable_ordered_tree_and_allow_self_reply(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory(name="Coordinator")
     worker, _ = credential_factory(name="Research worker")
@@ -175,11 +199,11 @@ def test_replies_form_an_immutable_ordered_tree_and_allow_self_reply(
 
 
 def test_reply_replay_keeps_original_position_without_event_reads_or_writes(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, key="reply-position-create")
-    arguments = {
+    arguments: PostReplyArguments = {
         "credential": creator,
         "idempotency_key": "reply-position-original",
         "address": created.address,
@@ -244,11 +268,11 @@ def test_reply_replay_keeps_original_position_without_event_reads_or_writes(
     ids=["missing", "null", "false", "true", "zero", "negative", "string", "float"],
 )
 def test_reply_replay_rejects_an_invalid_stored_event_position(
-    credential_factory: Any, position_fields: dict[str, Any]
+    credential_factory: CredentialFactory, position_fields: dict[str, object]
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, key="reply-invalid-position-create")
-    arguments = {
+    arguments: PostReplyArguments = {
         "credential": creator,
         "idempotency_key": "reply-invalid-position",
         "address": created.address,
@@ -267,11 +291,11 @@ def test_reply_replay_rejects_an_invalid_stored_event_position(
 
 @pytest.mark.parametrize("field", ["revoked_at", "expires_at"])
 def test_reply_replay_rejects_an_unavailable_credential_from_a_stale_object(
-    credential_factory: Any, field: str
+    credential_factory: CredentialFactory, field: str
 ) -> None:
     creator, _ = credential_factory()
     created = _create(creator, key="reply-credential-create")
-    arguments = {
+    arguments: PostReplyArguments = {
         "credential": creator,
         "idempotency_key": "reply-credential-original",
         "address": created.address,
@@ -288,7 +312,7 @@ def test_reply_replay_rejects_an_unavailable_credential_from_a_stale_object(
         post_reply(**arguments)
 
 
-def test_parent_must_belong_to_the_active_cycle(credential_factory: Any) -> None:
+def test_parent_must_belong_to_the_active_cycle(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     first = _create(creator, key="parent-first-create")
     second = _create(creator, key="parent-second-create")
@@ -306,7 +330,7 @@ def test_parent_must_belong_to_the_active_cycle(credential_factory: Any) -> None
 
 
 def test_mentions_are_deduplicated_and_snapshot_names_are_stable(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     mentioned, _ = credential_factory(name="Original name")
@@ -338,7 +362,7 @@ def test_mentions_are_deduplicated_and_snapshot_names_are_stable(
 
 
 def test_tree_snapshot_excludes_later_replies_and_read_does_not_mutate(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
@@ -377,7 +401,7 @@ def test_tree_snapshot_excludes_later_replies_and_read_does_not_mutate(
 
 
 def test_close_makes_cycle_read_only_but_keeps_address_for_history(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     reader, _ = credential_factory()
@@ -407,7 +431,7 @@ def test_close_makes_cycle_read_only_but_keeps_address_for_history(
         )
 
 
-def test_only_creator_can_close_cycle(credential_factory: Any) -> None:
+def test_only_creator_can_close_cycle(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     outsider, _ = credential_factory()
     created = _create(creator)
@@ -425,7 +449,7 @@ def test_only_creator_can_close_cycle(credential_factory: Any) -> None:
 
 
 def test_close_cycle_replays_exact_request_and_rejects_changed_request(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     creator, _ = credential_factory()
     first = _create(creator)
@@ -452,7 +476,9 @@ def test_close_cycle_replays_exact_request_and_rejects_changed_request(
         )
 
 
-def test_expired_idempotency_key_creates_a_new_random_address(credential_factory: Any) -> None:
+def test_expired_idempotency_key_creates_a_new_random_address(
+    credential_factory: CredentialFactory,
+) -> None:
     creator, _ = credential_factory()
     first = _create(creator, key="expired-create-key")
     record = creator.agent_receipts.get()
@@ -466,7 +492,7 @@ def test_expired_idempotency_key_creates_a_new_random_address(credential_factory
     assert second.address != first.address
 
 
-def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> None:
+def test_database_rejects_second_root_in_one_cycle(credential_factory: CredentialFactory) -> None:
     creator, _ = credential_factory()
     created = _create(creator)
 
@@ -493,26 +519,32 @@ def test_database_rejects_second_root_in_one_cycle(credential_factory: Any) -> N
 
 @pytest.mark.parametrize("operation", ["close", "rollover"])
 def test_identical_lifecycle_retry_returns_the_original_result(
-    credential_factory: Any, operation: str
+    credential_factory: CredentialFactory, operation: str
 ) -> None:
     from tunnels import cycles
 
     creator, _ = credential_factory()
     created = _create(creator, "replay-race-create")
-    arguments = dict(
-        credential=creator,
-        address=created.address,
-        expected_cycle_id=created.cycle.id,
-        idempotency_key="replay-race-operation",
-    )
-    if operation == "rollover":
-        arguments.update(
+
+    def action() -> StartedCycle | None:
+        if operation == "close":
+            return cycles.close_cycle(
+                credential=creator,
+                address=created.address,
+                expected_cycle_id=created.cycle.id,
+                idempotency_key="replay-race-operation",
+            )
+        return cycles.rollover_cycle(
+            credential=creator,
+            address=created.address,
+            expected_cycle_id=created.cycle.id,
+            idempotency_key="replay-race-operation",
             expected_address_generation=1,
             root_content={"type": "text", "text": "Next root."},
         )
-    action = cycles.close_cycle if operation == "close" else cycles.rollover_cycle
-    first = action(**arguments)
-    second = action(**arguments)
+
+    first = action()
+    second = action()
     if operation == "rollover":
         assert first is not None
         assert second is not None
@@ -529,13 +561,13 @@ def test_identical_lifecycle_retry_returns_the_original_result(
 
 
 def test_close_replay_checks_current_creator_authority(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from tunnels import cycles
 
     creator, _ = credential_factory()
     created = _create(creator, "close-replay-authority")
-    arguments = {
+    arguments: CloseCycleArguments = {
         "credential": creator,
         "address": created.address,
         "expected_cycle_id": created.cycle.id,
@@ -548,7 +580,7 @@ def test_close_replay_checks_current_creator_authority(
 
 
 def test_all_mentions_are_resolved_in_one_query(
-    credential_factory: Any, django_assert_num_queries: Any
+    credential_factory: CredentialFactory, django_assert_num_queries: DjangoAssertNumQueries
 ) -> None:
     credentials = [credential_factory(name=f"Mention {index}")[0] for index in range(32)]
     ids = [credential.id for credential in reversed(credentials)]
@@ -560,7 +592,9 @@ def test_all_mentions_are_resolved_in_one_query(
 
 @pytest.mark.parametrize("unavailable", ["revoked_at", "expires_at", "missing"])
 def test_mention_batch_rejects_any_unavailable_credential(
-    unavailable: str, credential_factory: Any, django_assert_num_queries: Any
+    unavailable: str,
+    credential_factory: CredentialFactory,
+    django_assert_num_queries: DjangoAssertNumQueries,
 ) -> None:
     available, _ = credential_factory()
     other, _ = credential_factory()
@@ -577,12 +611,13 @@ def test_mention_batch_rejects_any_unavailable_credential(
 
 @pytest.mark.parametrize("operation", ["start", "rollover", "admin_start", "admin_rollover"])
 def test_expired_cycle_can_be_replaced_without_maintenance(
-    credential_factory: Any, settings: Any, operation: str
+    credential_factory: CredentialFactory, settings: Settings, operation: str
 ) -> None:
     from tunnels.admin_actions import rollover_cycle_as_admin, start_cycle_as_admin
-    from tunnels.cycles import StartedCycle, get_tunnel_status, rollover_cycle, start_cycle
+    from tunnels.cycles import get_tunnel_status, rollover_cycle, start_cycle
 
     creator, _ = credential_factory()
+    assert creator.created_by is not None
     created = _create(creator, key="lazy-expiry-create")
     expiry = timezone.now() - timedelta(seconds=30)
     Cycle.objects.filter(pk=created.cycle.pk).update(expires_at=expiry, retention_seconds=120)
@@ -596,24 +631,40 @@ def test_expired_cycle_can_be_replaced_without_maintenance(
     assert created.tunnel.state == Tunnel.State.ACTIVE
     assert created.cycle.state == Cycle.State.ACTIVE
 
-    common: dict[str, Any] = {
-        "expected_address_generation": 1,
-        "root_content": {"type": "text", "text": "Continue after expiry."},
-    }
-    function: Callable[..., StartedCycle]
+    content = {"type": "text", "text": "Continue after expiry."}
     if operation.startswith("admin_"):
-        common.update(actor=creator.created_by, tunnel_id=created.tunnel.id)
-        function = (
-            rollover_cycle_as_admin if operation == "admin_rollover" else start_cycle_as_admin
+        if operation == "admin_rollover":
+            started = rollover_cycle_as_admin(
+                actor=creator.created_by,
+                tunnel_id=created.tunnel.id,
+                expected_address_generation=1,
+                expected_cycle_id=created.cycle.id,
+                root_content=content,
+            )
+        else:
+            started = start_cycle_as_admin(
+                actor=creator.created_by,
+                tunnel_id=created.tunnel.id,
+                expected_address_generation=1,
+                root_content=content,
+            )
+    elif operation == "rollover":
+        started = rollover_cycle(
+            credential=creator,
+            address=created.address,
+            idempotency_key="lazy-expiry-next",
+            expected_address_generation=1,
+            expected_cycle_id=created.cycle.id,
+            root_content=content,
         )
     else:
-        common.update(
-            credential=creator, address=created.address, idempotency_key="lazy-expiry-next"
+        started = start_cycle(
+            credential=creator,
+            address=created.address,
+            idempotency_key="lazy-expiry-next",
+            expected_address_generation=1,
+            root_content=content,
         )
-        function = rollover_cycle if operation == "rollover" else start_cycle
-    if operation.endswith("rollover"):
-        common["expected_cycle_id"] = created.cycle.id
-    started = function(**common)
 
     created.cycle.refresh_from_db()
     assert created.cycle.state == Cycle.State.CLOSED
@@ -629,7 +680,7 @@ def test_expired_cycle_can_be_replaced_without_maintenance(
 
 
 def test_expired_tunnel_keeps_its_reported_dormancy_time_after_maintenance(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     from core.maintenance import cleanup_once
     from tunnels.cycles import get_tunnel_status

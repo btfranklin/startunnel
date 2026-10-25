@@ -35,9 +35,9 @@ GATES = [
     ),
     Gate(
         "mypy",
-        ("mypy", "src", "tests"),
+        (sys.executable, "-m", "scripts.check_types"),
         "docs/architecture.md",
-        "Correct the reported types in src/ or tests/, then run `pdm run mypy src tests`.",
+        "Correct the reported types, then run `pdm run types`.",
         {"PYTHONPATH": "src"},
     ),
     Gate(

@@ -11,7 +11,13 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict
+
+if TYPE_CHECKING or __package__:
+    pass
+else:
+    pass
+
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import (
@@ -20,6 +26,7 @@ if TYPE_CHECKING or __package__:
         LaneError,
         required_output,
     )
+    from scripts.proof_build import BuildProvenance
 else:
     from compose_isolation import (
         ROOT,
@@ -27,6 +34,7 @@ else:
         LaneError,
         required_output,
     )
+    from proof_build import BuildProvenance
 
 SENSITIVE_LOG_PATTERNS = (
     ("OpenAI key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
@@ -164,13 +172,43 @@ def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
                 raise LaneError(label, f"The {label} failed with exit code {result.returncode}.")
 
 
+class SystemStep(TypedDict):
+    name: str
+    started_at: str
+    status: str
+    finished_at: NotRequired[str]
+    duration_seconds: NotRequired[float]
+
+
+class SystemReport(TypedDict, total=False):
+    proof: str
+    status: str
+    project: str
+    started_at: str
+    steps: list[SystemStep]
+    disposable_volumes_removed: bool
+    build_mode: str
+    candidate_image: str | None
+    release_evidence_eligible: bool
+    build_provenance: BuildProvenance
+    helper_build_provenance: BuildProvenance
+    docker_server_version: str
+    host: dict[str, int | str]
+    image_ids: dict[str, str]
+    retained_data: str
+    finished_at: str
+    duration_seconds: float
+    error: str
+    failed_step: str
+
+
 def _recorded_step(
-    evidence: list[dict[str, Any]],
+    evidence: list[SystemStep],
     name: str,
     action: Callable[[], None],
 ) -> None:
     started = time.monotonic()
-    record: dict[str, Any] = {
+    record: SystemStep = {
         "name": name,
         "started_at": datetime.now(UTC).isoformat(),
         "status": "failed",
@@ -461,7 +499,7 @@ def _run_activity_restart_proof(stack: IsolatedComposeProject) -> None:
     _assert_proof_marker_order(_proof_client_logs(stack, container_name))
 
 
-def write_system_report(report: Mapping[str, Any]) -> Path:
+def write_system_report(report: Mapping[str, object]) -> Path:
     directory = ROOT / "artifacts"
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
@@ -486,21 +524,23 @@ def run_system_proof(
     stack: IsolatedComposeProject,
     *,
     build_images: bool = True,
-    report: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    report: SystemReport | None = None,
+) -> SystemReport:
     """Run the current bounded clean-stack release proof."""
 
-    evidence: list[dict[str, Any]] = []
+    evidence: list[SystemStep] = []
     started_at = datetime.now(UTC)
     if report is None:
         report = {}
     report.update(
-        proof="clean-stack system",
-        status="failed",
-        project=stack.project_name,
-        started_at=started_at.isoformat(),
-        steps=evidence,
-        disposable_volumes_removed=False,
+        SystemReport(
+            proof="clean-stack system",
+            status="failed",
+            project=stack.project_name,
+            started_at=started_at.isoformat(),
+            steps=evidence,
+            disposable_volumes_removed=False,
+        )
     )
 
     def step(name: str, action: Callable[[], None]) -> None:
@@ -611,10 +651,12 @@ def run_system_proof(
         step(
             "no-cache image build",
             lambda: report.update(
-                build_provenance=stack.build_services(
-                    ("web", "migrate", "maintenance"),
-                    no_cache=True,
-                    timeout_seconds=3_600,
+                SystemReport(
+                    build_provenance=stack.build_services(
+                        ("web", "migrate", "maintenance"),
+                        no_cache=True,
+                        timeout_seconds=3_600,
+                    )
                 )
             ),
         )
@@ -624,9 +666,11 @@ def run_system_proof(
         step(
             "proof helper image build",
             lambda: report.update(
-                helper_build_provenance=stack.build_services(
-                    ("example-tests", "agent-e2e", "proxy-tests"),
-                    timeout_seconds=3_600,
+                SystemReport(
+                    helper_build_provenance=stack.build_services(
+                        ("example-tests", "agent-e2e", "proxy-tests"),
+                        timeout_seconds=3_600,
+                    )
                 )
             ),
         )

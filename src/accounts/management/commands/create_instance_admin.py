@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import os
 from getpass import getpass
-from typing import Any
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
 from accounts.admin_access import issue_admin_key
@@ -21,12 +20,12 @@ from ._admin_key_file import reserve_key_file
 class Command(BaseCommand):
     help = "Create one active local StarTunnel administrator."
 
-    def add_arguments(self, parser: Any) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("username")
         parser.add_argument("--key-file")
         parser.add_argument("--key-name", default="bootstrap")
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: object, **options: object) -> None:
         username = User.normalize_username(options["username"]).strip()
         if not username:
             raise CommandError("Supply a username.")
@@ -37,12 +36,12 @@ class Command(BaseCommand):
             raise CommandError(" ".join(error.messages)) from error
 
         if options["key_file"]:
-            path, descriptor = reserve_key_file(options["key_file"])
+            path, descriptor = reserve_key_file(str(options["key_file"]))
             try:
                 with os.fdopen(descriptor, "w") as output, transaction.atomic():
                     user.set_unusable_password()
                     user.save()
-                    credential, secret = issue_admin_key(owner=user, name=options["key_name"])
+                    credential, secret = issue_admin_key(owner=user, name=str(options["key_name"]))
                     output.write(secret + "\n")
                     output.flush()
                     os.fsync(output.fileno())

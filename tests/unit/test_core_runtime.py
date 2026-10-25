@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
 from django.test import Client
+from pytest_django.fixtures import Settings
 
-from core.activity_listener import ActivityListener, _connection_kwargs
+from core.activity_listener import ActivityListener
+from core.database_options import postgres_connection_options
 from core.notifications import ACTIVITY_CHANNEL, BOARD_CHANNEL, notify, notify_maintenance
 
 pytestmark = pytest.mark.django_db
@@ -33,7 +34,7 @@ def test_health_endpoints_report_database_state(
 
 
 def test_metrics_require_token_and_publish_maintenance_status(
-    client: Client, settings: Any, monkeypatch: pytest.MonkeyPatch
+    client: Client, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings.METRICS_TOKEN = "metrics-test-token"
     assert client.get("/metrics").status_code == 404
@@ -64,7 +65,7 @@ def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> Non
         def __enter__(self) -> Cursor:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        def __exit__(self, *args: object) -> None:
             return None
 
         def execute(self, sql: str, parameters: list[str]) -> None:
@@ -86,7 +87,7 @@ def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_listener_connection_settings_are_redacted_shape(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name, value in {
         "NAME": "db",
@@ -96,7 +97,7 @@ def test_listener_connection_settings_are_redacted_shape(
         "PORT": "5432",
     }.items():
         monkeypatch.setitem(settings.DATABASES["default"], name, value)
-    assert _connection_kwargs() == {
+    assert postgres_connection_options() == {
         "dbname": "db",
         "user": "user",
         "password": "pass",
@@ -108,7 +109,7 @@ def test_listener_connection_settings_are_redacted_shape(
 
 @pytest.mark.asyncio
 async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")
     tunnel_id = uuid4()
@@ -122,20 +123,20 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
         async def __aenter__(self) -> Connection:
             return self
 
-        async def __aexit__(self, *args: Any) -> None:
+        async def __aexit__(self, *args: object) -> None:
             return None
 
         async def execute(self, sql: str) -> None:
             assert sql in {"LISTEN startunnel_activity", f"LISTEN {BOARD_CHANNEL}"}
 
-        async def notifies(self, *, timeout: float) -> Any:
+        async def notifies(self, *, timeout: float) -> object:
             assert timeout == 0
             yield Notification("startunnel_activity", "invalid")
             yield Notification("startunnel_activity", str(tunnel_id))
             yield Notification(BOARD_CHANNEL, "1")
             raise asyncio.CancelledError
 
-    async def connect(**kwargs: Any) -> Connection:
+    async def connect(**kwargs: object) -> Connection:
         return Connection()
 
     monkeypatch.setattr("core.activity_listener.psycopg.AsyncConnection.connect", connect)
@@ -153,13 +154,13 @@ async def test_listener_dispatches_valid_notifications_and_ignores_invalid(
 
 @pytest.mark.asyncio
 async def test_listener_reconnects_after_database_error(
-    settings: Any, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setitem(settings.DATABASES["default"], "ENGINE", "django.db.backends.postgresql")
     calls = 0
     subscriptions: list[str] = []
 
-    async def connect(**kwargs: Any) -> Any:
+    async def connect(**kwargs: object) -> object:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -172,13 +173,13 @@ async def test_listener_reconnects_after_database_error(
         async def __aenter__(self) -> RestoredConnection:
             return self
 
-        async def __aexit__(self, *arguments: Any) -> None:
+        async def __aexit__(self, *arguments: object) -> None:
             return None
 
         async def execute(self, query: str) -> None:
             subscriptions.append(query)
 
-        async def notifies(self, *, timeout: float) -> Any:
+        async def notifies(self, *, timeout: float) -> object:
             assert timeout == 0
             assert listener._ready.is_set()
             assert board_waiter.is_set()

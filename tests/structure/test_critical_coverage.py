@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any
 
 import pytest
 from scripts.check_critical_coverage import CriticalTarget, find_gaps
@@ -37,7 +36,7 @@ def test_focused_coverage_gate_detects_a_missing_branch(
         encoding="utf-8",
     )
     lines, branch_lines = _function_lines(source, "decide")
-    report: dict[str, Any] = {
+    report: dict[str, object] = {
         "files": {
             "critical.py": {
                 "executed_lines": lines,
@@ -66,7 +65,7 @@ def test_focused_coverage_gate_accepts_complete_function(
     source = tmp_path / "critical.py"
     source.write_text("def done() -> bool:\n    return True\n", encoding="utf-8")
     lines, _ = _function_lines(source, "done")
-    report: dict[str, Any] = {
+    report: dict[str, object] = {
         "files": {
             "critical.py": {
                 "executed_lines": lines,

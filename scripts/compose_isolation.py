@@ -9,22 +9,22 @@ import signal
 import subprocess  # nosec B404
 import sys
 import tempfile
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from ipaddress import IPv4Network, ip_network
 from pathlib import Path
-from types import FrameType
-from typing import TYPE_CHECKING, Any, Literal
+from types import FrameType, TracebackType
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 if TYPE_CHECKING or __package__:
-    from .proof_build import ProofBuildError
+    from .proof_build import BuildProvenance, ProofBuildError
     from .proof_build import build_services as build_proof_services
     from .start_production import validate_image_reference
 else:
-    from proof_build import ProofBuildError
+    from proof_build import BuildProvenance, ProofBuildError
     from proof_build import build_services as build_proof_services
     from start_production import validate_image_reference
 
@@ -305,7 +305,7 @@ def prune_disposable_images(environment: Mapping[str, str]) -> None:
 def termination_signals() -> Iterator[None]:
     """Convert termination signals to exceptions so Compose cleanup can run."""
 
-    previous: dict[signal.Signals, Any] = {}
+    previous: dict[signal.Signals, Callable[[int, FrameType | None], object] | int | None] = {}
 
     def stop(signum: int, _frame: FrameType | None) -> None:
         raise InterruptedError(f"Received signal {signum}.")
@@ -407,7 +407,7 @@ class IsolatedComposeProject:
         self,
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
-        traceback: Any,
+        traceback: TracebackType | None,
     ) -> Literal[False]:
         cleanup_error: BaseException | None = None
         if self._owned:
@@ -480,7 +480,7 @@ class IsolatedComposeProject:
         *,
         no_cache: bool = False,
         timeout_seconds: int = 2400,
-    ) -> dict[str, object]:
+    ) -> BuildProvenance:
         """Build selected proof services through Buildx with isolated cache scopes."""
 
         model = self.capture(

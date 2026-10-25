@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
 from core.errors import InvalidRequest, PayloadTooLarge
+from core.json_types import JsonValue
 from core.limits import DEFAULT_LIMITS
 
 MAX_DEPTH = 32
@@ -25,7 +27,10 @@ class JsonContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["json"]
-    value: Any = Field(examples=[{"task": "review", "artifact": "report-42"}])
+    # Keep the public schema open while Python checks use the bounded JSON union.
+    value: Annotated[JsonValue, WithJsonSchema({"title": "Value"})] = Field(
+        examples=[{"task": "review", "artifact": "report-42"}]
+    )
 
 
 MessageContent = Annotated[TextContent | JsonContent, Field(discriminator="type")]
@@ -50,7 +55,7 @@ def validate_storable_text(value: str, *, field: str) -> None:
         raise InvalidRequest(f"{field} must contain valid Unicode.") from error
 
 
-def _validate_json_unicode(value: Any) -> None:
+def _validate_json_unicode(value: object) -> None:
     """Reject lone surrogates while keeping JSON control characters valid."""
 
     if isinstance(value, str):
@@ -69,7 +74,7 @@ def _validate_json_unicode(value: Any) -> None:
             _validate_json_unicode(item)
 
 
-def _depth(value: Any, current: int = 0) -> int:
+def _depth(value: object, current: int = 0) -> int:
     if current > MAX_DEPTH:
         return current
     if isinstance(value, dict):
@@ -82,13 +87,14 @@ def _depth(value: Any, current: int = 0) -> int:
 
 
 def validate_content(
-    content: dict[str, Any], *, maximum_bytes: int = DEFAULT_LIMITS.bytes_per_message
+    content: Mapping[str, object], *, maximum_bytes: int = DEFAULT_LIMITS.bytes_per_message
 ) -> ValidatedPayload:
     payload_type = content.get("type")
     if payload_type == "text":
         if set(content) != {"type", "text"} or not isinstance(content.get("text"), str):
             raise InvalidRequest("Text content must contain only type and text fields.")
         text = content["text"]
+        assert isinstance(text, str)
         validate_storable_text(text, field="Message text")
         byte_count = len(text.encode("utf-8"))
         if byte_count > maximum_bytes:

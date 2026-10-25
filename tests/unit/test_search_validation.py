@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
 
 import pytest
+from tests.factories import CredentialFactory
 
+from agents.models import AgentCredential
 from core.errors import CycleUnavailable, DependencyUnavailable, InvalidRequest
-from tunnels.cycles import create_tunnel
+from tunnels.cycles import CreatedTunnel, create_tunnel
 from tunnels.messages import post_reply
 from tunnels.models import Message
 from tunnels.search import (
@@ -23,7 +25,18 @@ from tunnels.search import (
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, *, key: str) -> Any:
+class SearchArguments(TypedDict, total=False):
+    query: str | None
+    limit: int
+    sequence_after: int
+    sequence_before: int
+    after_rank: int
+    after_sequence: int
+    after_message_id: UUID
+    snapshot_sequence: int
+
+
+def _create(credential: AgentCredential, *, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -59,8 +72,8 @@ def _create(credential: Any, *, key: str) -> Any:
     ],
 )
 def test_search_rejects_invalid_or_unbounded_inputs_before_database_search(
-    credential_factory: Any,
-    arguments: dict[str, Any],
+    credential_factory: CredentialFactory,
+    arguments: SearchArguments,
     message: str,
 ) -> None:
     credential, _ = credential_factory()
@@ -77,7 +90,7 @@ def test_search_rejects_invalid_or_unbounded_inputs_before_database_search(
 
 @pytest.mark.sqlite_only
 def test_valid_search_fails_directly_without_the_required_postgresql_dependency(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, key="search-validation-dependency")
@@ -92,7 +105,7 @@ def test_valid_search_fails_directly_without_the_required_postgresql_dependency(
 
 
 def test_branch_filter_collects_only_the_selected_descendants(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, key="search-validation-branch")
@@ -144,7 +157,7 @@ def test_branch_filter_collects_only_the_selected_descendants(
 
 
 def test_base_query_composes_metadata_branch_and_sequence_filters(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     coordinator, _ = credential_factory(name="Filter coordinator")
     worker, _ = credential_factory(name="Filter worker")
@@ -208,7 +221,7 @@ def test_base_query_composes_metadata_branch_and_sequence_filters(
 
 
 def test_search_hit_payload_preserves_public_fields_and_full_timestamp_precision(
-    credential_factory: Any,
+    credential_factory: CredentialFactory,
 ) -> None:
     credential, _ = credential_factory(name="Byte count café")
     mentioned, _ = credential_factory(name="Mentioned agent")

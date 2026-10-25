@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
 
 import pytest
 from django.utils import timezone
+from tests.factories import CredentialFactory, UserFactory
 
 from agents.models import AgentCredential
 from core.errors import (
@@ -27,7 +28,7 @@ from tunnels.admin_actions import (
     start_cycle_as_admin,
 )
 from tunnels.context import get_context
-from tunnels.cycles import _close_locked_cycle, close_cycle, create_tunnel
+from tunnels.cycles import CreatedTunnel, _close_locked_cycle, close_cycle, create_tunnel
 from tunnels.entry import enter_tunnel
 from tunnels.messages import get_message, list_replies, post_reply, read_tree
 from tunnels.models import Cycle, Message, Tunnel
@@ -37,7 +38,14 @@ from tunnels.search import search_messages
 pytestmark = pytest.mark.django_db
 
 
-def _create(credential: Any, key: str) -> Any:
+class CloseCycleArguments(TypedDict):
+    credential: AgentCredential
+    idempotency_key: str
+    address: str
+    expected_cycle_id: UUID
+
+
+def _create(credential: AgentCredential, key: str) -> CreatedTunnel:
     return create_tunnel(
         credential=credential,
         idempotency_key=key,
@@ -45,7 +53,7 @@ def _create(credential: Any, key: str) -> Any:
     )
 
 
-def test_create_rejects_inactive_credential(credential_factory: Any) -> None:
+def test_create_rejects_inactive_credential(credential_factory: CredentialFactory) -> None:
     credential, _ = credential_factory()
     credential.revoked_at = timezone.now()
     credential.save(update_fields=["revoked_at"])
@@ -54,7 +62,7 @@ def test_create_rejects_inactive_credential(credential_factory: Any) -> None:
 
 
 def test_create_rejects_long_correlation_and_instance_quota(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     with pytest.raises(InvalidRequest, match="correlation_id"):
@@ -72,7 +80,7 @@ def test_create_rejects_long_correlation_and_instance_quota(
         _create(credential, "critical-quota")
 
 
-def test_create_replay_rejects_missing_resources(credential_factory: Any) -> None:
+def test_create_replay_rejects_missing_resources(credential_factory: CredentialFactory) -> None:
     credential, _ = credential_factory()
     _create(credential, "critical-create-replay")
     record = credential.agent_receipts.get(operation="create_tunnel")
@@ -83,7 +91,9 @@ def test_create_replay_rejects_missing_resources(credential_factory: Any) -> Non
 
 
 @pytest.mark.sqlite_only
-def test_create_replay_rejects_a_corrupt_missing_cycle_root(credential_factory: Any) -> None:
+def test_create_replay_rejects_a_corrupt_missing_cycle_root(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-create-missing-root")
     Cycle.objects.filter(pk=created.cycle.pk).update(root_message=None)
@@ -92,7 +102,7 @@ def test_create_replay_rejects_a_corrupt_missing_cycle_root(credential_factory: 
 
 
 def test_resolve_exact_fallback_and_locked_address_race(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-resolve")
@@ -110,7 +120,7 @@ def test_resolve_exact_fallback_and_locked_address_race(
     original = access.address_query
     calls = 0
 
-    def disappearing(*, address: str) -> Any:
+    def disappearing(*, address: str) -> object:
         nonlocal calls
         calls += 1
         query = original(address=address)
@@ -122,7 +132,7 @@ def test_resolve_exact_fallback_and_locked_address_race(
 
 
 def test_fast_locked_resolve_rejects_address_removed_after_lookup(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-fast-resolve")
@@ -145,7 +155,9 @@ def test_fast_locked_resolve_rejects_address_removed_after_lookup(
 
 @pytest.mark.parametrize("for_update", [False, True])
 @pytest.mark.sqlite_only
-def test_resolve_rejects_retired_tunnel(credential_factory: Any, for_update: bool) -> None:
+def test_resolve_rejects_retired_tunnel(
+    credential_factory: CredentialFactory, for_update: bool
+) -> None:
     credential, _ = credential_factory()
     created = _create(credential, f"critical-retired-{for_update}")
     Tunnel.objects.filter(pk=created.tunnel.pk).update(
@@ -159,7 +171,7 @@ def test_resolve_rejects_retired_tunnel(credential_factory: Any, for_update: boo
         )
 
 
-def test_post_reply_replay_rejects_missing_resource(credential_factory: Any) -> None:
+def test_post_reply_replay_rejects_missing_resource(credential_factory: CredentialFactory) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-reply-replay")
     reply = post_reply(
@@ -194,7 +206,7 @@ def test_post_reply_replay_rejects_missing_resource(credential_factory: Any) -> 
 
 
 def test_post_reply_rejects_correlation_and_cycle_limits(
-    credential_factory: Any, monkeypatch: pytest.MonkeyPatch
+    credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-reply-limits")
@@ -245,7 +257,7 @@ def test_post_reply_rejects_correlation_and_cycle_limits(
         )
 
 
-def test_tree_message_and_reply_validation(credential_factory: Any) -> None:
+def test_tree_message_and_reply_validation(credential_factory: CredentialFactory) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-read-validation")
     with pytest.raises(InvalidRequest, match="limit"):
@@ -270,7 +282,9 @@ def test_tree_message_and_reply_validation(credential_factory: Any) -> None:
         )
 
 
-def test_close_conflict_and_retry_do_not_duplicate_events(credential_factory: Any) -> None:
+def test_close_conflict_and_retry_do_not_duplicate_events(
+    credential_factory: CredentialFactory,
+) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-close")
     with pytest.raises(LifecycleConflict):
@@ -280,7 +294,7 @@ def test_close_conflict_and_retry_do_not_duplicate_events(credential_factory: An
             address=created.address,
             expected_cycle_id=uuid4(),
         )
-    arguments = dict(
+    arguments: CloseCycleArguments = dict(
         credential=credential,
         idempotency_key="critical-close-retry",
         address=created.address,
@@ -303,7 +317,7 @@ def test_cycle_readability_rejects_deleted_and_unknown_state() -> None:
 
 
 def test_operator_can_close_start_and_roll_over_instance_cycle(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     credential, _ = credential_factory()
     actor = user_factory()
@@ -336,7 +350,7 @@ def test_operator_can_close_start_and_roll_over_instance_cycle(
 
 
 def test_inactive_operator_cannot_control_or_find_tunnel(
-    credential_factory: Any, user_factory: Any
+    credential_factory: CredentialFactory, user_factory: UserFactory
 ) -> None:
     credential, _ = credential_factory()
     actor = user_factory()
@@ -360,19 +374,22 @@ def test_inactive_operator_cannot_control_or_find_tunnel(
 
 @pytest.mark.parametrize("operation", ["tree", "entry", "context", "participants", "search"])
 def test_domain_reads_reject_a_revoked_credential_from_a_stale_object(
-    credential_factory: Any, operation: str
+    credential_factory: CredentialFactory, operation: str
 ) -> None:
     credential, _ = credential_factory()
     created = _create(credential, "critical-stale-reader")
     AgentCredential.objects.filter(pk=credential.pk).update(revoked_at=timezone.now())
     assert credential.revoked_at is None
-    operations: dict[str, tuple[Callable[..., Any], dict[str, Any]]] = {
-        "tree": (read_tree, {}),
-        "entry": (enter_tunnel, {}),
-        "context": (get_context, {"focus_message_id": created.root.id}),
-        "participants": (list_participants, {}),
-        "search": (search_messages, {"query": "root"}),
+    operations: dict[str, Callable[[], object]] = {
+        "tree": lambda: read_tree(credential=credential, address=created.address),
+        "entry": lambda: enter_tunnel(credential=credential, address=created.address),
+        "context": lambda: get_context(
+            credential=credential, address=created.address, focus_message_id=created.root.id
+        ),
+        "participants": lambda: list_participants(credential=credential, address=created.address),
+        "search": lambda: search_messages(
+            credential=credential, address=created.address, query="root"
+        ),
     }
-    read, arguments = operations[operation]
     with pytest.raises(InvalidCredential):
-        read(credential=credential, address=created.address, **arguments)
+        operations[operation]()

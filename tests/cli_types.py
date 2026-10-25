@@ -1,0 +1,39 @@
+"""Check the interface of CLI modules loaded under isolated test names."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Protocol
+from urllib.error import HTTPError
+
+from cli import star_tunnel
+
+
+class CliModule(Protocol):
+    CliError: type[star_tunnel.CliError]
+    StarTunnelTransport: type[star_tunnel.StarTunnelTransport]
+    ROUTES: dict[str, tuple[str, str, set[int]]]
+    WRITE_COMMANDS: set[str]
+    AGENT_COMMANDS: dict[str, star_tunnel.AgentCommand]
+    ADMIN_COMMANDS: dict[str, star_tunnel.AdminCommand]
+    MAX_ERROR_BYTES: int
+
+    def validate_base_url(self, value: str) -> str: ...
+
+    def agent_schema(self, command: str | None = None) -> star_tunnel.JsonObject: ...
+    def admin_schema(self, command: str | None = None) -> star_tunnel.JsonObject: ...
+    def response_help(
+        self, commands: list[star_tunnel.SchemaCommand]
+    ) -> star_tunnel.JsonObject: ...
+    def main(self, argv: Sequence[str] | None = None) -> int: ...
+    def build_parser(self) -> star_tunnel.JsonArgumentParser: ...
+    def run_admin(self, arguments: star_tunnel.Arguments) -> star_tunnel.JsonObject: ...
+    def run_tutorial(self) -> star_tunnel.JsonObject: ...
+    def print_error(self, error: star_tunnel.CliError) -> None: ...
+    def _read_response_bytes(self, response: star_tunnel.HTTPBody, *, limit: int) -> bytes: ...
+    def _safe_server_error(self, error: HTTPError) -> star_tunnel.CliError: ...
+
+
+if TYPE_CHECKING:
+    # Check the protocol against the actual module as its interface changes.
+    _checked_module: CliModule = star_tunnel

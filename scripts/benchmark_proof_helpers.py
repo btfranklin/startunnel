@@ -11,7 +11,13 @@ import shutil
 import sys
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING or __package__:
+    pass
+else:
+    pass
+
 
 if TYPE_CHECKING or __package__:
     from scripts.compose_isolation import (
@@ -23,7 +29,8 @@ if TYPE_CHECKING or __package__:
         termination_signals,
         validate_project_name,
     )
-    from scripts.proof_timing import PhaseTimings
+    from scripts.proof_build import BuildProvenance
+    from scripts.proof_timing import PhaseRecord, PhaseTimings
 else:
     from compose_isolation import (
         IsolatedComposeProject,
@@ -34,7 +41,8 @@ else:
         termination_signals,
         validate_project_name,
     )
-    from proof_timing import PhaseTimings
+    from proof_build import BuildProvenance
+    from proof_timing import PhaseRecord, PhaseTimings
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = (
@@ -52,7 +60,52 @@ FOCUSED_PREFLIGHT = (
 )
 
 
-def _image(stack: IsolatedComposeProject, image: str) -> dict[str, object]:
+class HelperImageData(TypedDict):
+    image_id: str
+    size_bytes: int
+    source_revision: str
+    platform: str
+
+
+class BenchmarkInputs(TypedDict):
+    source_revision: str
+    platform: str
+    hashes: dict[str, str]
+
+
+class BenchmarkCase(HelperImageData):
+    build: BuildProvenance
+    build_provenance_file: str
+    tool_preflight_passed: bool | None
+
+
+class BenchmarkComparison(TypedDict):
+    focused_image_smaller: bool
+    warm_cache_hits: int
+    timing_scope: str
+
+
+class BenchmarkHost(TypedDict):
+    system: str
+    machine: str
+    cpu_count: int | None
+
+
+class BenchmarkReport(TypedDict, total=False):
+    status: str
+    release_evidence_eligible: bool
+    project: str
+    phases: list[PhaseRecord]
+    disposable_volumes_removed: bool
+    host: BenchmarkHost
+    cases: dict[str, BenchmarkCase]
+    inputs: BenchmarkInputs | None
+    comparison: BenchmarkComparison
+    failure: str
+    build_provenance_copy_failed: bool
+
+
+def _image(stack: IsolatedComposeProject, image: str) -> HelperImageData:
     raw = required_output(
         [
             "docker",
@@ -100,17 +153,19 @@ def _preflight(stack: IsolatedComposeProject) -> None:
 
 
 def benchmark(
-    stack: IsolatedComposeProject, report: dict[str, object], timings: PhaseTimings
+    stack: IsolatedComposeProject, report: BenchmarkReport, timings: PhaseTimings
 ) -> None:
     """Keep source, inputs, and daemon fixed across all three build cases."""
-    cases: dict[str, dict[str, object]] = {}
+    cases: dict[str, BenchmarkCase] = {}
     report["cases"] = cases
-    reference: dict[str, object] | None = None
+    reference: BenchmarkInputs | None = None
     for name, service, no_cache in CASES:
         with timings.phase(name):
             provenance = stack.build_services((service,), no_cache=no_cache, timeout_seconds=2400)
-            identity = {
-                key: provenance.get(key) for key in ("source_revision", "platform", "hashes")
+            identity: BenchmarkInputs = {
+                "source_revision": provenance["source_revision"],
+                "platform": provenance["platform"],
+                "hashes": provenance["hashes"],
             }
             if reference is None:
                 reference = identity
@@ -131,7 +186,7 @@ def benchmark(
                 r"proof-build-[A-Za-z0-9.]+Z\.json", provenance_file
             ):
                 raise LaneError("benchmark provenance", "The build report name is invalid.")
-            case = {
+            case: BenchmarkCase = {
                 **inspected,
                 "build": provenance,
                 "build_provenance_file": provenance_file,
@@ -143,15 +198,15 @@ def benchmark(
                 case["tool_preflight_passed"] = True
     report["inputs"] = reference
     report["comparison"] = {
-        "focused_image_smaller": int(str(cases["focused_cold"]["size_bytes"]))
-        < int(str(cases["full_cold"]["size_bytes"])),
-        "warm_cache_hits": cases["focused_warm"]["build"]["cache_hits"],  # type: ignore[index]
+        "focused_image_smaller": cases["focused_cold"]["size_bytes"]
+        < cases["full_cold"]["size_bytes"],
+        "warm_cache_hits": cases["focused_warm"]["build"]["cache_hits"],
         "timing_scope": "Buildx wall time on this Docker daemon; no application traffic",
     }
     warm = cases["focused_warm"]["build"]
     if not isinstance(warm, dict) or int(str(warm.get("cache_hits", 0))) <= 0:
         raise LaneError("benchmark warm cache", "The warm build did not record a cache hit.")
-    if not report["comparison"]["focused_image_smaller"]:  # type: ignore[index]
+    if not report["comparison"]["focused_image_smaller"]:
         raise LaneError("benchmark image size", "The focused helper image is not smaller.")
 
 
@@ -171,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     report_path = directory / "benchmark-summary.json"
     timings = PhaseTimings()
-    report: dict[str, object] = {
+    report: BenchmarkReport = {
         "status": "failed",
         "release_evidence_eligible": False,
         "project": project,

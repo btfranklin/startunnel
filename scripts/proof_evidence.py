@@ -7,13 +7,30 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict
+
+if TYPE_CHECKING or __package__:
+    from .json_data import (
+        JsonObject,
+        json_integer,
+        json_object,
+        json_string,
+    )
+else:
+    from json_data import (
+        JsonObject,
+        json_integer,
+        json_object,
+        json_string,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 KINDS = ("security", "system", "load")
-LOAD_CONFIGURATION = {
+LOAD_CONFIGURATION: dict[str, int | str] = {
     "duration_seconds": 300,
     "drain_seconds": 30,
     "sends_per_second": 50,
@@ -26,11 +43,38 @@ LOAD_CONFIGURATION = {
 }
 
 
-def read_object(path: Path) -> dict[str, Any]:
+class ProofInputs(TypedDict):
+    source_commit: str
+    platform: str
+    files: dict[str, str]
+    profiles: list[str]
+    configuration: NotRequired[dict[str, int | str]]
+    drain_seconds: NotRequired[int]
+    active_credential_limit: NotRequired[int]
+
+
+class ProofRecord(TypedDict):
+    kind: str
+    source_commit: str
+    candidate_image: str
+    platform: str
+    run_id: int
+    attempt: int
+    status: str
+    inputs: ProofInputs
+    input_fingerprint: str
+    recorded_at: str
+    files: dict[str, str]
+    reports: dict[str, str]
+    incomplete: NotRequired[bool]
+    release_evidence_eligible: NotRequired[bool]
+
+
+def read_object(path: Path) -> JsonObject:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError("Evidence must contain a JSON object.")
-    return value
+    return json_object(value)
 
 
 def checksum(path: Path) -> str:
@@ -51,7 +95,7 @@ def referenced_file(directory: Path, name: str) -> Path:
     return result
 
 
-def proof_inputs(kind: str, commit: str) -> dict[str, Any]:
+def proof_inputs(kind: str, commit: str) -> ProofInputs:
     if kind not in KINDS:
         raise ValueError("Unknown proof kind.")
     # Hash tracked proof inputs as well as the commit. This also rejects local
@@ -78,7 +122,7 @@ def proof_inputs(kind: str, commit: str) -> dict[str, Any]:
         .decode()
         .split("\0")
     )
-    inputs: dict[str, Any] = {
+    inputs: ProofInputs = {
         "source_commit": commit,
         "platform": "linux/amd64",
         "files": {name: checksum(ROOT / name) for name in files if name},
@@ -95,7 +139,7 @@ def proof_inputs(kind: str, commit: str) -> dict[str, Any]:
     return inputs
 
 
-def fingerprint(inputs: dict[str, Any]) -> str:
+def fingerprint(inputs: Mapping[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -110,12 +154,12 @@ def _one(directory: Path, pattern: str) -> Path:
 
 def record_proof(
     kind: str, directory: Path, *, commit: str, image: str, status: str
-) -> dict[str, Any]:
+) -> ProofRecord:
     """Write one attempt manifest, including failed and incomplete attempts."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     inputs = proof_inputs(kind, commit)
     diagnostic_success = status == "success" and not image
-    record: dict[str, Any] = {
+    record: ProofRecord = {
         "kind": kind,
         "source_commit": commit,
         "candidate_image": image,
@@ -144,10 +188,14 @@ def record_proof(
         else:
             reports["execution"] = _one(directory, "load-run-*.json")
             execution = read_object(reports["execution"])
-            reports["workload"] = referenced_file(directory, execution["workload_report"])
-            reports["observations"] = referenced_file(directory, execution["observations_file"])
+            reports["workload"] = referenced_file(
+                directory, json_string(execution["workload_report"])
+            )
+            reports["observations"] = referenced_file(
+                directory, json_string(execution["observations_file"])
+            )
             reports["driver_observations"] = referenced_file(
-                directory, execution["driver_observations_file"]
+                directory, json_string(execution["driver_observations_file"])
             )
             files = [*reports.values(), *directory.glob("proof-build-*.json")]
         record["reports"] = {
@@ -185,7 +233,7 @@ def record_proof(
 
 
 def validate_proof(
-    record: dict[str, Any], directory: Path, *, kind: str, commit: str, image: str
+    record: Mapping[str, object], directory: Path, *, kind: str, commit: str, image: str
 ) -> None:
     """Check one selected successful attempt without searching its history."""
     inputs = proof_inputs(kind, commit)
@@ -205,10 +253,10 @@ def validate_proof(
     if (
         type(record.get("run_id")) is not int
         or type(record.get("attempt")) is not int
-        or not 1 <= record["attempt"] <= 2
+        or not 1 <= json_integer(record["attempt"]) <= 2
     ):
         raise ValueError("Proof must identify a bounded workflow attempt.")
-    files = record.get("files")
+    files = json_object(record.get("files"))
     if not isinstance(files, dict) or not files:
         raise ValueError("Proof has no retained files.")
     for name, expected in files.items():
@@ -218,7 +266,7 @@ def validate_proof(
             or checksum(referenced_file(directory, name)) != expected
         ):
             raise ValueError("Proof evidence checksums do not match.")
-    reports = record["reports"]
+    reports = {name: json_string(path) for name, path in json_object(record["reports"]).items()}
     for name in reports.values():
         if name not in files:
             raise ValueError("Selected report is not checksum protected.")
@@ -242,7 +290,7 @@ def validate_proof(
         if kind == "load":
             build_ids = build.get("image_ids", {})
             if isinstance(build_ids, dict):
-                helper_build_id = build_ids.get("load-profile", helper_build_id)
+                helper_build_id = json_string(build_ids.get("load-profile", helper_build_id))
     if kind == "system":
         report = read_object(referenced_file(directory, reports["system"]))
         if (
@@ -255,7 +303,8 @@ def validate_proof(
             raise ValueError("System proof must pass and remove disposable volumes.")
         for service in ("web", "migrate", "maintenance", "proxy-web"):
             if not re.fullmatch(
-                r"sha256:[0-9a-f]{64}", report.get("image_ids", {}).get(service, "")
+                r"sha256:[0-9a-f]{64}",
+                json_string(json_object(report.get("image_ids", {})).get(service, "")),
             ):
                 raise ValueError("System proof is missing required runtime identities.")
         return
@@ -278,20 +327,22 @@ def validate_proof(
         or workload.get("diagnostic_lock_seconds") != 0
     ):
         raise ValueError("Load workload is diagnostic or not eligible for release evidence.")
-    config = workload.get("configuration", {})
+    config = json_object(workload.get("configuration", {}))
     if any(config.get(key) != value for key, value in LOAD_CONFIGURATION.items()):
         raise ValueError("Load configuration differs from the fixed release workload.")
-    provenance = workload.get("provenance", {})
+    provenance = json_object(workload.get("provenance", {}))
     if provenance.get("build_mode") != "immutable-candidate":
         raise ValueError("Load workload did not use an immutable candidate.")
-    helper = report.get("helper", {})
-    load_images = dict(pair.split("=", 1) for pair in provenance.get("image_ids", "").split(","))
+    helper = json_object(report.get("helper", {}))
+    load_images = dict(
+        pair.split("=", 1) for pair in json_string(provenance.get("image_ids", "")).split(",")
+    )
     if (
         not isinstance(helper, dict)
         or helper.get("imports_passed") is not True
         or helper.get("source_commit") != commit
         or helper.get("platform") != "linux/amd64"
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", helper.get("image_id", ""))
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", json_string(helper.get("image_id", "")))
         or helper.get("image_id") != helper_build_id
         or load_images.get("load-profile") != helper.get("image_id")
     ):
@@ -313,7 +364,8 @@ def validate_proof(
         or type(pool_samples) is not int
         or pool_samples <= 0
         or not isinstance(services_seen, list)
-        or set(services_seen) != {"web", "postgres", "maintenance", "load-profile"}
+        or set(json_string(service) for service in services_seen)
+        != {"web", "postgres", "maintenance", "load-profile"}
         or isinstance(overhead, bool)
         or not isinstance(overhead, (int, float))
         or not 0 <= overhead < 1

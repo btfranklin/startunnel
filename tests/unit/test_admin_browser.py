@@ -1,10 +1,10 @@
 """Browser administrator access shares API rules and keeps secrets private."""
 
-from typing import Any
 from uuid import uuid4
 
 import pytest
 from django.test import Client
+from tests.factories import CredentialFactory, UserFactory
 
 from accounts.models import AdminCredential, User
 from core.models import AuditEvent
@@ -12,7 +12,9 @@ from core.models import AuditEvent
 pytestmark = pytest.mark.django_db
 
 
-def test_passwordless_admin_creation_downloads_first_key(client: Client, user_factory: Any) -> None:
+def test_passwordless_admin_creation_downloads_first_key(
+    client: Client, user_factory: UserFactory
+) -> None:
     actor = user_factory()
     client.force_login(actor)
     response = client.post(
@@ -38,7 +40,7 @@ def test_passwordless_admin_creation_downloads_first_key(client: Client, user_fa
 
 
 def test_browser_can_remove_final_password_and_session_expires(
-    client: Client, user_factory: Any
+    client: Client, user_factory: UserFactory
 ) -> None:
     actor = user_factory()
     client.force_login(actor)
@@ -59,7 +61,7 @@ def test_browser_can_remove_final_password_and_session_expires(
     assert next_request["Location"].startswith("/accounts/login/")
 
 
-def test_browser_key_download_and_revoke(client: Client, user_factory: Any) -> None:
+def test_browser_key_download_and_revoke(client: Client, user_factory: UserFactory) -> None:
     actor = user_factory()
     client.force_login(actor)
     response = client.post(
@@ -90,7 +92,7 @@ def test_browser_key_download_and_revoke(client: Client, user_factory: Any) -> N
     assert secret.encode() not in audit.content
 
 
-def test_browser_mutation_requires_retry_key(client: Client, user_factory: Any) -> None:
+def test_browser_mutation_requires_retry_key(client: Client, user_factory: UserFactory) -> None:
     actor = user_factory()
     client.force_login(actor)
     response = client.post("/app/agents/create/", {"name": "Missing retry key"})
@@ -99,7 +101,7 @@ def test_browser_mutation_requires_retry_key(client: Client, user_factory: Any) 
 
 
 def test_password_form_records_operation_and_preserves_session(
-    client: Client, user_factory: Any
+    client: Client, user_factory: UserFactory
 ) -> None:
     actor = user_factory()
     client.force_login(actor)
@@ -121,7 +123,7 @@ def test_password_form_records_operation_and_preserves_session(
 
 
 def test_django_model_admin_cannot_bypass_product_services(
-    client: Client, user_factory: Any, credential_factory: Any
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory
 ) -> None:
     actor = user_factory()
     actor.is_staff = actor.is_superuser = True
@@ -147,7 +149,7 @@ def test_django_model_admin_cannot_bypass_product_services(
     ],
 )
 def test_browser_validation_errors_are_plain_field_messages(
-    data: dict[str, str], field: str, client: Client, user_factory: Any
+    data: dict[str, str], field: str, client: Client, user_factory: UserFactory
 ) -> None:
     from django.contrib.messages import get_messages
 
