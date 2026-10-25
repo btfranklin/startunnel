@@ -82,6 +82,7 @@ PHASE_NAMES = (
     "prepare",
     "render_compose",
     "pull_candidate",
+    "secret_ownership",
     "start_services",
     "runtime_identity",
     "health",
@@ -258,6 +259,48 @@ def make_secrets(directory: Path) -> None:
     }
     for name, value in values.items():
         write_secret(directory / name, value)
+
+
+def set_secret_ownership(
+    directory: Path, *, image: str, project_name: str, environment: Mapping[str, str]
+) -> None:
+    """Apply the documented native Linux file ownership without reading secrets."""
+    if sys.platform != "linux":
+        return
+    run_process(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--pull",
+            "never",
+            "--platform",
+            PLATFORM,
+            "--name",
+            f"{project_name}-secret-owner",
+            "--label",
+            f"com.docker.compose.project={project_name}",
+            "--label",
+            "com.docker.compose.service=secret-owner",
+            "--network",
+            "none",
+            "--read-only",
+            "--user",
+            "0:0",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--entrypoint",
+            "/bin/chown",
+            "--mount",
+            f"type=bind,source={directory},target=/proof-secrets",
+            image,
+            "startunnel:startunnel",
+            *(f"/proof-secrets/{name}" for name in SECRET_NAMES),
+        ],
+        environment=environment,
+        timeout=60,
+        step="secret_ownership",
+    )
 
 
 def object_value(value: object, step: str) -> dict[str, object]:
@@ -796,6 +839,14 @@ def run_proof(
                     labels, platform=platform, commit=commit, version=version
                 )
                 report["checks"]["source_identity"] = True
+            current_step = "secret_ownership"
+            with timings.phase("secret_ownership"):
+                set_secret_ownership(
+                    secret_directory,
+                    image=image,
+                    project_name=project_name,
+                    environment=stack.environment,
+                )
             current_step = "start_services"
             with timings.phase("start_services"):
                 stack.run(

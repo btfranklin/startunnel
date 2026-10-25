@@ -6,6 +6,7 @@ import base64
 import json
 import stat
 import subprocess
+import sys
 import time
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -719,3 +720,73 @@ def test_cli_download_rejects_a_file_origin_before_creating_files(
             tmp_path, tmp_path / "admin.key", "file:///outside", VERSION, COMMIT, {}
         )
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_secret_ownership_uses_verified_image_and_keeps_private_modes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+) -> None:
+    directory = tmp_path / "secrets"
+    proof.make_secrets(directory)
+    calls: list[list[str]] = []
+
+    def run(command: list[str], *, environment: Mapping[str, str], timeout: int, step: str) -> str:
+        assert step == "secret_ownership" and timeout == 60
+        calls.append(command)
+        return ""
+
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(proof, "run_process", run)
+    proof.set_secret_ownership(
+        directory, image=IMAGE, project_name="stproof-install-test", environment={}
+    )
+    if platform == "linux":
+        assert len(calls) == 1
+        command = calls[0]
+        assert command[:4] == ["docker", "run", "--rm", "--pull"]
+        assert command[command.index("--platform") + 1] == proof.PLATFORM
+        assert command[command.index("--network") + 1] == "none"
+        assert command[command.index("--entrypoint") + 1] == "/bin/chown"
+        assert command[command.index("--user") + 1] == "0:0"
+        assert "com.docker.compose.project=stproof-install-test" in command
+        assert command[-len(proof.SECRET_NAMES) - 2 :] == [
+            IMAGE,
+            "startunnel:startunnel",
+            *(f"/proof-secrets/{name}" for name in proof.SECRET_NAMES),
+        ]
+        assert not any("chmod" in value for value in command)
+    else:
+        assert calls == []
+    assert all(
+        stat.S_IMODE((directory / name).stat().st_mode) == 0o600 for name in proof.SECRET_NAMES
+    )
+
+
+def test_secret_ownership_failure_keeps_safe_report_and_cleans_private_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_run(monkeypatch)
+
+    def fail(
+        directory: Path, *, image: str, project_name: str, environment: Mapping[str, str]
+    ) -> None:
+        raise LaneError("secret_ownership", "private-operation-details")
+
+    monkeypatch.setattr(proof, "set_secret_ownership", fail)
+    report = proof.run_proof(
+        image=IMAGE,
+        commit=COMMIT,
+        version=VERSION,
+        project_name="stproof-install-failure",
+        report_path=tmp_path / "proof.json",
+    )
+    assert report["status"] == "failed"
+    assert report["failed_step"] == "secret_ownership"
+    assert report["failure_type"] == "LaneError"
+    assert report["disposable_volumes_removed"] is True
+    assert report["private_files_removed"] is True
+    assert report["release_evidence_eligible"] is False
+    assert "private-operation-details" not in json.dumps(report)
