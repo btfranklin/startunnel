@@ -20,8 +20,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 if TYPE_CHECKING or __package__:
+    from .proof_build import ProofBuildError
+    from .proof_build import build_services as build_proof_services
     from .start_production import validate_image_reference
 else:
+    from proof_build import ProofBuildError
+    from proof_build import build_services as build_proof_services
     from start_production import validate_image_reference
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -348,6 +352,7 @@ class IsolatedComposeProject:
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
         self._env_file: Path | None = None
         self._owned = False
+        self.cleanup_complete = False
 
     def __enter__(self) -> IsolatedComposeProject:
         assert_local_docker(self.environment)
@@ -462,6 +467,37 @@ class IsolatedComposeProject:
             raise LaneError(step, f"Could not inspect {step}.")
         return result.stdout.strip()
 
+    def build_services(
+        self,
+        services: Sequence[str],
+        *,
+        no_cache: bool = False,
+        timeout_seconds: int = 2400,
+    ) -> dict[str, object]:
+        """Build selected proof services through Buildx with isolated cache scopes."""
+
+        model = self.capture(
+            "the sanitized proof build model",
+            "config",
+            "--format",
+            "json",
+        )
+        print(f"[Build proof services: {', '.join(services)}]", flush=True)
+        build_environment = dict(self.environment)
+        for name in ("ACTIONS_CACHE_URL", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_RESULTS_URL"):
+            if value := self.source_environment.get(name):
+                build_environment[name] = value
+        try:
+            return build_proof_services(
+                services,
+                compose_model=model,
+                environment=build_environment,
+                no_cache=no_cache,
+                timeout_seconds=timeout_seconds,
+            )
+        except ProofBuildError as error:
+            raise LaneError("Build proof services", str(error)) from error
+
     def pull_candidate(self) -> None:
         if not self.candidate_image:
             raise IsolationError("No candidate image was selected.")
@@ -509,6 +545,20 @@ class IsolatedComposeProject:
         )
         if version != "v" + (ROOT / "VERSION").read_text().strip():
             raise IsolationError("Candidate image version differs from VERSION.")
+        platform = required_output(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                "{{.Os}}/{{.Architecture}}",
+                self.candidate_image,
+            ],
+            environment=self.environment,
+            label="the candidate platform",
+        )
+        if platform != "linux/amd64":
+            raise IsolationError("Candidate platform must be linux/amd64.")
 
     def verify_candidate_services(self) -> None:
         if not self.candidate_image:
@@ -558,4 +608,5 @@ class IsolatedComposeProject:
             ) from error
         if result.returncode:
             raise IsolationError("Could not remove the disposable Compose project and its volumes.")
+        self.cleanup_complete = True
         prune_disposable_images(self.environment)
