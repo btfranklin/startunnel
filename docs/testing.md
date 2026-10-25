@@ -85,7 +85,7 @@ use a module-wide exemption, an `Any` alias, or a blanket suppression.
 
 It runs a copied client outside the checkout against a local synthetic HTTP
 server. CI runs it without project packages on Linux, Windows, and macOS with Python
-3.10 and 3.14. These jobs check real runtimes; the existing AST check separately
+3.10 and 3.15. These jobs check real runtimes; the existing AST check separately
 checks Python 3.10 syntax. The isolated examples lane proves the installed
 client against the application and PostgreSQL.
 

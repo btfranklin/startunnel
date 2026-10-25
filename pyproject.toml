@@ -2,32 +2,32 @@
 name = "startunnel"
 description = "A stable message board for authenticated AI agents"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
     { name = "B.T. Franklin" },
 ]
 dynamic = ["version"]
-dependencies = ["Django>=6.0.8", "django-ninja>=1.6.2", "django-htmx>=1.29.0", "psycopg[binary,pool]>=3.3.4", "uvicorn[standard]>=0.52.1", "argon2-cffi>=25.1.0", "prometheus-client>=0.26.0", "markdown-it-py>=4.2.0", "mdit-py-plugins>=0.6.1", "Pygments>=2.20.0", "dj-database-url>=3.1.2", "httpx>=0.28.1", "python-dotenv>=1.2.2", "cryptography>=50.0.1", "sqlparse>=0.6.0", "pydantic>=2.14.1"]
+dependencies = ["Django>=6.1.2", "django-ninja>=1.7.1", "django-htmx>=1.29.0", "psycopg[binary,pool]>=3.3.6", "uvicorn[standard]>=0.54.0", "argon2-cffi>=25.1.0", "prometheus-client>=0.26.0", "markdown-it-py>=4.2.0", "mdit-py-plugins>=0.6.1", "Pygments>=2.21.0", "dj-database-url>=3.1.2", "httpx>=0.28.1", "python-dotenv>=1.2.4", "cryptography>=50.0.2", "sqlparse>=0.6.0", "pydantic>=2.14.1"]
 
 [dependency-groups]
 dev = [
     { include-group = "live-agents" },
     "pytest>=9.1.1",
-    "pytest-django>=4.13.0",
+    "pytest-django>=4.14.0",
     "pytest-cov>=7.1.0",
     "pytest-asyncio>=1.4.0",
-    "hypothesis>=6.165.2",
-    "time-machine>=3.3.1",
-    "ruff>=0.16.2",
-    "mypy>=2.3.0",
-    "django-stubs[compatible-mypy]>=6.0.9",
-    "djlint>=1.44.2",
+    "hypothesis>=6.170.9",
+    "time-machine>=3.5.1",
+    "ruff>=0.17.2",
+    "mypy>=2.4.0",
+    "django-stubs[compatible-mypy]>=6.1.2",
+    "djlint>=1.47.0",
     "openapi-spec-validator>=0.9.0",
     "jsonschema>=4.26.0",
     "beautifulsoup4>=4.15.0",
-    "playwright>=1.62.0",
+    "playwright>=1.64.1",
     "bandit>=1.9.4",
     "pip-audit>=2.10.1",
     "linkbust>=0.1.0",
@@ -36,15 +36,15 @@ dev = [
     "types-Pygments>=2.21.0.20260819",
 ]
 live-agents = [
-    "openai-agents>=0.20.0",
+    "openai-agents>=0.24.0",
 ]
 
 [build-system]
-requires = ["pdm-backend"]
+requires = ["pdm-backend>=2.5.0"]
 build-backend = "pdm.backend"
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py315"
 line-length = 100
 src = ["src", "tests", "examples"]
 
@@ -88,7 +88,7 @@ show_missing = true
 skip_covered = true
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.15"
 mypy_path = "src"
 plugins = ["mypy_django_plugin.main", "pydantic.mypy"]
 strict = true

@@ -1516,7 +1516,7 @@ def test_source_workflow_checks_service_lanes_and_cli_platforms() -> None:
     jobs = workflow["jobs"]
     assert set(jobs["external-proofs"]["strategy"]["matrix"]["lane"]) == {"examples", "agents"}
     matrix = jobs["standalone-cli"]["strategy"]["matrix"]
-    assert set(matrix["python"]) == {"3.10", "3.14"}
+    assert set(matrix["python"]) == {"3.10", "3.15"}
     assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest", "macos-latest"}
     for job in jobs.values():
         assert not job.get("secrets")

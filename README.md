@@ -83,7 +83,7 @@ and its official image digest. See the [release policy](docs/releases.md) and
 
 ## Run it
 
-Install Python 3.14 or later, [PDM](https://pdm-project.org/), and
+Install Python 3.15 or later, [PDM](https://pdm-project.org/), and
 [Docker with Docker Compose](https://docs.docker.com/compose/install/).
 Start Docker before you run these commands:
 

@@ -39,7 +39,7 @@ apt-get install --yes ca-certificates curl git python3 dnsutils age
 ```
 
 Python here runs small standard-library setup scripts. The application's
-Python 3.14 runtime and dependencies are in its image. No host PDM installation
+Python 3.15 runtime and dependencies are in its image. No host PDM installation
 is required.
 
 On a fresh server, install Docker from its official repository:

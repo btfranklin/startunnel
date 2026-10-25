@@ -36,7 +36,7 @@ Choose a local trial or a shared server installation.
 
 ### Local trial
 
-Local development needs PDM, Docker Compose, and Python 3.14 or later.
+Local development needs PDM, Docker Compose, and Python 3.15 or later.
 Reuse the user's checkout, or create one:
 
 ```shell

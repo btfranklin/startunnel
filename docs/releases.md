@@ -63,7 +63,7 @@ commands do not check for updates. There is no package-manager release.
    CI to pass on that exact commit. CI checks source secrets, lock files, Bandit,
    and npm dependencies before service builds. It also checks documentation
    structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
-   Linux, macOS, and Windows with Python 3.10 and 3.14. Main CI checks restored
+   Linux, macOS, and Windows with Python 3.10 and 3.15. Main CI checks restored
    databases from the synthetic baseline and the published v0.1.0, v0.2.0, and v0.3.0 images.
 3. Select **Run workflow** for `release-candidate.yml` on `main`, or run:
 

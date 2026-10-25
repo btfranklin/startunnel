@@ -39,7 +39,7 @@ def test_source_export_checks_new_files_and_migrations(tmp_path: Path) -> None:
 def test_standalone_context_keeps_strict_settings(tmp_path: Path) -> None:
     project = tmp_path / "pyproject.toml"
     project.write_text(
-        '[tool.mypy]\npython_version = "3.14"\nstrict = true\n'
+        '[tool.mypy]\npython_version = "3.15"\nstrict = true\n'
         "disallow_any_explicit = true\ndisallow_any_unimported = true\n"
         'plugins = ["mypy_django_plugin.main", "pydantic.mypy"]\nmypy_path = "src"\n'
         "[tool.pydantic-mypy]\ninit_typed = true\ninit_forbid_extra = true\n",

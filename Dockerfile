@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.12
 
-ARG PYTHON_BASE_IMAGE="python:3.14.8-alpine3.23@sha256:e7cff362a12454395f8dc99607c21a602ea880cdce03538877b90c2ba932b16f"
-ARG PYTHON_TEST_BASE_IMAGE="python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d"
+ARG PYTHON_BASE_IMAGE="python:3.15.1-alpine3.23@sha256:cb295b554dbbea09b2c0e6e6d9ce55f051347c902fbb611e618c071addfb30a3"
+ARG PYTHON_TEST_BASE_IMAGE="python:3.15.1-slim-trixie@sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51"
 ARG RUST_BUILD_IMAGE="rust:1.99-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d"
 
 # Build the existing Perfect Doc release for the test image's architecture.
@@ -33,7 +33,7 @@ RUN apk upgrade --no-cache \
 
 FROM python-base AS dependency-builder
 
-ARG PDM_VERSION="2.28.0"
+ARG PDM_VERSION="2.29.3"
 
 RUN python -m pip install --no-cache-dir "pdm==${PDM_VERSION}"
 
@@ -58,7 +58,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:${PATH}"
 
 WORKDIR /app
-ARG PDM_VERSION="2.28.0"
+ARG PDM_VERSION="2.29.3"
 RUN apt-get update \
     && apt-get install --no-install-recommends --only-upgrade --yes openssl libssl3t64 \
     && rm -rf /var/lib/apt/lists/* \
@@ -166,14 +166,14 @@ COPY --chmod=0555 docker/app/maintenance-healthcheck.sh /usr/local/bin/startunne
 RUN rm -rf \
         /usr/local/bin/pip \
         /usr/local/bin/pip3 \
-        /usr/local/bin/pip3.14 \
-        /usr/local/lib/python3.14/site-packages/pip \
-        /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+        /usr/local/bin/pip3.15 \
+        /usr/local/lib/python3.15/site-packages/pip \
+        /usr/local/lib/python3.15/site-packages/pip-*.dist-info \
         /app/.venv/bin/pip \
         /app/.venv/bin/pip3 \
-        /app/.venv/bin/pip3.14 \
-        /app/.venv/lib/python3.14/site-packages/pip \
-        /app/.venv/lib/python3.14/site-packages/pip-*.dist-info \
+        /app/.venv/bin/pip3.15 \
+        /app/.venv/lib/python3.15/site-packages/pip \
+        /app/.venv/lib/python3.15/site-packages/pip-*.dist-info \
     && chown -R startunnel:startunnel /app /home/startunnel
 
 ENV HOME=/home/startunnel \
