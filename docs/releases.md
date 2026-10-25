@@ -117,6 +117,13 @@ longest observed dependency path. Queue time is shown only when Actions supplies
 its boundary. The candidate summary also includes source CI, the immutable
 image, helper cache results, and proof phase times. Parallel jobs are not added
 as serial work. Missing counters and timestamps remain unavailable.
+The readiness view states whether a new candidate or promotion can start and
+lists blockers. It checks the local branch and source changes, the remote tag,
+exact-source CI, the candidate run, and retained evidence. A successful candidate
+requires a downloaded evidence bundle and its existing checksum and input checks
+before the view can report promotion readiness. An image record alone is
+insufficient. These are technical checks; they do not authorize publication or
+replace the promotion workflow's checks. API and checksum errors stop the command.
 Promotion timing records the dispatch source separately from the tagged release
 source. Source CI, candidate identity, and proof reuse still require the exact
 tagged source commit.
@@ -142,6 +149,23 @@ The manual `release-diagnostics.yml` workflow can compare cold and warm helper
 builds or run a controlled database-lock failure. Select the exact candidate
 digest for the lock test. These reports cannot promote a release. The tests use
 disposable resources and keep the standard load and worker budgets.
+
+## Clean local release caches
+
+Preview known disposable caches, then apply the same selection:
+
+```sh
+pdm run release-cleanup
+pdm run release-cleanup --apply
+```
+
+Use `--json` for a machine-readable report. Use `--directory artifacts/PATH`
+to limit the selection. The command removes only `scanners`, `trivy-cache`, and
+`__pycache__` directories under repository artifacts. It checks every selected
+directory before deletion and rejects symbolic links, unsafe paths, credentials,
+reports, and files referenced by retained proof manifests. Reports and unknown
+directories stay. No Docker resources or database volumes are removed. The
+isolated proof runner owns its disposable resource cleanup.
 
 ## Tag and promote
 

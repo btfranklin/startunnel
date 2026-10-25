@@ -701,6 +701,48 @@ def finish_report(
         report["release_evidence_eligible"] = True
 
 
+def prepare_stack(
+    private_directory: Path, *, image: str, project_name: str
+) -> tuple[ProductionComposeProject, str, Path, int]:
+    """Create private inputs for one disposable production stack."""
+    secret_directory = private_directory / "secrets"
+    make_secrets(secret_directory)
+    port = free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    overlay = private_directory / "production-release.yaml"
+    overlay.write_text(
+        "services:\n"
+        "  web:\n"
+        "    platform: linux/amd64\n"
+        "    environment:\n"
+        "      DJANGO_SETTINGS_MODULE: startunnel.settings.production\n"
+        "      PROMETHEUS_MULTIPROC_DIR: /tmp/startunnel-prometheus\n"
+        "    ports: !override\n"
+        "      - target: 8000\n"
+        f'        published: "{port}"\n'
+        "        host_ip: 127.0.0.1\n"
+        "        protocol: tcp\n"
+        "    volumes:\n"
+        "      - type: bind\n"
+        f"        source: {json.dumps(str(ROOT / 'scripts/proof_runtime.py'))}\n"
+        "        target: /proof/runtime.py\n"
+        "        read_only: true\n"
+        "  migrate:\n"
+        "    platform: linux/amd64\n"
+        "  maintenance:\n"
+        "    platform: linux/amd64\n",
+        encoding="utf-8",
+    )
+    overlay.chmod(0o600)
+    stack = ProductionComposeProject(
+        project_name,
+        candidate_image=image,
+        source_environment=os.environ,
+        smoke_overlay=overlay,
+    )
+    return stack, base_url, secret_directory, port
+
+
 def run_proof(
     *,
     image: str,
@@ -719,40 +761,8 @@ def run_proof(
     current_step = "prepare"
     try:
         with timings.phase("prepare"):
-            secret_directory = private_directory / "secrets"
-            make_secrets(secret_directory)
-            port = free_port()
-            base_url = f"http://127.0.0.1:{port}"
-            overlay = private_directory / "production-release.yaml"
-            overlay.write_text(
-                "services:\n"
-                "  web:\n"
-                "    platform: linux/amd64\n"
-                "    environment:\n"
-                "      DJANGO_SETTINGS_MODULE: startunnel.settings.production\n"
-                "      PROMETHEUS_MULTIPROC_DIR: /tmp/startunnel-prometheus\n"
-                "    ports: !override\n"
-                "      - target: 8000\n"
-                f'        published: "{port}"\n'
-                "        host_ip: 127.0.0.1\n"
-                "        protocol: tcp\n"
-                "    volumes:\n"
-                "      - type: bind\n"
-                f"        source: {json.dumps(str(ROOT / 'scripts/proof_runtime.py'))}\n"
-                "        target: /proof/runtime.py\n"
-                "        read_only: true\n"
-                "  migrate:\n"
-                "    platform: linux/amd64\n"
-                "  maintenance:\n"
-                "    platform: linux/amd64\n",
-                encoding="utf-8",
-            )
-            overlay.chmod(0o600)
-            stack = ProductionComposeProject(
-                project_name,
-                candidate_image=image,
-                source_environment=os.environ,
-                smoke_overlay=overlay,
+            stack, base_url, secret_directory, port = prepare_stack(
+                private_directory, image=image, project_name=project_name
             )
         with termination_signals():
             contexts.enter_context(stack)

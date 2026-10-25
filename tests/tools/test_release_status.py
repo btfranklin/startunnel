@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from scripts import release_status
 from scripts.json_data import JsonObject, json_object
+from scripts.release_candidate import CandidateData
 from scripts.release_status import ReleaseStatus, job_timings, render_summary
 from tests.json_values import json_at
 
@@ -189,6 +190,11 @@ def test_dispatch_source_is_separate_only_for_promotion_timing(
         "timing": job_timings([], {}),
         "artifacts": [],
     }
+    monkeypatch.setattr(
+        release_status,
+        "inspect_readiness",
+        lambda *args, **kwargs: readiness_for(status_fixture()),
+    )
     monkeypatch.setattr(release_status, "git_commit", lambda: tagged_source)
     monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
     monkeypatch.setattr(release_status, "github_api", lambda *args, **kwargs: {"workflow_runs": []})
@@ -230,3 +236,183 @@ def test_promotion_timing_rejects_an_unrelated_workflow(
     monkeypatch.setattr(sys, "argv", ["release-status", "--promotion-run-id", "42"])
     with pytest.raises(ValueError, match="requires the release workflow"):
         release_status.main()
+
+
+def status_fixture(*, candidate_result: str | None = None) -> ReleaseStatus:
+    def workflow(run_id: int, name: str, result: str) -> release_status.WorkflowStatus:
+        return {
+            "run_id": run_id,
+            "source_commit": "a" * 40,
+            "url": f"https://example.invalid/run/{run_id}",
+            "workflow": f".github/workflows/{name}",
+            "branch": "main",
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": result,
+            "attempt": 1,
+            "queue_seconds": None,
+            "timing": job_timings([], {}),
+            "artifacts": [],
+        }
+
+    status: ReleaseStatus = {
+        "source_commit": "a" * 40,
+        "workflows": [workflow(1, "ci.yml", "success")],
+    }
+    if candidate_result:
+        candidate_run = workflow(2, "release-candidate.yml", candidate_result)
+        candidate_run["artifacts"] = [
+            {
+                "id": 20,
+                "name": "release-candidate-2-1",
+                "digest": None,
+                "expired": False,
+                "created_at": None,
+                "expires_at": None,
+            }
+        ]
+        status["workflows"].append(candidate_run)
+    return status
+
+
+def readiness_for(
+    status: ReleaseStatus, *, verified: bool = False
+) -> release_status.ReleaseReadiness:
+    return release_status.release_readiness(
+        status,
+        version="v0.4.1",
+        branch="main",
+        source_clean=True,
+        tag_exists=False,
+        evidence_verified=verified,
+    )
+
+
+def test_green_source_can_start_candidate_but_cannot_promote() -> None:
+    result = readiness_for(status_fixture())
+    assert result["can_start_candidate"]
+    assert not result["can_promote"]
+    assert result["promotion_blockers"]
+
+
+@pytest.mark.parametrize("condition", ["dirty", "branch", "tag", "failed_ci", "other_source", "pr"])
+def test_readiness_reports_source_and_version_blockers(condition: str) -> None:
+    status = status_fixture()
+    source = status["workflows"][0]
+    if condition == "failed_ci":
+        source["conclusion"] = "failure"
+    if condition == "other_source":
+        source["source_commit"] = "b" * 40
+    if condition == "pr":
+        source["event"] = "pull_request"
+    result = release_status.release_readiness(
+        status,
+        version="v0.4.1",
+        branch="feature" if condition == "branch" else "main",
+        source_clean=condition != "dirty",
+        tag_exists=condition == "tag",
+        evidence_verified=True,
+    )
+    assert not result["can_start_candidate"]
+    assert not result["can_promote"]
+    assert result["candidate_blockers"]
+
+
+def test_only_successful_manual_candidate_with_verified_retained_evidence_can_promote() -> None:
+    status = status_fixture(candidate_result="success")
+    assert not readiness_for(status)["can_promote"]
+    result = readiness_for(status, verified=True)
+    assert result["can_promote"]
+    assert not result["can_start_candidate"]
+    assert "Can promote: yes." in render_summary({**status, "readiness": result})
+    status["workflows"][1]["event"] = "push"
+    assert not readiness_for(status, verified=True)["can_promote"]
+
+
+@pytest.mark.parametrize("condition", ["expired", "missing", "wrong_source_ci"])
+def test_local_verified_files_do_not_replace_retained_artifacts_or_source_ci(
+    condition: str,
+) -> None:
+    status = status_fixture(candidate_result="success")
+    if condition == "expired":
+        status["workflows"][1]["artifacts"][0]["expired"] = True
+    elif condition == "missing":
+        status["workflows"][1]["artifacts"] = []
+    else:
+        status["candidate"] = {
+            "source_commit": "a" * 40,
+            "version": "v0.4.1",
+            "platform": "linux/amd64",
+            "image": "ghcr.io/btfranklin/startunnel@sha256:" + "b" * 64,
+            "source_validation_run_id": 99,
+        }
+    assert not readiness_for(status, verified=True)["can_promote"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_failed_or_pending_candidate_requires_inspection_before_another_run(running: bool) -> None:
+    status = status_fixture(candidate_result="failure")
+    if running:
+        status["workflows"][1]["status"] = "in_progress"
+    result = readiness_for(status)
+    assert not result["can_start_candidate"]
+    assert not result["can_promote"]
+    assert any(
+        ("Wait" if running else "Inspect") in reason for reason in result["candidate_blockers"]
+    )
+
+
+def test_status_downloads_complete_evidence_before_reporting_promotion_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = status_fixture(candidate_result="success")
+    workflow = status["workflows"][1]
+    candidate: CandidateData = {
+        "source_commit": "a" * 40,
+        "version": "v0.4.1",
+        "platform": "linux/amd64",
+        "image": "ghcr.io/btfranklin/startunnel@sha256:" + "b" * 64,
+        "source_validation_run_id": 1,
+    }
+    downloads: list[str] = []
+
+    def download(repository: str, run_id: int, artifact: object, directory: Path) -> None:
+        assert run_id == 2
+        downloads.append(str(json_object(artifact)["name"]))
+
+    def verify(directory: Path, *, commit: str, version: str) -> CandidateData:
+        assert downloads == ["release-candidate-2-1"]
+        assert commit == "a" * 40 and version == "v0.4.1"
+        return candidate
+
+    monkeypatch.setattr(release_status, "_download", download)
+    monkeypatch.setattr(release_status, "verify_evidence", verify)
+    monkeypatch.setattr(release_status, "candidate_version", lambda: "v0.4.1")
+    assert release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40) == (
+        candidate,
+        True,
+    )
+
+    def corrupt(directory: Path, *, commit: str, version: str) -> CandidateData:
+        raise ValueError("Retained evidence checksums do not match.")
+
+    monkeypatch.setattr(release_status, "verify_evidence", corrupt)
+    with pytest.raises(ValueError, match="checksums"):
+        release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40)
+
+
+def test_expired_or_duplicate_artifacts_cannot_produce_verified_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow = status_fixture(candidate_result="success")["workflows"][1]
+    workflow["artifacts"][0]["expired"] = True
+    monkeypatch.setattr(
+        release_status, "_download", lambda *args: pytest.fail("unexpected download")
+    )
+    assert release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40) == (
+        None,
+        False,
+    )
+    workflow["artifacts"].append(workflow["artifacts"][0].copy())
+    with pytest.raises(ValueError, match="duplicate"):
+        release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40)

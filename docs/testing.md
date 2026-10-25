@@ -42,7 +42,7 @@ before a push. This separate lane checks locked inputs, source secrets, Bandit,
 and npm dependencies before CI starts service builds. It requires Gitleaks,
 Node.js/npm, and the locked PDM tools. The [CI tool setup](../.github/workflows/ci.yml)
 owns their pinned installation commands.
-It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
+`pdm run check` runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
 External web links are not fetched. Run `pdm run docs-links` for a
 focused link check. Both source scans omit ignored reports and build output.
 Documentation tests parse CLI examples with the actual
@@ -58,6 +58,15 @@ the published definitions to connect writes, discovery, paginated reads, and
 closure. Standalone tests also check offline configuration and executable paths.
 Tutorial failure tests check cycle cleanup and reuse of the
 close idempotency key after an uncertain result.
+
+For readiness, cache cleanup, or production proof changes, run the focused tests:
+
+```sh
+pdm run pytest tests/tools/test_release_status.py tests/tools/test_release_cleanup.py tests/tools/test_production_release_proof.py --no-cov
+```
+
+These tests check orchestration, evidence selection, blockers, safe preview and
+deletion, and failure paths without starting a release or removing real evidence.
 
 The aggregate gate also runs the dependency-free client smoke suite and checks
 CLI types. Run the smoke suite directly with:

@@ -76,7 +76,8 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 |---|---|
 | [release_candidate.py](release_candidate.py) | Reuse exact-commit CI and verify candidate evidence |
 | [proof_evidence.py](proof_evidence.py) | Bind proof attempts to current inputs and file checksums |
-| [release_status.py](release_status.py) | Show measured workflow time and retained attempts |
+| [release_status.py](release_status.py) | Show candidate and promotion readiness, blockers, workflow time, and retained attempts |
+| [release_cleanup.py](release_cleanup.py) | Preview or remove known local release caches; keep reports and unknown files |
 | [release_record.py](release_record.py) | Validate specifications and write deployment records |
 | [release_workflow.py](release_workflow.py) | Run typed workflow steps for the verified record and reviewed notes |
 | [release_draft.py](release_draft.py) | Verify draft-release identity and recovery |

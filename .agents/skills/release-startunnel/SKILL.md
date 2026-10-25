@@ -5,100 +5,62 @@ description: Prepare, inspect, validate, or publish a StarTunnel release with th
 
 # Release StarTunnel
 
-Use this skill in the StarTunnel repository. Read the
-[release policy](../../../docs/releases.md) and
-[tooling map](../../../docs/release-tooling.md) before selecting commands.
-The policy owns compatibility, acceptance limits, retries, and publication.
-The map owns tool locations, callers, tests, and type-check boundaries.
+Read the [release policy](../../../docs/releases.md) for acceptance, compatibility,
+retries, and publication. Use the [tooling map](../../../docs/release-tooling.md)
+for command owners, callers, tests, and type boundaries. Keep those rules in
+these owning guides; this skill gives the execution order.
 
 ## Establish the requested work
 
-Distinguish process maintenance, inspection, candidate preparation, and release
-publication. A request to improve this skill or a proof helper does not authorize
-a release. An explicit request to release authorizes the documented publication
-steps after their checks pass. Respect a later stop or abandonment instruction.
+Distinguish maintenance, inspection, candidate preparation, and publication.
+Maintenance does not authorize a release. An explicit release request authorizes
+the documented publication steps after their checks pass. Respect a later stop
+or abandonment instruction. Work on `main` as required by `AGENTS.md`.
 
-Inspect `git status --short --branch`, `VERSION`, the release specification and
-notes, recent releases, tags, and Actions runs. Record the exact source commit,
-source CI run, candidate run and attempt, immutable image digest, and platform.
-Use values from checked records. Do not infer them from a tag name or the most
-recent run alone. Work and commit on `main` as required by `AGENTS.md`.
+Inspect Git state, `VERSION`, reviewed notes, the release specification, and
+`pdm run release-status`. Use checked source, run, image, and attempt identities.
+The readiness report gives technical blockers, not publication authorization.
+A local unpushed commit still needs exact-source hosted CI before a candidate.
 
-## Use maintained commands
+## Use maintained tools
 
-Use the repository tools and workflow entry points. Do not write executable
-release logic in temporary directories, generated output, workflow heredocs, or a chat command.
-Private credentials, disposable checkout files, and retained reports can use
-temporary storage. Reusable logic belongs in typed repository modules with
-regression tests. Review and test a helper before its first real stack run.
+Keep reusable release logic in tested, strictly typed repository modules. Do not
+write executable release logic in temporary directories, generated output,
+workflow heredocs, or chat commands. Use the same tools locally and in CI.
+Test complete orchestration and failure paths before a real stack run.
 
-Keep one maintained implementation for local and hosted checks.
-Read [testing](../../../docs/testing.md) for the applicable focused gates.
+Preview local cache removal with `pdm run release-cleanup`. Apply it only within
+the requested cleanup scope. Keep failed reports and unknown files. The isolated
+proof runner owns disposable containers and volumes.
 
-## Prepare and validate
+## Follow the release sequence
 
 1. Prepare the version, reviewed notes, compatibility specification, and current
-   guides. List a predecessor only after its restored-database upgrade and
-   recovery proof passes. Keep required host Python and standalone CLI Python
-   requirements separate.
-2. Run the focused tests, `pdm run check`, `pdm run docs-structure`,
-   `pdm run security-release source`, and `actionlint`. The source security lane
-   is separate from the aggregate check. Include new Python modules in the strict type gate.
-   Test orchestration through its complete successful path and its failure
-   paths. Function tests and a type check alone do not prove orchestration.
-3. Commit and push. Wait for source CI on that exact commit. Do not replace a
-   failed gate with a local result or a result from another source.
-4. Run `release-candidate.yml` on `main`. Its checked selection can reuse
-   matching evidence. Otherwise it builds one immutable runtime image and runs
-   the required image proofs. Do not rebuild during promotion.
-5. Inspect the read-only status command and retained attempt manifests. Verify
-   checksums and all required proof results, including production installation,
-   cleanup, and helper provenance. Preserve the failed reports. A source,
-   version, image, platform, profile, or workload change requires new matching
-   evidence.
+   guides. Use the policy's restored-database proofs before listing predecessors.
+2. Run the applicable [local gates](../../../docs/testing.md#local-gates), including
+   focused tests, `pdm run check`, `pdm run docs-structure`,
+   `pdm run security-release source`, and `actionlint`. Source security is separate
+   from the aggregate check.
+3. Commit and push only within the owner's requested scope. Wait for successful
+   source CI on that exact commit. Use `pdm run release-status` to check blockers.
+4. Run `release-candidate.yml` on `main`. Keep one immutable application image.
+   Use the existing proof selection and checksum checks; do not rebuild for promotion.
+5. Inspect readiness and retained evidence. An image identity or passing workload
+   alone is insufficient. Required observations, proofs, provenance, and cleanup
+   must pass for the same source and inputs.
+6. While release authorization remains active, follow the policy to tag the exact
+   tested commit, promote its digest, review the workflow-owned draft, and publish.
+   Use the maintained production proof and external checks required by the policy.
+7. Report the version, release URL, source, digest, evidence, limits, and cleanup.
+   A tag, draft, or green CI run alone is not a published release.
 
-The production proof uses the repository command, production Compose files,
-an explicit target platform, private secrets, and a disposable project. Its
-bootstrap command loads secrets through the production entrypoint and removes
-the metrics setting only from that command process. It transfers private
-container files through captured output. It must not clear live worker metrics
-or depend on `docker cp` for a file on a container temporary mount.
+## Handle failures and improve the process
 
-## Handle a failed check
+Before a fix, tell the owner which check failed and what the retained evidence
+shows. Separate traffic, observations, identity, and cleanup. Keep unknown causes
+unknown. Preserve failed reports and acceptance limits. Use only the policy's
+bounded manual repeat; do not add automatic retry loops.
 
-Before a fix, tell the owner exactly which check failed and what the retained
-evidence shows. Separate application traffic, observation completeness, runtime
-identity, and cleanup. A passing workload with incomplete observations is a
-failed release proof. Preserve unknown causes instead of attributing a result
-to runner variance.
-
-Keep the existing load and collection limits. Controlled lock diagnostics and
-partial reports cannot promote a release. Do not add automatic retry loops.
-Use the policy's one bounded manual repeat only when the relevant inputs match
-and the failed report is retained. Rerun only failed jobs. If another fix is
-needed, test it before starting a new source validation cycle.
-
-## Promote and publish
-
-Proceed only while the owner's release authorization remains active. Confirm
-that the tag is unused and that source, version, candidate digest, selected
-proofs, checksums, and cleanup agree. Tag the exact tested commit. Let
-`release.yml` promote the tested digest and create or recover its draft.
-
-Review the actual draft and deployment record. Follow the policy's installation,
-upgrade, anonymous asset, registry identity, and post-publication checks. Use
-the same production proof command against the published digest. Keep each
-report under a new project and attempt name. Do not replace a published tag,
-release record, or image.
-
-Report the published version and URL, source commit, immutable digest, evidence
-links, verification limits, and cleanup. A prepared tag, draft, or passing CI
-run alone is not a published release.
-
-## Improve the process
-
-When a release exposes a tooling defect, retain its safe evidence and add a
-regression test to the owning repository module. Update the command, its tests,
-the tooling map, and this skill when its decisions change. Keep detailed rules
-in their owning guide. Remove obsolete callers when replacing internal logic.
-Keep one supported execution path for each proof.
+Add a regression test for a tooling defect before another real run. Update the
+owning command and guide, then the map or skill if its instructions change.
+Remove obsolete callers and keep one supported path for each proof.

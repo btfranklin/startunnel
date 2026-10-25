@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -41,9 +42,10 @@ if TYPE_CHECKING or __package__:
         candidate_data,
         git_commit,
         github_api,
+        validate_candidate,
         verify_evidence,
     )
-    from .release_record import candidate_version
+    from .release_record import ROOT, candidate_version
 else:
     from release_candidate import (
         CandidateData,
@@ -51,9 +53,10 @@ else:
         candidate_data,
         git_commit,
         github_api,
+        validate_candidate,
         verify_evidence,
     )
-    from release_record import candidate_version
+    from release_record import ROOT, candidate_version
 
 
 def _github_object(repository: str, path: str) -> JsonObject:
@@ -117,6 +120,20 @@ class WorkflowStatus(TypedDict):
     queue_seconds: float | None
     timing: WorkflowTiming
     artifacts: list[ArtifactSummary]
+    branch: NotRequired[str | None]
+    event: NotRequired[str | None]
+
+
+class ReleaseReadiness(TypedDict):
+    version: str
+    branch: str
+    source_clean: bool
+    tag_exists: bool
+    evidence_verified: bool
+    can_start_candidate: bool
+    candidate_blockers: list[str]
+    can_promote: bool
+    promotion_blockers: list[str]
 
 
 class ProofDetails(TypedDict):
@@ -130,6 +147,7 @@ class ReleaseStatus(TypedDict):
     candidate: NotRequired[CandidateData]
     proof_details: NotRequired[dict[str, ProofDetails]]
     promotion: NotRequired[WorkflowStatus]
+    readiness: NotRequired[ReleaseReadiness]
 
 
 def _optional_text(value: object) -> str | None:
@@ -292,6 +310,8 @@ def workflow_status(repository: str, run_id: int) -> WorkflowStatus:
     return {
         "run_id": run_id,
         "source_commit": json_string(run["head_sha"]),
+        "branch": _optional_text(run.get("head_branch")),
+        "event": _optional_text(run.get("event")),
         "url": json_string(run["html_url"]),
         "workflow": json_string(run["path"]),
         "status": json_string(run["status"]),
@@ -311,8 +331,168 @@ def workflow_status(repository: str, run_id: int) -> WorkflowStatus:
     }
 
 
+def release_readiness(
+    status: ReleaseStatus,
+    *,
+    version: str,
+    branch: str,
+    source_clean: bool,
+    tag_exists: bool,
+    evidence_verified: bool,
+) -> ReleaseReadiness:
+    """Describe technical prerequisites; do not authorize or start a release."""
+    common: list[str] = []
+    if branch != "main":
+        common.append("Check out main.")
+    if not source_clean:
+        common.append("Commit the source changes before validation.")
+    if tag_exists:
+        common.append(f"The remote {version} tag already exists; inspect promotion or recovery.")
+    candidate = status.get("candidate")
+    source_id = candidate["source_validation_run_id"] if candidate else None
+    source_ok = any(
+        workflow["workflow"] == ".github/workflows/ci.yml"
+        and workflow["source_commit"] == status["source_commit"]
+        and workflow.get("branch") == "main"
+        and workflow.get("event") in {"push", "workflow_dispatch"}
+        and workflow["status"] == "completed"
+        and workflow["conclusion"] == "success"
+        and (source_id is None or workflow["run_id"] == source_id)
+        for workflow in status["workflows"]
+    )
+    if not source_ok:
+        common.append("Wait for successful source CI on main for this exact commit.")
+    candidate_blockers = common.copy()
+    promotion_blockers = common.copy()
+    candidate_runs = [
+        workflow
+        for workflow in status["workflows"]
+        if workflow["workflow"] == ".github/workflows/release-candidate.yml"
+        and workflow["source_commit"] == status["source_commit"]
+    ]
+    successful_candidate = any(
+        workflow["status"] == "completed"
+        and workflow["conclusion"] == "success"
+        and workflow.get("branch") == "main"
+        and workflow.get("event") == "workflow_dispatch"
+        for workflow in candidate_runs
+    )
+    retained_candidate = any(
+        workflow["conclusion"] == "success"
+        and any(
+            re.fullmatch(rf"release-candidate-{workflow['run_id']}-[12]", artifact["name"] or "")
+            and artifact["expired"] is False
+            for artifact in workflow["artifacts"]
+        )
+        for workflow in candidate_runs
+    )
+    if any(workflow["status"] != "completed" for workflow in candidate_runs):
+        candidate_blockers.append("Wait for the current candidate run to finish.")
+    elif any(workflow["conclusion"] != "success" for workflow in candidate_runs):
+        candidate_blockers.append("Inspect the failed candidate before a bounded manual repeat.")
+    if successful_candidate and evidence_verified and retained_candidate:
+        candidate_blockers.append("The candidate is verified; use its promotion path.")
+    if not successful_candidate:
+        promotion_blockers.append(
+            "Complete a successful manual candidate run on main for this commit."
+        )
+    if not evidence_verified:
+        promotion_blockers.append(
+            "Retain and verify all required candidate evidence and checksums."
+        )
+    if not retained_candidate:
+        promotion_blockers.append("The retained candidate artifact is missing or expired.")
+    return {
+        "version": version,
+        "branch": branch,
+        "source_clean": source_clean,
+        "tag_exists": tag_exists,
+        "evidence_verified": evidence_verified,
+        "can_start_candidate": not candidate_blockers,
+        "candidate_blockers": candidate_blockers,
+        "can_promote": not promotion_blockers,
+        "promotion_blockers": promotion_blockers,
+    }
+
+
+def inspect_readiness(
+    status: ReleaseStatus, repository: str, *, evidence_verified: bool
+) -> ReleaseReadiness:
+    version = candidate_version()
+    refs = json_array(github_api(repository, f"git/matching-refs/tags/{version}"))
+    tag_exists = any(json_object(ref).get("ref") == f"refs/tags/{version}" for ref in refs)
+    branch = subprocess.check_output(
+        ["git", "branch", "--show-current"], cwd=ROOT, text=True
+    ).strip()
+    source_clean = not subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True
+    ).strip()
+    return release_readiness(
+        status,
+        version=version,
+        branch=branch,
+        source_clean=source_clean,
+        tag_exists=tag_exists,
+        evidence_verified=evidence_verified,
+    )
+
+
+def candidate_from_workflow(
+    repository: str, workflow: WorkflowStatus, *, commit: str
+) -> tuple[CandidateData | None, bool]:
+    """Verify a retained candidate; an image identity alone never proves promotion."""
+    if workflow["workflow"] != ".github/workflows/release-candidate.yml":
+        return None, False
+    run_id = workflow["run_id"]
+    artifacts = workflow["artifacts"]
+    names = [item["name"] for item in artifacts]
+    if len(names) != len(set(names)):
+        raise ValueError("The workflow contains duplicate artifact names.")
+    retained = [
+        item
+        for item in artifacts
+        if re.fullmatch(rf"release-candidate-{run_id}-[12]", item["name"] or "")
+    ]
+    images = [
+        item
+        for item in artifacts
+        if re.fullmatch(rf"candidate-image-{run_id}-[12]", item["name"] or "")
+    ]
+    verified = (
+        workflow["status"] == "completed" and workflow["conclusion"] == "success" and bool(retained)
+    )
+    choices = retained if verified else images
+    if not choices:
+        return None, False
+    artifact = max(choices, key=lambda item: int((item["name"] or "").rsplit("-", 1)[1]))
+    if artifact["expired"] is not False:
+        return None, False
+    with tempfile.TemporaryDirectory(prefix="startunnel-status-") as temporary:
+        directory = Path(temporary)
+        _download(repository, run_id, artifact, directory)
+        if verified:
+            candidate = verify_evidence(directory, commit=commit, version=candidate_version())
+        else:
+            candidate = candidate_data(
+                json_object(json.loads((directory / "candidate-image.json").read_text()))
+            )
+            validate_candidate(candidate, commit=commit, version=candidate_version())
+    return candidate, verified
+
+
 def render_summary(status: ReleaseStatus) -> str:
     lines = [f"Release source: `{status['source_commit']}`", ""]
+    if "readiness" in status:
+        readiness = status["readiness"]
+        lines += [
+            f"Version: {readiness['version']}. Branch: {readiness['branch'] or 'detached'}.",
+            f"Can start a candidate: {'yes' if readiness['can_start_candidate'] else 'no'}.",
+            *[f"- {reason}" for reason in readiness["candidate_blockers"]],
+            f"Can promote: {'yes' if readiness['can_promote'] else 'no'}.",
+            *[f"- {reason}" for reason in readiness["promotion_blockers"]],
+            "These are technical checks, not release authorization.",
+            "",
+        ]
     workflows = list(status["workflows"])
     if "promotion" in status:
         promotion = status["promotion"]
@@ -401,7 +581,9 @@ def main() -> int:
         if runs:
             run_ids.append(json_integer(json_object(json_array(runs)[0])["id"]))
     status: ReleaseStatus = {"source_commit": commit, "workflows": []}
+    evidence_verified = False
     if arguments.directory:
+        evidence_verified = True
         candidate = verify_evidence(arguments.directory, commit=commit, version=candidate_version())
         status["candidate"] = candidate
         source_id = candidate["source_validation_run_id"]
@@ -410,23 +592,10 @@ def main() -> int:
     status["workflows"] = [workflow_status(arguments.repository, run_id) for run_id in run_ids]
     if not status.get("candidate") and status["workflows"]:
         latest = status["workflows"][-1]
-        images = [
-            item
-            for item in latest["artifacts"]
-            if re.fullmatch(r"candidate-image-[0-9]+-[12]", (item.get("name") or ""))
-            and item.get("expired") is False
-        ]
-        if images:
-            selected = max(
-                images, key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1])
-            )
-            with tempfile.TemporaryDirectory(prefix="startunnel-status-") as temporary:
-                _download(arguments.repository, latest["run_id"], selected, Path(temporary))
-                identity = candidate_data(
-                    json_object(json.loads((Path(temporary) / "candidate-image.json").read_text()))
-                )
-            if identity.get("source_commit") != commit:
-                raise ValueError("Candidate identity belongs to a different source commit.")
+        identity, evidence_verified = candidate_from_workflow(
+            arguments.repository, latest, commit=commit
+        )
+        if identity is not None:
             status["candidate"] = identity
             source_id = identity["source_validation_run_id"]
             if source_id not in run_ids:
@@ -478,6 +647,9 @@ def main() -> int:
         if promotion["workflow"] != ".github/workflows/release.yml":
             raise ValueError("Promotion timing requires the release workflow.")
         status["promotion"] = promotion
+    status["readiness"] = inspect_readiness(
+        status, arguments.repository, evidence_verified=evidence_verified
+    )
     summary = render_summary(status)
     if arguments.output:
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
