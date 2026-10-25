@@ -293,6 +293,7 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
         raise ValueError("The candidate image artifact has expired.")
     _download(repository, run_id, candidate_artifact, directory)
     selection: ProofSelection = {"selected": {}, "history": []}
+    failed_kinds: list[str] = []
     for kind in KINDS:
         attempts = sorted(
             (
@@ -333,11 +334,15 @@ def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
             selection["history"].append(reference)
         latest = selection["history"][-1]
         if latest["status"] != "passed":
-            raise ValueError(f"The latest {kind} attempt did not pass.")
-        selection["selected"][kind] = latest
+            failed_kinds.append(kind)
+        else:
+            selection["selected"][kind] = latest
     (directory / "proof-selection.json").write_text(
         json.dumps(selection, indent=2, sort_keys=True) + "\n"
     )
+    if failed_kinds:
+        kinds = ", ".join(failed_kinds)
+        raise ValueError(f"The latest proof attempt did not pass for: {kinds}.")
 
 
 def verify_evidence(directory: Path, *, commit: str, version: str) -> CandidateData:

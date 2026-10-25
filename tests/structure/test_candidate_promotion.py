@@ -294,6 +294,103 @@ def test_collect_selects_passed_second_attempt_and_retains_first_failure(
     }
 
 
+@pytest.mark.parametrize("failed_kind", proof_evidence.KINDS)
+def test_collect_retains_all_proofs_when_latest_attempt_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_kind: str,
+) -> None:
+    source = tmp_path / "source"
+    evidence(source, monkeypatch)
+    failed_path = source / "proofs" / failed_kind / "1" / f"proof-{failed_kind}.json"
+    failed_record = json.loads(failed_path.read_text())
+    failed_record["status"] = "failed"
+    failed_path.write_text(json.dumps(failed_record))
+
+    artifacts = [artifact(name="candidate-image-42-1", artifact_id=1)]
+    sources: dict[str, Path] = {"candidate-image-42-1": source}
+    for index, kind in enumerate(proof_evidence.KINDS, start=10):
+        name = f"proof-{kind}-42-1"
+        artifacts.append(artifact(name=name, artifact_id=index))
+        sources[name] = source / "proofs" / kind / "1"
+    monkeypatch.setattr(candidate, "github_api", lambda *args, **kwargs: [{"artifacts": artifacts}])
+    downloaded: list[str] = []
+
+    def download(_repository: str, _run_id: int, selected: JsonObject, destination: Path) -> None:
+        name = json_string(selected["name"])
+        downloaded.append(name)
+        source_path = sources[name]
+        destination.mkdir(parents=True, exist_ok=True)
+        if name.startswith("candidate-image-"):
+            shutil.copy(source_path / "candidate-image.json", destination / "candidate-image.json")
+        else:
+            shutil.copytree(source_path, destination, dirs_exist_ok=True)
+
+    monkeypatch.setattr(candidate, "_download", download)
+    retained = tmp_path / "retained"
+    with pytest.raises(ValueError, match="latest proof attempt did not pass"):
+        candidate.collect_evidence("owner/repository", 42, retained)
+
+    selection = json.loads((retained / "proof-selection.json").read_text())
+    assert set(downloaded) == set(sources)
+    assert {entry["kind"] for entry in selection["history"]} == set(proof_evidence.KINDS)
+    assert failed_kind not in selection["selected"]
+    assert set(selection["selected"]) == set(proof_evidence.KINDS) - {failed_kind}
+    with pytest.raises(ValueError, match="select all required proofs"):
+        candidate.verify_evidence(retained, commit=COMMIT, version="v0.1.0")
+
+
+def test_collect_does_not_select_older_pass_when_second_attempt_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    evidence(source, monkeypatch)
+    second_dir = source / "attempt-2" / "security"
+    shutil.copytree(source / "proofs/security/1", second_dir)
+    second_manifest = second_dir / "proof-security.json"
+    second_record = json.loads(second_manifest.read_text())
+    second_record.update(attempt=2, status="failed")
+    second_manifest.write_text(json.dumps(second_record))
+
+    artifacts = [artifact(name="candidate-image-42-1", artifact_id=1)]
+    sources: dict[str, Path] = {"candidate-image-42-1": source}
+    for index, kind in enumerate(proof_evidence.KINDS, start=10):
+        name = f"proof-{kind}-42-1"
+        artifacts.append(artifact(name=name, artifact_id=index))
+        sources[name] = source / "proofs" / kind / "1"
+    second_name = "proof-security-42-2"
+    artifacts.append(artifact(name=second_name, artifact_id=20))
+    sources[second_name] = second_dir
+    monkeypatch.setattr(candidate, "github_api", lambda *args, **kwargs: [{"artifacts": artifacts}])
+
+    def download(_repository: str, _run_id: int, selected: JsonObject, destination: Path) -> None:
+        name = json_string(selected["name"])
+        source_path = sources[name]
+        destination.mkdir(parents=True, exist_ok=True)
+        if name.startswith("candidate-image-"):
+            shutil.copy(source_path / "candidate-image.json", destination / "candidate-image.json")
+        else:
+            shutil.copytree(source_path, destination, dirs_exist_ok=True)
+
+    monkeypatch.setattr(candidate, "_download", download)
+    retained = tmp_path / "retained"
+    with pytest.raises(ValueError, match="latest proof attempt did not pass"):
+        candidate.collect_evidence("owner/repository", 42, retained)
+
+    selection = json.loads((retained / "proof-selection.json").read_text())
+    security_history = [entry for entry in selection["history"] if entry["kind"] == "security"]
+    assert [(entry["attempt"], entry["status"]) for entry in security_history] == [
+        (1, "passed"),
+        (2, "failed"),
+    ]
+    assert "security" not in selection["selected"]
+    assert set(selection["selected"]) == set(proof_evidence.KINDS) - {"security"}
+    assert all(reference["attempt"] == 1 for reference in selection["selected"].values())
+    with pytest.raises(ValueError, match="select all required proofs"):
+        candidate.verify_evidence(retained, commit=COMMIT, version="v0.1.0")
+
+
 def run_record(
     *, workflow: str = "release-candidate.yml", event: str = "workflow_dispatch"
 ) -> JsonObject:
