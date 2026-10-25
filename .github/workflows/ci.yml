@@ -106,15 +106,15 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.15"
       - uses: ./.github/actions/proof-build
       - name: Run the isolated service lane
         run: >-
           python3 scripts/run_isolated_test_lane.py postgres
           --project-name stci-postgres-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Set up Python for the restored baseline proof
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.15"
       - name: Install locked proof dependencies
         run: |
           python -m pip install --disable-pip-version-check "pdm==2.29.3"
@@ -172,6 +172,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.15"
       - uses: ./.github/actions/proof-build
       - name: Run the isolated proof
         run: >-
@@ -198,6 +202,10 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.15"
       - uses: ./.github/actions/proof-build
       - name: Run the isolated browser lane
         run: >-
@@ -226,6 +234,10 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.15"
       - name: Report observed source CI time
         env:
           GH_TOKEN: ${{ github.token }}

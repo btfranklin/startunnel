@@ -445,7 +445,7 @@ def _automatic_restore(
         restart_database_clients(command)
         verify_transition(command, previous=rejected, current=restore)
         inspect_runtime(command)
-    except (OSError, RotationError, ValueError):
+    except OSError, RotationError, ValueError:
         return False
     return True
 

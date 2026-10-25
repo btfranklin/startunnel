@@ -1,5 +1,6 @@
 # Repository tools
 
+All Python tools in `scripts/` require Python 3.15 or later.
 Use PDM commands where available. Start with [testing](../docs/testing.md) for
 verification and [operations](../docs/operations.md) for a running instance.
 Compose proofs must use disposable projects through the isolated runner.

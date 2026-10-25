@@ -204,7 +204,7 @@ def record_proof(
         record["files"] = {str(path.relative_to(directory)): checksum(path) for path in files}
         if record["status"] == "passed":
             validate_proof(record, directory, kind=kind, commit=commit, image=image)
-    except (ValueError, KeyError, OSError, TypeError):
+    except ValueError, KeyError, OSError, TypeError:
         record["status"] = "failed"
         record["incomplete"] = True
         # Retain all safe reports that were produced before a failed phase.

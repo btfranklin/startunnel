@@ -35,12 +35,18 @@ by another installation. Do not overwrite an existing instance.
 
 ```shell
 apt-get update
-apt-get install --yes ca-certificates curl git python3 dnsutils age
+apt-get install --yes ca-certificates curl git dnsutils age
 ```
 
-Python here runs small standard-library setup scripts. The application's
-Python 3.15 runtime and dependencies are in its image. No host PDM installation
-is required.
+Install Python 3.15 or later on the host before you run the setup scripts.
+The commands in this guide use the `python3.15` executable. Check it with:
+
+```shell
+python3.15 --version
+```
+
+The application runtime and dependencies are in its image. No host PDM
+installation is required.
 
 On a fresh server, install Docker from its official repository:
 
@@ -173,7 +179,7 @@ For another registry, use its login command. Public images need no login.
 docker pull "$STARTUNNEL_APP_IMAGE"
 docker image inspect "$STARTUNNEL_APP_IMAGE" \
   --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
-python3 scripts/generate_production_secrets.py --directory "$STARTUNNEL_SECRETS_DIR"
+python3.15 scripts/generate_production_secrets.py --directory "$STARTUNNEL_SECRETS_DIR"
 chown 10001:10001 "$STARTUNNEL_SECRETS_DIR"/*
 chmod 700 "$STARTUNNEL_SECRETS_DIR"
 chmod 600 "$STARTUNNEL_SECRETS_DIR"/*
@@ -199,7 +205,7 @@ files as root before it starts the database process.
 ## 7. Start the production stack
 
 ```shell
-python3 scripts/start_production.py --edge
+python3.15 scripts/start_production.py --edge
 docker compose up -d --no-build --wait --wait-timeout 180
 docker compose ps --all
 ```

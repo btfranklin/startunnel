@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
-    except (RuntimeError, psycopg.Error, OSError):
+    except RuntimeError, psycopg.Error, OSError:
         print("The UUID benchmark failed. Sensitive details were omitted.", file=sys.stderr)
         return 1
     print(json.dumps(report, indent=2, sort_keys=True))

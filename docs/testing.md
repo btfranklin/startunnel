@@ -67,6 +67,11 @@ the website builder, and examples. Source exports use the same source scope
 as the secret scan. Build output, private artifacts, and installed packages
 are outside this scope.
 
+Host scripts and workflow jobs require Python 3.15. Each job that runs host
+Python code selects Python 3.15 before that code runs. Ruff and mypy use the
+same Python 3.15 target for these scripts. The standalone CLI compatibility
+jobs also test Python 3.10.
+
 The gate uses strict mypy settings and rejects explicit `Any`, types lost
 through missing imports, and decorated functions with untyped signatures.
 Suppressions must name an error code. Pydantic constructors also use typed fields. The

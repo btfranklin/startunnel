@@ -117,7 +117,7 @@ after the server update; the download remains available to older clients.
 4. Preview the upgrade from that matching checkout:
 
    ```shell
-   python3 scripts/upgrade_production.py /absolute/path/release.json
+   python3.15 scripts/upgrade_production.py /absolute/path/release.json
    ```
 
    For another config name, add `--env-file /absolute/path/team.env` to both
@@ -137,7 +137,7 @@ after the server update; the download remains available to older clients.
 5. Once the preview passes and the backup checks in step 2 are complete, apply:
 
    ```shell
-   python3 scripts/upgrade_production.py /absolute/path/release.json --apply --backup-verified
+   python3.15 scripts/upgrade_production.py /absolute/path/release.json --apply --backup-verified
    set -a
    . /opt/startunnel/production.env
    set +a
@@ -215,7 +215,7 @@ compatibility.
 For private/custom images, use the [manual image build path](image.md#build-a-custom-image)
 and follow the same backup, compatibility, matching-checkout, migration, and
 verification requirements. Write a release record from the matching source
-checkout with `python3 scripts/release_record.py --write VERSION IMAGE --platform
+checkout with `python3.15 scripts/release_record.py --write VERSION IMAGE --platform
 linux/arm64` if you use an ARM64 image. The writer defaults to `linux/amd64`.
 Check the record and image labels before an upgrade.
 

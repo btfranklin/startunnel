@@ -1,21 +1,27 @@
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import io
 import json
+import os
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 import pytest
+from cli import star_tunnel
+from tests.cli_types import CliModule
+from tests.json_values import json_array, json_at, json_members, json_text
 
 CLI_PATH = Path(__file__).resolve().parents[2] / "cli" / "star_tunnel.py"
 spec = importlib.util.spec_from_file_location("admin_cli_under_test", CLI_PATH)
 assert spec and spec.loader
-cli = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = cli
-spec.loader.exec_module(cli)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+cli = cast(CliModule, module)
 
 
 @pytest.fixture
@@ -29,43 +35,39 @@ def stdin(monkeypatch: pytest.MonkeyPatch, value: Mapping[str, object]) -> None:
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(value).encode())))
 
 
-def arguments(*values: str) -> argparse.Namespace:
-    parsed = cli.build_parser().parse_args(["admin", *values])
-    assert isinstance(parsed, argparse.Namespace)
-    return parsed
+def arguments(*values: str) -> star_tunnel.Arguments:
+    return cli.build_parser().parse_args(["admin", *values], namespace=star_tunnel.Arguments())
 
 
 def test_schema_is_available_without_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("STARTUNNEL_BASE_URL", raising=False)
     result = cli.run_admin(arguments("schema"))
     assert result["openapi_path"] == "/api/v1/openapi.json"
-    assert len(result["commands"]) == len(cli.ADMIN_COMMANDS)
-    account_create = next(
-        item for item in result["commands"] if item["command"] == "admin accounts create"
-    )
+    commands = [json_members(item) for item in json_array(result["commands"])]
+    assert len(commands) == len(cli.ADMIN_COMMANDS)
+    account_create = next(item for item in commands if item["command"] == "admin accounts create")
     assert account_create["secret_output_required"] is False
     assert account_create["secret_output_condition"] == (
         "Required when password is omitted or empty."
     )
-    rotated = next(item for item in result["commands"] if item["command"] == "admin tunnels rotate")
+    rotated = next(item for item in commands if item["command"] == "admin tunnels rotate")
     assert rotated["secret_output_required"] is False
     for action in ("start", "rollover"):
-        command = next(
-            item for item in result["commands"] if item["command"] == f"admin tunnels {action}"
-        )
+        command = next(item for item in commands if item["command"] == f"admin tunnels {action}")
         assert command["optional_fields"] == [
             "cycle_label",
             "expires_in_seconds",
             "root_session",
         ]
-    for command in result["commands"]:
+    for command in commands:
+        name = json_text(command["command"])
         parsed = (
-            arguments(*command["command"].split()[1:])
-            if not (command["idempotency_key_required"] or "{id}" in command["path"])
+            arguments(*name.split()[1:])
+            if not (command["idempotency_key_required"] or "{id}" in json_text(command["path"]))
             else None
         )
         if parsed:
-            assert parsed.admin_command == command["command"][6:]
+            assert parsed.admin_command == name[6:]
 
 
 def test_admin_key_file_accepts_readonly_and_symlinked_regular_file(
@@ -97,7 +99,7 @@ def test_admin_key_file_reports_unreadable_file_safely(
         del args, kwargs
         raise PermissionError("private path")
 
-    monkeypatch.setattr(cli.os, "open", fail_open)
+    monkeypatch.setattr(os, "open", fail_open)
     with pytest.raises(cli.CliError) as error:
         cli.read_role_credential("admin")
     assert error.value.field_errors == [
@@ -164,7 +166,7 @@ def test_password_account_creation_needs_no_secret_file(
     if with_output_path:
         values.extend(("--secret-output", str(filename)))
     result = cli.run_admin(arguments(*values))
-    assert result["resource"]["id"] == "safe-id"
+    assert json_at(result, "resource", "id") == "safe-id"
     assert len(calls) == 1
     assert filename.read_text() == "keep this key file"
 
@@ -182,7 +184,7 @@ def test_tunnel_rotation_returns_resource_address_without_secret_output(
         lambda *args, **kwargs: {"resource": {"address": "safe-address"}},
     )
     result = cli.run_admin(arguments("tunnels", "rotate", "--idempotency-key", "rotate-address"))
-    assert result["resource"]["address"] == "safe-address"
+    assert json_at(result, "resource", "address") == "safe-address"
     assert "secret" not in result
 
 
@@ -212,7 +214,7 @@ def test_bulk_retirement_sends_only_explicit_selections(
     assert args[1:3] == ("POST", "/api/v1/admin/tunnels/retire-for-credential")
     assert kwargs["body"] == body
     assert kwargs["idempotency_key"] == "retire-key"
-    schema = cli.admin_schema("tunnels retire-for-credential")["commands"][0]
+    schema = json_members(json_at(cli.admin_schema("tunnels retire-for-credential"), "commands", 0))
     assert schema["required_fields"] == ["credential_id", "tunnels"]
 
 
@@ -375,7 +377,7 @@ def test_transient_retry_retains_body_and_key(monkeypatch: pytest.MonkeyPatch, s
         return {"resource": {"id": "done"}}
 
     monkeypatch.setattr(transport, "_request_once", request)
-    monkeypatch.setattr(cli.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     result = transport.request(
         "POST",
         "/api/v1/admin/keys/create",
@@ -384,7 +386,7 @@ def test_transient_retry_retains_body_and_key(monkeypatch: pytest.MonkeyPatch, s
         expected={201},
         retry=True,
     )
-    assert result["resource"]["id"] == "done"
+    assert json_at(result, "resource", "id") == "done"
     assert calls[0] == calls[1] == calls[2]
     assert sleeps == [0.25, 0.25]
 
@@ -416,7 +418,7 @@ def test_unsafe_uuid_rejected_before_request(configured: None) -> None:
 
 
 def test_retry_after_date_and_long_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli.time, "time", lambda: 0)
+    monkeypatch.setattr(time, "time", lambda: 0)
     assert cli._retry_after_seconds("Thu, 01 Jan 1970 00:00:04 GMT") == 4
     assert cli._retry_after_seconds("999999") == 999999
     assert cli._retry_after_seconds("nan") is None
@@ -433,7 +435,7 @@ def test_connection_retry_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
         raise cli.CliError("connection_failed")
 
     monkeypatch.setattr(transport, "_request_once", fail)
-    monkeypatch.setattr(cli.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
     with pytest.raises(cli.CliError):
         transport.request("GET", "/api/v1/admin/me", expected={200}, retry=True)
     assert len(calls) == 3
@@ -456,7 +458,7 @@ def test_secret_file_write_failure_is_safe(
     def fail(descriptor: int) -> None:
         raise OSError("write failed")
 
-    monkeypatch.setattr(cli.os, "fsync", fail)
+    monkeypatch.setattr(os, "fsync", fail)
     with pytest.raises(cli.CliError, match="secret_output_failed"):
         cli.run_admin(
             arguments(
@@ -527,7 +529,7 @@ def test_long_retry_after_returns_control_without_early_retry(
 
     monkeypatch.setattr(transport, "_request_once", fail)
     sleeps: list[float] = []
-    monkeypatch.setattr(cli.time, "sleep", sleeps.append)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
     with pytest.raises(cli.CliError) as error:
         transport.request("GET", "/api/v1/admin/me", expected={200}, retry=True)
     assert error.value.retry_after == 60

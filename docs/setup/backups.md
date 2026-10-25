@@ -210,7 +210,7 @@ docker compose exec -T postgres pg_restore --exit-on-error \
 docker compose exec -T postgres psql --set=ON_ERROR_STOP=1 \
   --set=database_name=startunnel --username startunnel_admin --dbname startunnel \
   --file /usr/local/share/startunnel/runtime-grants.sql
-python3 scripts/start_production.py --edge
+python3.15 scripts/start_production.py --edge
 docker compose up -d --no-build --wait --wait-timeout 180
 ```
 

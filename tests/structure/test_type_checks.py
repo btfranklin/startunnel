@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 
 from scripts.check_types import source_lanes, standalone_config
+from tests.json_values import json_at, json_members
+from tests.structure.workflows import load_workflow
 
 
 def test_source_export_checks_new_files_and_migrations(tmp_path: Path) -> None:
@@ -53,6 +55,33 @@ def test_standalone_context_keeps_strict_settings(tmp_path: Path) -> None:
     assert settings["plugins"] == ["pydantic.mypy"]
     assert "mypy_path" not in settings
     assert document["tool"]["pydantic-mypy"]["init_typed"]
+
+
+def test_host_scripts_use_the_required_python_target() -> None:
+    root = Path(__file__).resolve().parents[2]
+    document: object = tomllib.loads((root / "pyproject.toml").read_text())
+    assert (root / ".python-version").read_text().strip() == "3.15"
+    assert json_at(document, "tool", "mypy", "python_version") == "3.15"
+    assert json_at(document, "tool", "ruff", "target-version") == "py315"
+    overrides = json_members(json_at(document, "tool", "ruff", "per-file-target-version"))
+    for pattern, target in overrides.items():
+        if Path("scripts/host.py").match(pattern):
+            assert target == "py315"
+
+
+def test_workflows_select_python_before_running_host_code() -> None:
+    root = Path(__file__).resolve().parents[2]
+    for path in sorted((root / ".github/workflows").glob("*.yml")):
+        for name, job in load_workflow(path.name)["jobs"].items():
+            configured = False
+            for step in job.get("steps", []):
+                if step.get("uses", "").startswith("actions/setup-python@"):
+                    configured = step.get("with", {}).get("python-version") == "3.15"
+                command = step.get("run", "")
+                if command.strip() == "python tests/cli_standalone.py":
+                    continue
+                if "python" in command or "pdm " in command:
+                    assert configured, f"{path.name}: {name}: Python 3.15 must be selected first."
 
 
 def test_strict_gate_rejects_unchecked_values_and_factory_arguments(tmp_path: Path) -> None:

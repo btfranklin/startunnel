@@ -416,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
                 and workload.get("passed") is True
                 and workload.get("fixture_cleanup_complete") is True
             )
-        except (OSError, ValueError, AttributeError):
+        except OSError, ValueError, AttributeError:
             completed = False
         passed = completed and report["disposable_volumes_removed"] is True
         report["status"] = "passed" if passed else "failed"

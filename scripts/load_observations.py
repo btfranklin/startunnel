@@ -273,7 +273,7 @@ class PoolReader:
                 with self.lock:
                     self.latest, self.received_at = snapshot, time.monotonic()
                 self.ready.set()
-        except (ValueError, OSError, TypeError):
+        except ValueError, OSError, TypeError:
             self.failed = True
         finally:
             self.ready.set()
@@ -297,7 +297,7 @@ class PoolReader:
         if self.pid is not None:
             try:
                 self.stats.exec(self.identifier, ("/bin/kill", "-TERM", str(self.pid)))
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 self.failed = True
         if self.process is not None:
             if self.process.poll() is None:
@@ -351,7 +351,7 @@ class LoadObservations:
                 self.capacity.update(numeric_fields(self.stats.get("/info"), ("NCPU", "MemTotal")))
             except InterruptedError:
                 raise
-            except (ValueError, OSError):
+            except ValueError, OSError:
                 self.capacity.update(NCPU=None, MemTotal=None)
             if "web" not in self.identifiers:
                 self._inventory()
@@ -463,7 +463,7 @@ class LoadObservations:
         try:
             if len(self.identifiers) < len(SERVICES):
                 self._inventory()
-        except (ValueError, OSError, KeyError, TypeError):
+        except ValueError, OSError, KeyError, TypeError:
             errors.append("container_inventory_unavailable")
         jobs: dict[str, Future[JsonValue]] = {
             name: self.executor.submit(self._service_value, identifier)
@@ -496,7 +496,7 @@ class LoadObservations:
                     sample["postgres"] = postgres
                     if all(item is not None for item in postgres.values()):
                         self.postgres_samples += 1
-            except (ValueError, OSError, KeyError, TypeError):
+            except ValueError, OSError, KeyError, TypeError:
                 errors.append(f"{name}_counters_unavailable")
         reader: PoolSnapshot | None = None
         try:
@@ -512,7 +512,7 @@ class LoadObservations:
             if (numeric(pool.get("sampler_error")) or 0) > 0:
                 self.pool_error_samples += 1
                 errors.append("pool_sampler_error")
-        except (ValueError, KeyError, TypeError):
+        except ValueError, KeyError, TypeError:
             errors.append("pool_counters_unavailable")
             self.failed = True
             self.stop_event.set()

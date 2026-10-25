@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
+            except UnicodeDecodeError, OSError:
                 continue
             for label, pattern in PATTERNS.items():
                 if pattern.search(text):

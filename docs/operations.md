@@ -329,8 +329,8 @@ spaces and punctuation. They cannot contain a NUL byte.
 ```shell
 umask 077
 mkdir -m 0700 /srv/startunnel/password-rotation
-python3 scripts/rotate_postgres_passwords.py prepare --directory /srv/startunnel/password-rotation
-python3 scripts/rotate_postgres_passwords.py rotate \
+python3.15 scripts/rotate_postgres_passwords.py prepare --directory /srv/startunnel/password-rotation
+python3.15 scripts/rotate_postgres_passwords.py rotate \
   --new-admin-file /srv/startunnel/password-rotation/postgres_admin_password.new \
   --new-runtime-file /srv/startunnel/password-rotation/postgres_runtime_password.new \
   --rollback-file /srv/startunnel/password-rotation/rollback.json
@@ -343,7 +343,7 @@ shown on stderr. If automatic restore does not complete, correct the reported
 fault and run the saved rollback command:
 
 ```shell
-python3 scripts/rotate_postgres_passwords.py rollback \
+python3.15 scripts/rotate_postgres_passwords.py rollback \
   --rollback-file /srv/startunnel/password-rotation/rollback.json
 ```
 

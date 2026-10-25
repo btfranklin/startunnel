@@ -1691,4 +1691,4 @@ def test_resource_measurement_runs_only_requested_stacks(
 
 def test_host_proof_scripts_parse_on_runner_python() -> None:
     for path in (ROOT / "scripts").glob("*.py"):
-        ast.parse(path.read_text(), filename=str(path), feature_version=(3, 12))
+        ast.parse(path.read_text(), filename=str(path), feature_version=(3, 15))
