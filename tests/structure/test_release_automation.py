@@ -11,6 +11,7 @@ import subprocess
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import datetime
 from http.client import HTTPMessage
 from pathlib import Path
 from typing import Any
@@ -65,12 +66,20 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
         database_loss_started = False
         builds: list[tuple[str, ...]] = []
         proof_service_creations: list[tuple[str, ...]] = []
+        proof_services_created = False
 
         def pull_candidate(self) -> None:
             pass
 
         def verify_candidate_services(self) -> None:
-            assert self.running
+            assert self.proof_services_created
+
+        def build_services(
+            self, services: Sequence[str], *, no_cache: bool = False, timeout_seconds: int = 2400
+        ) -> dict[str, object]:
+            del timeout_seconds
+            self.builds.append(("build", *(("--no-cache",) if no_cache else ()), *services))
+            return {"services": list(services)}
 
         def run(self, label: str, *args: str, **kwargs: Any) -> None:
             del label, kwargs
@@ -78,6 +87,7 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
                 self.builds.append(args)
             if args[0] == "create":
                 self.proof_service_creations.append(args)
+                self.proof_services_created = True
             if args[0] == "up" and "--wait" in args:
                 self.running = True
             if args[-1] == "runtime-contents-proof":
@@ -121,18 +131,68 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
     assert report["status"] == "passed"
     assert stack.runtime_contents_checked
     assert stack.availability_checked
-    assert stack.proof_service_creations == [
-        ("create", "example-tests", "agent-e2e", "proxy-tests")
-    ]
+    expected_creations = (
+        [
+            ("create", "web", "migrate", "maintenance", "proxy-web"),
+            ("create", "example-tests", "agent-e2e", "proxy-tests"),
+        ]
+        if candidate_image
+        else [("create", "example-tests", "agent-e2e", "proxy-tests")]
+    )
+    assert stack.proof_service_creations == expected_creations
     if candidate_image:
         assert stack.builds == [("build", "example-tests", "agent-e2e", "proxy-tests")]
     elif build_images:
         assert stack.builds == [
-            ("build", "--no-cache", "web", "maintenance"),
+            ("build", "--no-cache", "web", "migrate", "maintenance"),
             ("build", "example-tests", "agent-e2e", "proxy-tests"),
         ]
     else:
         assert stack.builds == []
+
+
+def test_system_proof_stops_after_candidate_identity_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class Stack:
+        project_name = "stproof-candidate-mismatch"
+        candidate_image = "registry.example/startunnel@sha256:" + "a" * 64
+        environment: dict[str, str] = {}
+
+        def pull_candidate(self) -> None:
+            events.append("pull")
+
+        def verify_candidate_services(self) -> None:
+            events.append("identity")
+            raise isolation.LaneError("candidate image proof", "proxy-web image mismatch")
+
+        def run(self, label: str, *args: str, **kwargs: Any) -> None:
+            del label, kwargs
+            events.append("create" if args[0] == "create" else "long-step")
+
+    with pytest.raises(isolation.LaneError, match="proxy-web image mismatch"):
+        system_proof.run_system_proof(Stack())  # type: ignore[arg-type]
+
+    assert events == ["pull", "create", "identity"]
+
+
+def test_system_step_reports_fractional_seconds_even_when_it_fails() -> None:
+    evidence: list[dict[str, Any]] = []
+
+    def fail() -> None:
+        raise RuntimeError("expected failure")
+
+    with pytest.raises(RuntimeError, match="expected failure"):
+        system_proof._recorded_step(evidence, "failing proof step", fail)
+
+    record = evidence[0]
+    assert record["status"] == "failed"
+    assert isinstance(record["duration_seconds"], float)
+    assert record["duration_seconds"] >= 0
+    assert datetime.fromisoformat(str(record["started_at"])).tzinfo is not None
+    assert datetime.fromisoformat(str(record["finished_at"])).tzinfo is not None
 
 
 @pytest.mark.skipif(
@@ -575,13 +635,12 @@ def test_failed_lane_still_removes_disposable_volumes(
 @pytest.mark.parametrize(
     "lane,profiles,command,timeout_seconds",
     [
-        ("canonical", (), ("run", "--build", "--rm", "tests"), 2_400),
+        ("canonical", (), ("run", "--rm", "tests"), 2_400),
         (
             "postgres",
             (),
             (
                 "run",
-                "--build",
                 "--rm",
                 "tests",
                 "pdm",
@@ -590,13 +649,13 @@ def test_failed_lane_still_removes_disposable_volumes(
             ),
             2_400,
         ),
-        ("examples", ("examples",), ("run", "--build", "--rm", "example-tests"), 2_400),
-        ("agents", ("agents",), ("run", "--build", "--rm", "agent-e2e"), 2_400),
-        ("browser", ("browser",), ("run", "--build", "--rm", "browser-tests"), 4_800),
+        ("examples", ("examples",), ("run", "--rm", "example-tests"), 2_400),
+        ("agents", ("agents",), ("run", "--rm", "agent-e2e"), 2_400),
+        ("browser", ("browser",), ("run", "--rm", "browser-tests"), 4_800),
         (
             "live-agents",
             ("live-agents",),
-            ("run", "--build", "--rm", "live-agent-e2e"),
+            ("run", "--rm", "live-agent-e2e"),
             3_600,
         ),
     ],
@@ -614,12 +673,39 @@ def test_lane_dispatch_keeps_the_fixed_compose_contract(
     assert specification.timeout_seconds == timeout_seconds
 
 
+def test_lane_build_targets_include_active_buildable_dependencies() -> None:
+    class FakeStack:
+        def capture(self, *arguments: str, **kwargs: Any) -> str:
+            del arguments, kwargs
+            return json.dumps(
+                {
+                    "services": {
+                        "web": {"build": {}, "depends_on": {"migrate": {}}},
+                        "migrate": {"build": {}, "depends_on": {"postgres": {}}},
+                        "maintenance": {"build": {}, "depends_on": {"web": {}}},
+                        "tests": {"build": {}, "depends_on": {"web": {}}},
+                        "postgres": {"image": "postgres:18"},
+                    }
+                }
+            )
+
+    stack: Any = FakeStack()
+    assert lane_runner._lane_build_targets(stack, "tests") == (
+        "migrate",
+        "tests",
+        "web",
+    )
+
+
 def test_load_runner_uses_isolated_project_and_safe_provenance(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     events: list[tuple[str, Any]] = []
 
     class FakeStack:
+        cleanup_complete = False
+
         environment = {"PATH": "/safe/bin"}
 
         def __init__(self, project_name: str, *, profiles: Sequence[str]) -> None:
@@ -631,7 +717,12 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
 
         def __exit__(self, *arguments: Any) -> None:
             del arguments
+            self.cleanup_complete = True
             events.append(("exit", None))
+
+        def build_services(self, services: Sequence[str], **kwargs: Any) -> dict[str, object]:
+            events.append(("build", (tuple(services), kwargs)))
+            return {"services": list(services)}
 
         def run(
             self,
@@ -642,6 +733,23 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
         ) -> None:
             del timeout_seconds
             events.append(("run", (step, arguments, dict(environment or {}))))
+            if arguments == ("run", "--rm", "--no-deps", "load-profile"):
+                assert environment is not None
+                artifact_path = tmp_path / "artifacts"
+                artifact_path.mkdir(parents=True, exist_ok=True)
+                workload_path = artifact_path / environment["STARTUNNEL_LOAD_REPORT_FILENAME"]
+                driver_path = workload_path.with_suffix(".driver.jsonl")
+                driver_path.write_text("{}\n", encoding="utf-8")
+                workload_path.write_text(
+                    json.dumps(
+                        {
+                            "passed": True,
+                            "fixture_cleanup_complete": True,
+                            "driver_observations_file": driver_path.name,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
         def capture(self, step: str, *arguments: str, timeout_seconds: int = 60) -> str:
             del step, arguments, timeout_seconds
@@ -660,9 +768,35 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
         del environment, label
         if command[:2] == ["docker", "version"]:
             return "29.0.0"
+        if command[:2] == ["git", "rev-parse"]:
+            return "a" * 40
+        if "{{.Os}}/{{.Architecture}}" in command:
+            return "linux/amd64"
+        identity_format = (
+            '{{index .Config.Labels "net.startunnel.source"}}|{{.Os}}/{{.Architecture}}'
+        )
+        if identity_format in command:
+            return "a" * 40 + "|linux/amd64"
         return "sha256:" + "a" * 64
 
+    class CompleteObservations:
+        failed = False
+
+        def __init__(self, *args: Any) -> None:
+            del args
+
+        def __enter__(self) -> CompleteObservations:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            del args
+
+        def summary(self) -> dict[str, Any]:
+            return {"samples": 1, "complete": True}
+
     monkeypatch.setattr(load_runner, "IsolatedComposeProject", FakeStack)
+    monkeypatch.setattr(load_runner, "LoadObservations", CompleteObservations)
+    monkeypatch.setattr(load_runner, "__file__", str(tmp_path / "scripts/run_full_load_profile.py"))
     monkeypatch.setattr(load_runner, "termination_signals", no_signals)
     monkeypatch.setattr(load_runner, "required_output", safe_output)
 
@@ -688,10 +822,12 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
 
 def test_load_runner_can_reuse_verified_current_images(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     events: list[tuple[str, tuple[str, ...]]] = []
 
     class FakeStack:
+        cleanup_complete = False
         environment = {"PATH": "/safe/bin"}
 
         def __init__(self, project_name: str, *, profiles: Sequence[str]) -> None:
@@ -702,6 +838,11 @@ def test_load_runner_can_reuse_verified_current_images(
 
         def __exit__(self, *arguments: Any) -> None:
             del arguments
+            self.cleanup_complete = True
+
+        def build_services(self, services: Sequence[str], **kwargs: Any) -> dict[str, object]:
+            del services, kwargs
+            raise AssertionError("reuse mode must not build images")
 
         def run(
             self,
@@ -715,6 +856,21 @@ def test_load_runner_can_reuse_verified_current_images(
             if arguments == ("run", "--rm", "--no-deps", "load-profile"):
                 assert environment is not None
                 assert environment["STARTUNNEL_LOAD_BUILD_MODE"] == "reused-current-images"
+                artifact_path = tmp_path / "artifacts"
+                artifact_path.mkdir(parents=True, exist_ok=True)
+                workload_path = artifact_path / environment["STARTUNNEL_LOAD_REPORT_FILENAME"]
+                driver_path = workload_path.with_suffix(".driver.jsonl")
+                driver_path.write_text("{}\n", encoding="utf-8")
+                workload_path.write_text(
+                    json.dumps(
+                        {
+                            "passed": True,
+                            "fixture_cleanup_complete": True,
+                            "driver_observations_file": driver_path.name,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
         def capture(self, step: str, *arguments: str, timeout_seconds: int = 60) -> str:
             del step, timeout_seconds
@@ -733,13 +889,39 @@ def test_load_runner_can_reuse_verified_current_images(
     def no_signals() -> Iterator[None]:
         yield
 
+    class CompleteObservations:
+        failed = False
+
+        def __init__(self, *args: Any) -> None:
+            del args
+
+        def __enter__(self) -> CompleteObservations:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            del args
+
+        def summary(self) -> dict[str, Any]:
+            return {"samples": 1, "complete": True}
+
     monkeypatch.setattr(load_runner, "IsolatedComposeProject", FakeStack)
+    monkeypatch.setattr(load_runner, "LoadObservations", CompleteObservations)
+    monkeypatch.setattr(load_runner, "__file__", str(tmp_path / "scripts/run_full_load_profile.py"))
     monkeypatch.setattr(load_runner, "termination_signals", no_signals)
     monkeypatch.setattr(
         load_runner,
         "required_output",
         lambda *args, **kwargs: (
-            "29.0.0" if args[0][:2] == ["docker", "version"] else "sha256:" + "a" * 64
+            "29.0.0"
+            if args[0][:2] == ["docker", "version"]
+            else "a" * 40
+            if args[0][:2] == ["git", "rev-parse"]
+            else "linux/amd64"
+            if "{{.Os}}/{{.Architecture}}" in args[0]
+            else "a" * 40 + "|linux/amd64"
+            if '{{index .Config.Labels "net.startunnel.source"}}|{{.Os}}/{{.Architecture}}'
+            in args[0]
+            else "sha256:" + "a" * 64
         ),
     )
 
@@ -805,6 +987,8 @@ def test_system_report_is_written_only_after_volume_cleanup(
     events: list[str] = []
 
     class FakeStack:
+        cleanup_complete = False
+
         def __init__(
             self,
             project_name: str,
@@ -822,17 +1006,21 @@ def test_system_report_is_written_only_after_volume_cleanup(
 
         def __exit__(self, *arguments: Any) -> None:
             del arguments
+            self.cleanup_complete = True
             events.append("cleanup")
 
     @contextmanager
     def no_signals() -> Iterator[None]:
         yield
 
-    def fake_proof(stack: FakeStack, *, build_images: bool) -> dict[str, object]:
+    def fake_proof(
+        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
+    ) -> dict[str, object]:
         del stack
         assert build_images is True
         events.append("proof")
-        return {"status": "passed"}
+        report.update(status="passed")
+        return report
 
     def fake_write(report: Mapping[str, object]) -> Path:
         assert report["disposable_volumes_removed"] is True
@@ -848,6 +1036,63 @@ def test_system_report_is_written_only_after_volume_cleanup(
 
     assert result == 0
     assert events == ["init", "enter", "proof", "cleanup", "report"]
+
+
+def test_system_failure_writes_partial_report_after_failed_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reports: list[Mapping[str, object]] = []
+
+    class FakeStack:
+        cleanup_complete = False
+
+        def __init__(
+            self,
+            project_name: str,
+            *,
+            profiles: Sequence[str],
+            include_openai: bool,
+        ) -> None:
+            del project_name, profiles, include_openai
+
+        def __enter__(self) -> FakeStack:
+            return self
+
+        def __exit__(self, *arguments: Any) -> None:
+            del arguments
+            self.cleanup_complete = False
+
+    @contextmanager
+    def no_signals() -> Iterator[None]:
+        yield
+
+    def failing_proof(
+        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
+    ) -> dict[str, Any]:
+        del stack, build_images
+        report.update(
+            status="failed",
+            steps=[{"name": "candidate image preflight", "status": "failed"}],
+        )
+        raise isolation.LaneError("candidate image proof", "proxy-web image mismatch")
+
+    def write(report: Mapping[str, object]) -> Path:
+        reports.append(report)
+        return ROOT / "artifacts/system-proof-failed-test.json"
+
+    monkeypatch.setattr(lane_runner, "IsolatedComposeProject", FakeStack)
+    monkeypatch.setattr(lane_runner, "termination_signals", no_signals)
+    monkeypatch.setattr(lane_runner, "run_system_proof", failing_proof)
+    monkeypatch.setattr(lane_runner, "write_system_report", write)
+
+    result = lane_runner.main(["system", "--project-name", "stproof-failed-12345678"])
+
+    assert result == 1
+    assert reports[0]["status"] == "failed"
+    assert reports[0]["disposable_volumes_removed"] is False
+    assert reports[0]["steps"] == [{"name": "candidate image preflight", "status": "failed"}]
+    assert "Isolated lane failed" in capsys.readouterr().err
 
 
 def test_reuse_current_images_is_only_valid_for_system(
@@ -867,6 +1112,8 @@ def test_system_reuse_mode_is_explicit_and_not_release_evidence(
     written_reports: list[Mapping[str, object]] = []
 
     class FakeStack:
+        cleanup_complete = False
+
         def __init__(
             self,
             project_name: str,
@@ -881,19 +1128,25 @@ def test_system_reuse_mode_is_explicit_and_not_release_evidence(
 
         def __exit__(self, *arguments: Any) -> None:
             del arguments
+            self.cleanup_complete = True
 
     @contextmanager
     def no_signals() -> Iterator[None]:
         yield
 
-    def fake_proof(stack: FakeStack, *, build_images: bool) -> dict[str, object]:
+    def fake_proof(
+        stack: FakeStack, *, build_images: bool, report: dict[str, Any]
+    ) -> dict[str, object]:
         del stack
         proof_arguments.append(build_images)
-        return {
-            "status": "passed",
-            "build_mode": "reused-current-images",
-            "release_evidence_eligible": False,
-        }
+        report.update(
+            {
+                "status": "passed",
+                "build_mode": "reused-current-images",
+                "release_evidence_eligible": False,
+            }
+        )
+        return report
 
     def fake_write(report: Mapping[str, object]) -> Path:
         written_reports.append(report)

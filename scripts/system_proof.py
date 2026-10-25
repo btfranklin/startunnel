@@ -164,18 +164,23 @@ def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
 
 
 def _recorded_step(
-    evidence: list[dict[str, int | str]],
+    evidence: list[dict[str, Any]],
     name: str,
     action: Callable[[], None],
 ) -> None:
     started = time.monotonic()
-    action()
-    evidence.append(
-        {
-            "name": name,
-            "duration_seconds": round(time.monotonic() - started),
-        }
-    )
+    record: dict[str, Any] = {
+        "name": name,
+        "started_at": datetime.now(UTC).isoformat(),
+        "status": "failed",
+    }
+    try:
+        action()
+        record["status"] = "passed"
+    finally:
+        record["finished_at"] = datetime.now(UTC).isoformat()
+        record["duration_seconds"] = round(time.monotonic() - started, 3)
+        evidence.append(record)
 
 
 def _system_image_ids(stack: IsolatedComposeProject) -> dict[str, str]:
@@ -480,11 +485,22 @@ def run_system_proof(
     stack: IsolatedComposeProject,
     *,
     build_images: bool = True,
+    report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the current bounded clean-stack release proof."""
 
-    evidence: list[dict[str, int | str]] = []
+    evidence: list[dict[str, Any]] = []
     started_at = datetime.now(UTC)
+    if report is None:
+        report = {}
+    report.update(
+        proof="clean-stack system",
+        status="failed",
+        project=stack.project_name,
+        started_at=started_at.isoformat(),
+        steps=evidence,
+        disposable_volumes_removed=False,
+    )
 
     def step(name: str, action: Callable[[], None]) -> None:
         _recorded_step(evidence, name, action)
@@ -577,16 +593,28 @@ def run_system_proof(
     candidate_image = getattr(stack, "candidate_image", None)
     if candidate_image:
         step("pull immutable candidate", stack.pull_candidate)
+        step(
+            "candidate runtime service creation",
+            lambda: stack.run(
+                "Create candidate runtime service containers",
+                "create",
+                "web",
+                "migrate",
+                "maintenance",
+                "proxy-web",
+                timeout_seconds=300,
+            ),
+        )
+        step("candidate image preflight", stack.verify_candidate_services)
     elif build_images:
         step(
             "no-cache image build",
-            lambda: stack.run(
-                "No-cache system image build",
-                "build",
-                "--no-cache",
-                "web",
-                "maintenance",
-                timeout_seconds=3_600,
+            lambda: report.update(
+                build_provenance=stack.build_services(
+                    ("web", "migrate", "maintenance"),
+                    no_cache=True,
+                    timeout_seconds=3_600,
+                )
             ),
         )
     else:
@@ -594,13 +622,11 @@ def run_system_proof(
     if candidate_image or build_images:
         step(
             "proof helper image build",
-            lambda: stack.run(
-                "Build proof helper images",
-                "build",
-                "example-tests",
-                "agent-e2e",
-                "proxy-tests",
-                timeout_seconds=3_600,
+            lambda: report.update(
+                helper_build_provenance=stack.build_services(
+                    ("example-tests", "agent-e2e", "proxy-tests"),
+                    timeout_seconds=3_600,
+                )
             ),
         )
     step(
@@ -703,24 +729,26 @@ def run_system_proof(
         environment=stack.environment,
         label="the Docker server version",
     )
-    report = {
-        "proof": "clean-stack system",
-        "status": "passed",
-        "build_mode": (
-            "immutable-candidate"
-            if candidate_image
-            else "no-cache"
-            if build_images
-            else "reused-current-images"
-        ),
-        "candidate_image": candidate_image,
-        "release_evidence_eligible": build_images,
-        "project": stack.project_name,
-        "started_at": started_at.isoformat(),
-        "docker_server_version": docker_version,
-        "host": _system_host_profile(stack),
-        "image_ids": _system_image_ids(stack),
-        "steps": evidence,
-        "retained_data": "safe evidence only",
-    }
+    report.update(
+        {
+            "proof": "clean-stack system",
+            "status": "passed",
+            "build_mode": (
+                "immutable-candidate"
+                if candidate_image
+                else "no-cache"
+                if build_images
+                else "reused-current-images"
+            ),
+            "candidate_image": candidate_image,
+            "release_evidence_eligible": build_images,
+            "project": stack.project_name,
+            "started_at": started_at.isoformat(),
+            "docker_server_version": docker_version,
+            "host": _system_host_profile(stack),
+            "image_ids": _system_image_ids(stack),
+            "steps": evidence,
+            "retained_data": "safe evidence only",
+        }
+    )
     return report

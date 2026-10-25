@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -39,12 +40,11 @@ class LaneSpec:
 
 
 LANES = {
-    "canonical": LaneSpec((), ("run", "--build", "--rm", "tests"), 2_400),
+    "canonical": LaneSpec((), ("run", "--rm", "tests"), 2_400),
     "postgres": LaneSpec(
         (),
         (
             "run",
-            "--build",
             "--rm",
             "tests",
             "pdm",
@@ -55,27 +55,27 @@ LANES = {
     ),
     "examples": LaneSpec(
         ("examples",),
-        ("run", "--build", "--rm", "example-tests"),
+        ("run", "--rm", "example-tests"),
         2_400,
     ),
     "agents": LaneSpec(
         ("agents",),
-        ("run", "--build", "--rm", "agent-e2e"),
+        ("run", "--rm", "agent-e2e"),
         2_400,
     ),
     "browser": LaneSpec(
         ("browser",),
-        ("run", "--build", "--rm", "browser-tests"),
+        ("run", "--rm", "browser-tests"),
         4_800,
     ),
     "proxy": LaneSpec(
         ("proxy-proof",),
-        ("run", "--build", "--rm", "proxy-tests"),
+        ("run", "--rm", "proxy-tests"),
         2_400,
     ),
     "live-agents": LaneSpec(
         ("live-agents",),
-        ("run", "--build", "--rm", "live-agent-e2e"),
+        ("run", "--rm", "live-agent-e2e"),
         3_600,
     ),
 }
@@ -100,6 +100,37 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+def _lane_build_targets(stack: IsolatedComposeProject, service: str) -> tuple[str, ...]:
+    """Return buildable services in the selected lane service dependency tree."""
+
+    try:
+        model = json.loads(stack.capture("active lane build model", "config", "--format", "json"))
+    except json.JSONDecodeError as error:
+        raise LaneError("lane image build", "Compose returned an invalid build model.") from error
+    services = model.get("services") if isinstance(model, dict) else None
+    if not isinstance(services, dict):
+        raise LaneError("lane image build", "Compose did not return a service model.")
+    targets: set[str] = set()
+    pending = [service]
+    visited: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        definition = services.get(name)
+        if not isinstance(definition, dict):
+            continue
+        if isinstance(definition.get("build"), dict):
+            targets.add(name)
+        dependencies = definition.get("depends_on", {})
+        if isinstance(dependencies, (dict, list)):
+            pending.extend(str(item) for item in dependencies)
+    if not targets:
+        raise LaneError("lane image build", f"No buildable services found for {service}.")
+    return tuple(sorted(targets))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     system_report: dict[str, Any] | None = None
+    stack: IsolatedComposeProject | None = None
     try:
         profiles: tuple[str, ...] = (
             ("examples", "agents", "proxy-proof") if arguments.lane == "system" else ()
@@ -153,12 +185,23 @@ def main(argv: list[str] | None = None) -> int:
             termination_signals(),
         ):
             if arguments.lane == "system":
-                system_report = run_system_proof(
+                system_report = {}
+                run_system_proof(
                     stack,
                     build_images=not arguments.reuse_current_images,
+                    report=system_report,
                 )
             else:
                 specification = LANES[arguments.lane]
+                service = next(
+                    item
+                    for index, item in enumerate(specification.command)
+                    if index and specification.command[index - 1] == "--rm"
+                )
+                stack.build_services(
+                    _lane_build_targets(stack, service),
+                    timeout_seconds=3_600,
+                )
                 stack.run(
                     f"Run {arguments.lane} lane",
                     *specification.command,
@@ -167,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"The {arguments.lane} lane passed.")
         if system_report is not None:
             system_report["finished_at"] = datetime.now(UTC).isoformat()
-            system_report["disposable_volumes_removed"] = True
+            system_report["disposable_volumes_removed"] = bool(stack and stack.cleanup_complete)
             report_path = write_system_report(system_report)
             if system_report.get("release_evidence_eligible") is False:
                 print(
@@ -178,6 +221,13 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"System proof passed. Safe report: {report_path}")
     except (InterruptedError, IsolationError, LaneError) as error:
+        if system_report is not None:
+            system_report.update(
+                status="failed",
+                finished_at=datetime.now(UTC).isoformat(),
+                disposable_volumes_removed=bool(stack and stack.cleanup_complete),
+            )
+            write_system_report(system_report)
         print(f"Isolated lane failed: {error}", file=sys.stderr)
         return 1
     return 0
