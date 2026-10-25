@@ -36,7 +36,8 @@ proof runner owns disposable containers and volumes.
 ## Follow the release sequence
 
 1. Prepare the version, reviewed notes, compatibility specification, and current
-   guides. Use the policy's restored-database proofs before listing predecessors.
+   guides. Complete the manual-reference check below before source validation.
+   Use the policy's restored-database proofs before listing predecessors.
 2. Run the applicable [local gates](../../../docs/testing.md#local-gates), including
    focused tests, `pdm run check`, `pdm run docs-structure`,
    `pdm run security-release source`, and `actionlint`. Source security is separate
@@ -53,6 +54,34 @@ proof runner owns disposable containers and volumes.
    Use the maintained production proof and external checks required by the policy.
 7. Report the version, release URL, source, digest, evidence, limits, and cleanup.
    A tag, draft, or green CI run alone is not a published release.
+
+## Check manual version references
+
+Before source CI and candidate validation, read `VERSION` and the target release
+specification. Update these maintained spots for that target:
+
+- `README.md` and `docs/setup/README.md`: the version described by the guides.
+- `docs/setup/maintain.md`: the target version, release and tagged-note links,
+  supported predecessors, configuration, database, and recovery instructions.
+- `docs/releases.md`: the current specification and supported upgrade route.
+- `releases/vMAJOR.MINOR.PATCH.json` and `releases/vMAJOR.MINOR.PATCH.md`: matching
+  version, tested compatibility, operator instructions, and tagged setup links.
+
+Review version references in the homepage, copied prompts, and public agent
+guide. Keep installation entry points directed to published GitHub releases and
+the selected release's `release.json`. A prepared version is not yet published.
+Keep explicit source and image identity in the deployment record.
+
+Check each older version in context. Preserve required upgrade baselines,
+minimum CLI versions, dependency versions, and versioned records. A global
+replacement of version strings can change these contracts.
+
+Include manual-reference edits in the tested candidate source. A later source
+edit requires exact-source CI and candidate validation again. After publication,
+verify the live homepage and agent guide, GitHub's published release, tagged
+setup links, and attached record agree. Update the public website through its
+maintained build and workflow if its source changed. Report a mismatch before
+calling the release complete.
 
 ## Handle failures and improve the process
 
