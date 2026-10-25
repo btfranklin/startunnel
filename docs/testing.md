@@ -37,6 +37,11 @@ tests run on both backends. Async tests that use separate connections commit
 their fixture data with `transaction=True`.
 
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
+Release and release-tooling changes also require `pdm run security-release source`
+before a push. This separate lane checks locked inputs, source secrets, Bandit,
+and npm dependencies before CI starts service builds. It requires Gitleaks,
+Node.js/npm, and the locked PDM tools. The [CI tool setup](../.github/workflows/ci.yml)
+owns their pinned installation commands.
 It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
 External web links are not fetched. Run `pdm run docs-links` for a
 focused link check. Both source scans omit ignored reports and build output.

@@ -409,6 +409,17 @@ def test_system_health_probe_accepts_normal_response() -> None:
     assert calls == [("http://127.0.0.1:8000/health/live", 10, "web", "https")]
 
 
+@pytest.mark.parametrize("path", ["/unexpected", "//example.invalid", "/health/ready?extra=1"])
+def test_system_health_probe_rejects_other_paths_before_network_access(path: str) -> None:
+    def unexpected(
+        request: urllib.request.Request, *, timeout: float
+    ) -> proof_runtime.HealthResponse:
+        pytest.fail("unexpected network access")
+
+    with pytest.raises(ValueError, match="path"):
+        proof_runtime.check_health(200, path, urlopen=unexpected)
+
+
 def test_system_health_probe_accepts_expected_http_error() -> None:
     calls: list[tuple[str, float]] = []
 

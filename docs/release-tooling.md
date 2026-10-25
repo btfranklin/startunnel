@@ -25,6 +25,9 @@ agents use an instance; it does not own repository publication.
 All maintained Python files below are included in `pdm run types` and the
 aggregate `pdm run check`. Test locations identify automated behavior checks;
 they do not imply complete branch coverage or a real registry test.
+The source security lane is separate: run `pdm run security-release source`
+before pushing release-tooling changes. The aggregate check does not run Bandit
+or the npm vulnerability audit.
 
 | Command or module | Caller and responsibility | Automated tests |
 |---|---|---|

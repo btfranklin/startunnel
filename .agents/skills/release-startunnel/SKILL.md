@@ -41,8 +41,9 @@ Read [testing](../../../docs/testing.md) for the applicable focused gates.
    guides. List a predecessor only after its restored-database upgrade and
    recovery proof passes. Keep required host Python and standalone CLI Python
    requirements separate.
-2. Run the focused tests, `pdm run check`, `pdm run docs-structure`, and
-   `actionlint`. Include new Python modules in the existing strict type gate.
+2. Run the focused tests, `pdm run check`, `pdm run docs-structure`,
+   `pdm run security-release source`, and `actionlint`. The source security lane
+   is separate from the aggregate check. Include new Python modules in the strict type gate.
    Test orchestration through its complete successful path and its failure
    paths. Function tests and a type check alone do not prove orchestration.
 3. Commit and push. Wait for source CI on that exact commit. Do not replace a

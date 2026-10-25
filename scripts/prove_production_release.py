@@ -18,6 +18,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypedDict, cast
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 if TYPE_CHECKING or __package__:
@@ -382,7 +383,8 @@ def metrics_preserved(before: Mapping[str, int], after: Mapping[str, int]) -> bo
 
 
 def admin_key_from_stack(stack: CaptureStack, private_directory: Path) -> Path:
-    container_path = "/tmp/startunnel-release-admin.key"
+    # The command creates this file exclusively in the disposable container's tmpfs.
+    container_path = "/tmp/startunnel-release-admin.key"  # nosec B108
     stack.capture(
         "bootstrap_admin",
         "exec",
@@ -426,9 +428,30 @@ def metrics_inodes(stack: IsolatedComposeProject) -> dict[str, int]:
     return result
 
 
+def checked_proof_url(url: str) -> str:
+    """Permit only the proof's HTTP loopback origin and fixed read endpoints."""
+    parsed = urlsplit(url)
+    port = parsed.port
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None
+        or not 1 <= port <= 65535
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"/health/live", "/health/ready", "/downloads/star_tunnel.py"}
+    ):
+        raise ValueError("The proof URL must use its HTTP loopback origin and a fixed endpoint.")
+    return url
+
+
 def health_ok(url: str) -> bool:
+    request_url = checked_proof_url(url)
     try:
-        with urllib.request.urlopen(url, timeout=5) as response:
+        # checked_proof_url rejects file, remote, and credential-bearing URLs.
+        with urllib.request.urlopen(request_url, timeout=5) as response:  # nosec B310
             return cast(int, response.status) == 200
     except OSError, urllib.error.URLError:
         return False
@@ -461,8 +484,10 @@ def run_cli_proof(
     checks: dict[str, bool],
 ) -> None:
     client = private_directory / "star_tunnel.py"
+    download_url = checked_proof_url(base_url + "/downloads/star_tunnel.py")
     try:
-        with urllib.request.urlopen(base_url + "/downloads/star_tunnel.py", timeout=20) as response:
+        # This is a checked, unauthenticated HTTP loopback endpoint.
+        with urllib.request.urlopen(download_url, timeout=20) as response:  # nosec B310
             content = response.read(1_000_001)
             if response.status != 200 or len(content) > 1_000_000:
                 raise LaneError(

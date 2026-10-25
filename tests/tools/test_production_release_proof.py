@@ -677,3 +677,45 @@ def test_default_report_name_is_project_scoped() -> None:
     assert proof.output_path(None, project_name) == (
         proof.ROOT / "artifacts" / f"production-release-proof-{project_name}.json"
     )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///outside/data",
+        "https://127.0.0.1:45000/health/ready",
+        "http://example.invalid:45000/health/ready",
+        "http://user:password@127.0.0.1:45000/health/ready",
+        "http://127.0.0.1:45000/unapproved",
+        "http://127.0.0.1:45000/health/ready?extra=1",
+        "http://127.0.0.1:0/health/ready",
+        "http://127.0.0.1/health/ready",
+    ],
+)
+def test_proof_health_rejects_unapproved_urls_before_network_access(
+    url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda *args, **kwargs: pytest.fail("unexpected network access")
+    )
+    with pytest.raises(ValueError):
+        proof.health_ok(url)
+
+
+@pytest.mark.parametrize("path", ["/health/live", "/health/ready", "/downloads/star_tunnel.py"])
+def test_proof_url_allows_only_the_current_loopback_endpoints(path: str) -> None:
+    url = "http://127.0.0.1:45000" + path
+    assert proof.checked_proof_url(url) == url
+
+
+def test_cli_download_rejects_a_file_origin_before_creating_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda *args, **kwargs: pytest.fail("unexpected network access")
+    )
+    with pytest.raises(ValueError):
+        proof.run_cli_proof(
+            tmp_path, tmp_path / "admin.key", "file:///outside", VERSION, COMMIT, {}
+        )
+    assert list(tmp_path.iterdir()) == []

@@ -49,7 +49,8 @@ def check_health(
     )
     try:
         response = (
-            urllib.request.urlopen(request, timeout=10)
+            # The request has a fixed HTTP loopback origin and an approved path.
+            urllib.request.urlopen(request, timeout=10)  # nosec B310
             if urlopen is None
             else urlopen(request, timeout=10)
         )
@@ -135,7 +136,10 @@ def check_runtime_contents() -> None:
     print("Runtime image contents passed.")
 
 
-def metrics_file_inodes(directory: Path = Path("/tmp/startunnel-prometheus")) -> dict[str, int]:
+def metrics_file_inodes(
+    # This is a private container tmpfs; only inode numbers are read.
+    directory: Path = Path("/tmp/startunnel-prometheus"),  # nosec B108
+) -> dict[str, int]:
     """Read only the inode numbers of current metrics files."""
     return {path.name: path.stat().st_ino for path in directory.glob("*.db") if path.is_file()}
 
