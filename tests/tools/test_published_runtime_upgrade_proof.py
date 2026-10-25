@@ -25,7 +25,7 @@ def release_record(
     return path, data
 
 
-@pytest.mark.parametrize("version", ["v0.2.0", "v0.3.0"])
+@pytest.mark.parametrize("version", ["v0.2.0", "v0.3.0", "v0.4.0"])
 def test_published_record_requires_tagged_immutable_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
 ) -> None:

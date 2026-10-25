@@ -1544,6 +1544,7 @@ def test_source_scan_failure_blocks_service_builds() -> None:
         ("v0.1.0", "prove_admin_upgrade.py", "--baseline-record"),
         ("v0.2.0", "prove_published_upgrade.py", "--release-record"),
         ("v0.3.0", "prove_published_upgrade.py", "--release-record"),
+        ("v0.4.0", "prove_published_upgrade.py", "--release-record"),
     ],
 )
 def test_ci_checks_each_published_upgrade_with_its_own_record(

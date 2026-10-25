@@ -1,0 +1,15 @@
+{
+  "version": "v0.4.1",
+  "supported_from": [
+    "v0.2.0",
+    "v0.3.0",
+    "v0.4.0"
+  ],
+  "configuration_changes": [
+    "The application image and host tools now use Python 3.15. Install Python 3.15 or later before running the host installation, backup, or upgrade commands. The official image includes its Python runtime. The standalone CLI still supports Python 3.10 or later.",
+    "Existing application settings, credentials, API contracts, and the minimum official CLI version remain unchanged. Update clients explicitly from the upgraded instance to align their version and command definitions. No new CLI command is required for this release.",
+    "For upgrades from v0.2.0 or v0.3.0, also apply the v0.4.0 credential-cap and Caddy proxy instructions. Existing explicit trusted-proxy settings are preserved. Proof metrics remain disabled in normal application runs."
+  ],
+  "database": "There are no new migrations after v0.4.0. Existing accounts, credentials, messages, and tunnel addresses are preserved. Upgrades from v0.2.0 or v0.3.0 also apply the v0.4.0 tunnels.0011 history and retry guards. That migration has no reverse operation. Restored-database upgrade and recovery checks cover each listed published predecessor. Older installations must first follow the tagged v0.2.0 upgrade and one-time reset instructions.",
+  "rollback": "Keep the previous source, immutable image, configuration, secrets, and a fresh verified database backup outside the server. If recovery is required, stop writers and restore those matching inputs together. Do not reverse tunnels.0011 or use a pre-v0.4.0 image against its migrated database. Restoring a backup discards writes made after that backup. Keep recovery inputs until external verification passes. Clients can explicitly run startunnel update from the restored instance."
+}
