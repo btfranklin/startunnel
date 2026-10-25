@@ -83,12 +83,15 @@ def test_diagnostic_lock_rejects_unbounded_duration(monkeypatch: pytest.MonkeyPa
         pass
 
 
-@pytest.mark.parametrize("broken", [None, "cleanup", "no_wait", "no_error"])
+@pytest.mark.parametrize(
+    "broken", [None, "cleanup", "no_wait", "no_error", "observations", "budget"]
+)
 def test_diagnostic_validation_requires_failure_waits_and_cleanup(
     tmp_path: Path, broken: str | None
 ) -> None:
     import json
 
+    from scripts.proof_evidence import LOAD_CONFIGURATION
     from scripts.validate_load_diagnostic import validate
 
     project = "stload-lock-diagnostic"
@@ -96,12 +99,18 @@ def test_diagnostic_validation_requires_failure_waits_and_cleanup(
         "status": "failed",
         "release_evidence_eligible": False,
         "disposable_volumes_removed": broken != "cleanup",
+        "observations": {"complete": broken != "observations", "collector_failed": False},
+        "diagnostic_lock_seconds": 10,
         "workload_report": "workload.json",
         "observations_file": "observations.jsonl",
     }
     workload = {
         "fixture_cleanup_complete": True,
-        "configuration": {"duration_seconds": 300},
+        "passed": False,
+        "configuration": {
+            **LOAD_CONFIGURATION,
+            "sends_per_second": 25 if broken == "budget" else 50,
+        },
         "results": {
             "expected_sends": 15000,
             "failures_by_status": {} if broken == "no_error" else {"503": 1},

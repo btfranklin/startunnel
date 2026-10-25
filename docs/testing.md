@@ -394,8 +394,9 @@ Worker gauges use the existing multiprocess metrics directory and remove dead
 worker values on shutdown. Host observations record per-service CPU, throttling,
 memory, available pressure counters, database connection and lock counters,
 pool waits, and collector cost. Counter reads run in a fixed worker pool through
-the Docker Engine. Pool metrics come from the existing worker files, without
-adding HTTP traffic. Each collection must finish within one second; a missed
+the Docker Engine. One bounded pool reader reads the existing worker files
+once per second. It adds no HTTP traffic and records its CPU and memory cost.
+The observer stops this reader before stack cleanup. Each collection must finish within one second; a missed
 deadline stops the collector and fails the proof. Driver observations record
 scheduling lag and in-flight sends. Unavailable values are null. No report includes SQL text,
 credentials, addresses, connection strings, or message content.

@@ -7,12 +7,13 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from scripts import load_observations, run_full_load_profile
 from scripts.compose_isolation import LaneError
-from scripts.load_observations import container_counters, numeric_fields, pool_metrics
+from scripts.load_observations import container_counters, numeric_fields
 from scripts.proof_timing import PhaseTimings
 from tests.load import run_profile
 
@@ -37,23 +38,6 @@ def test_counter_allowlists_drop_secrets_and_unknowns() -> None:
         "b": None,
         "c": None,
     }
-    metrics = pool_metrics(
-        "startunnel_database_pool_size 18\n"
-        "startunnel_database_pool_queued 4\n"
-        'startunnel_database_pool_waiting{secret="key"} 6\n'
-        'startunnel_database_pool_sampler_status{status="ok"} 1\n'
-        'startunnel_database_pool_sampler_status{status="missing"} 2\n'
-        'startunnel_database_pool_sampler_status{status="error"} 1\n'
-        "startunnel_database_pool_secret 1\n"
-        'query{sql="secret-sql"} 1\n'
-    )
-    assert metrics["size"] == 18
-    assert metrics["queued"] == 4
-    assert metrics["waiting"] is None
-    assert metrics["sampler_ok"] == 1
-    assert metrics["sampler_missing"] == 2
-    assert metrics["sampler_error"] == 1
-    assert "secret" not in json.dumps(metrics)
 
 
 def test_failed_phase_retains_both_clocks() -> None:
@@ -237,6 +221,10 @@ def test_collector_writes_each_sample_and_retains_safe_error(
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "observations.jsonl")  # type: ignore[arg-type]
 
+    observations.identifiers = {name: "a" * 64 for name in load_observations.SERVICES}
+    fake_reader = SimpleNamespace(start=lambda: None, close=lambda: None, failed=False)
+    monkeypatch.setattr(load_observations, "PoolReader", lambda *args: fake_reader)
+
     def sample() -> dict[str, object]:
         if observations.samples:
             raise ValueError("secret-credential")
@@ -252,11 +240,12 @@ def test_collector_writes_each_sample_and_retains_safe_error(
     assert "secret" not in json.dumps(observations.summary())
 
 
-def test_metrics_probe_reads_worker_shards_without_http_or_credentials() -> None:
-    assert "MultiProcessCollector(registry)" in load_observations.METRICS_COMMAND
-    assert "core.metrics" not in load_observations.METRICS_COMMAND
-    assert "urllib" not in load_observations.METRICS_COMMAND
-    assert "TOKEN" not in load_observations.METRICS_COMMAND
+def test_metrics_reader_reads_worker_shards_without_http_or_credentials() -> None:
+    source = Path(load_observations.__file__).with_name("proof_pool_reader.py").read_text()
+    assert "MultiProcessCollector(registry)" in source
+    assert "core.metrics" not in source
+    assert "urllib" not in source
+    assert "TOKEN" not in source
     assert "statement_timeout=500" in str(load_observations.POSTGRES_ENVIRONMENT)
 
 
@@ -299,6 +288,16 @@ def test_collector_requires_all_four_pool_samplers_and_records_failures(
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "samples.jsonl")  # type: ignore[arg-type]
     observations.identifiers = {name: "a" * 12 for name in load_observations.SERVICES}
+    observations.pool_reader = cast(
+        Any,
+        SimpleNamespace(
+            snapshot=lambda: {
+                "pool": {"sampler_ok": ok, "sampler_missing": missing, "sampler_error": error},
+                "cpu_seconds": 1,
+                "peak_memory_bytes": 10,
+            }
+        ),
+    )
     try:
         sample = observations._sample()
     finally:
@@ -476,6 +475,16 @@ def test_parallel_sample_finishes_under_one_second_and_caches_scoped_inventory(
 
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "sample.jsonl")  # type: ignore[arg-type]
+    observations.pool_reader = cast(
+        Any,
+        SimpleNamespace(
+            snapshot=lambda: {
+                "pool": {"sampler_ok": 4, "sampler_missing": 0, "sampler_error": 0},
+                "cpu_seconds": 1,
+                "peak_memory_bytes": 10,
+            }
+        ),
+    )
     try:
         first = observations._sample()
         second = observations._sample()
@@ -514,6 +523,13 @@ def test_slow_sample_stops_without_queuing_a_second_iteration(
     monkeypatch.setattr(load_observations, "DockerStats", Stats)
     observations = load_observations.LoadObservations(Stack(), tmp_path / "sample.jsonl")  # type: ignore[arg-type]
     observations.identifiers = {name: "a" * 64 for name in load_observations.SERVICES}
+    fake_reader = SimpleNamespace(
+        start=lambda: None,
+        close=lambda: None,
+        failed=False,
+        snapshot=lambda: {"pool": {"sampler_ok": 4}},
+    )
+    monkeypatch.setattr(load_observations, "PoolReader", lambda *args: fake_reader)
     with observations:
         observations.thread.join(timeout=1.5)
         assert not observations.thread.is_alive()
@@ -553,14 +569,17 @@ def test_metrics_probe_reads_existing_worker_files_without_creating_shards(tmp_p
     assert files
     for _ in range(2):
         result = subprocess.run(
-            [sys.executable, "-c", load_observations.METRICS_COMMAND],
+            [sys.executable, "-c", "from scripts.proof_pool_reader import run; run(0.01)"],
             env=environment,
             capture_output=True,
             text=True,
             check=True,
             timeout=5,
         )
-        assert pool_metrics(result.stdout)["sampler_ok"] == 4
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        assert rows[1]["pool"]["sampler_ok"] == 4
+        assert rows[1]["cpu_seconds"] >= 0
+        assert rows[1]["peak_memory_bytes"] > 0
         assert sorted(path.name for path in tmp_path.iterdir()) == files
 
 
@@ -586,3 +605,124 @@ def test_engine_inventory_returns_array_and_failed_exec_discards_stderr(
     ]
     with pytest.raises(ValueError, match=r"^The Docker observation command failed\.$"):
         client.exec("a" * 12, load_observations.POSTGRES_COMMAND)
+
+
+def test_persistent_pool_reader_stops_remote_process_and_rejects_stale_cache(
+    tmp_path: Path,
+) -> None:
+    import os
+    import signal
+    import sys
+    import time
+
+    class Stack:
+        environment = {**os.environ, "PROMETHEUS_MULTIPROC_DIR": str(tmp_path)}
+
+        def compose_command(self, *arguments: str) -> list[str]:
+            assert arguments[:3] == ("exec", "-T", "web")
+            return [sys.executable, "-u", "-c", arguments[-1]]
+
+    class Stats:
+        def exec(self, identifier: str, command: tuple[str, ...]) -> str:
+            assert identifier == "a" * 64
+            assert command[:2] == ("/bin/kill", "-TERM")
+            assert command[2].isdigit()
+            os.kill(int(command[2]), signal.SIGTERM)
+            return ""
+
+    reader = load_observations.PoolReader(cast(Any, Stack()), cast(Any, Stats()), "a" * 64)
+    reader.start()
+    try:
+        assert reader.pid is not None
+        first = reader.snapshot()
+        assert first["cpu_seconds"] >= 0
+        assert first["peak_memory_bytes"] > 0
+        assert first["pool"]["sampler_ok"] is None
+        with reader.lock:
+            reader.received_at = time.monotonic() - 3
+        with pytest.raises(ValueError, match="stale"):
+            reader.snapshot()
+    finally:
+        reader.close()
+    assert reader.failed is False
+    assert reader.process is not None and reader.process.poll() is not None
+    assert not reader.thread.is_alive()
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(ProcessLookupError):
+        os.kill(reader.pid, 0)
+
+
+@pytest.mark.parametrize("pid", [True, 0, 1, -1, 2**31, "secret-pid"])
+def test_persistent_reader_rejects_invalid_process_header_without_kill(pid: object) -> None:
+    import io
+
+    reader = load_observations.PoolReader(cast(Any, None), cast(Any, None), "a" * 64)
+    reader.process = cast(Any, SimpleNamespace(stdout=io.StringIO(json.dumps({"pid": pid}) + "\n")))
+    reader._read()
+    assert reader.failed
+    assert reader.pid is None
+
+
+def test_pool_reader_program_rejects_unbounded_lifetime() -> None:
+    from scripts.proof_pool_reader import run
+
+    with pytest.raises(ValueError, match="900"):
+        run(901)
+
+
+@pytest.mark.parametrize("failure", [InterruptedError, KeyboardInterrupt])
+def test_collector_startup_interrupt_stops_reader_and_closes_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[BaseException],
+) -> None:
+    class Stats:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def get(self, *args: object) -> dict[str, object]:
+            return {}
+
+    closed = []
+
+    class Reader:
+        def __init__(self, *args: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise failure()
+
+        def close(self) -> None:
+            closed.append(True)
+
+    class Stack:
+        environment = {"DOCKER_HOST": "unix:///safe"}
+
+    monkeypatch.setattr(load_observations, "DockerStats", Stats)
+    monkeypatch.setattr(load_observations, "PoolReader", Reader)
+    observations = load_observations.LoadObservations(cast(Any, Stack()), tmp_path / "sample.jsonl")
+    observations.identifiers = {"web": "a" * 64}
+    with pytest.raises(failure):
+        observations.__enter__()
+    assert closed == [True]
+    assert observations.executor._shutdown
+    assert observations._output.closed
+    assert not observations.thread.is_alive()
+
+
+def test_pool_reader_ignores_unrelated_metric_names_and_labels() -> None:
+    from scripts.proof_pool_reader import read_pool
+
+    samples = [
+        SimpleNamespace(name="size", labels={}, value=999),
+        SimpleNamespace(
+            name="startunnel_database_pool_available", labels={"secret": "key"}, value=7
+        ),
+        SimpleNamespace(name="startunnel_database_pool_waiting", labels={}, value=2),
+    ]
+    registry = SimpleNamespace(collect=lambda: [SimpleNamespace(samples=samples)])
+    result = read_pool(cast(Any, registry))
+    assert result["size"] is None
+    assert result["available"] is None
+    assert result["waiting"] == 2
+    assert "secret" not in json.dumps(result)

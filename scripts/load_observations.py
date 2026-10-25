@@ -7,6 +7,7 @@ import math
 import os
 import re
 import resource
+import subprocess  # nosec B404
 import sys
 import threading
 import time
@@ -57,12 +58,7 @@ SQL = """SELECT json_build_object(
  'lock_count', (SELECT count(*) FROM pg_locks),
  'ungranted_locks', (SELECT count(*) FROM pg_locks WHERE NOT granted)
  ) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid();"""
-# This trusted Engine exec reads worker shards without an HTTP request or a token.
-METRICS_COMMAND = (
-    "from prometheus_client import CollectorRegistry,generate_latest,multiprocess; "
-    "registry=CollectorRegistry(); multiprocess.MultiProcessCollector(registry); "
-    "print(generate_latest(registry).decode())"
-)
+
 POSTGRES_COMMAND = (
     "psql",
     "--username",
@@ -91,29 +87,6 @@ def numeric(value: object) -> int | float | None:
 def numeric_fields(source: object, names: tuple[str, ...]) -> dict[str, int | float | None]:
     values = source if isinstance(source, dict) else {}
     return {name: numeric(values.get(name)) for name in names}
-
-
-def pool_metrics(raw: str) -> dict[str, object]:
-    values: dict[str, object] = {name: None for name in POOL_FIELDS}
-    values.update({f"sampler_{status}": None for status in POOL_STATUSES})
-    for line in raw.splitlines():
-        match = re.fullmatch(
-            r"startunnel_database_pool_([a-z_]+)(?:\{([^}]*)\})? ([0-9.eE+-]+)", line
-        )
-        if not match:
-            continue
-        name, labels, raw_value = match.groups()
-        try:
-            value = numeric(float(raw_value))
-        except ValueError:
-            continue
-        if name in POOL_FIELDS and labels is None:
-            values[name] = value
-        elif name == "sampler_status":
-            for status in POOL_STATUSES:
-                if labels == f'status="{status}"':
-                    values[f"sampler_{status}"] = value
-    return values
 
 
 def container_counters(raw: dict[str, Any]) -> dict[str, object]:
@@ -147,6 +120,124 @@ def container_counters(raw: dict[str, Any]) -> dict[str, object]:
     }
 
 
+class PoolReader:
+    """Own one bounded remote reader and retain only its latest numeric snapshot."""
+
+    def __init__(self, stack: IsolatedComposeProject, stats: DockerStats, identifier: str) -> None:
+        self.stack, self.stats, self.identifier = stack, stats, identifier
+        self.process: subprocess.Popen[str] | None = None
+        self.pid: int | None = None
+        self.lock = threading.Lock()
+        self.ready = threading.Event()
+        self.failed = False
+        self.stopping = False
+        self.closed = False
+        self.latest: dict[str, Any] | None = None
+        self.received_at: float | None = None
+        self.thread = threading.Thread(target=self._read, name="pool-reader", daemon=True)
+
+    def start(self) -> None:
+        program = Path(__file__).with_name("proof_pool_reader.py").read_text(encoding="utf-8")
+        self.process = subprocess.Popen(  # nosec B603
+            self.stack.compose_command(
+                "exec", "-T", "web", "/app/.venv/bin/python", "-u", "-c", program
+            ),
+            env=self.stack.environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        self.thread.start()
+        if not self.ready.wait(timeout=5) or self.failed:
+            self.close()
+            raise ValueError("The bounded pool reader did not start.")
+
+    def _read(self) -> None:
+        try:
+            assert self.process is not None and self.process.stdout is not None
+            header = self.process.stdout.readline(4097)
+            document = json.loads(header)
+            pid = document.get("pid") if isinstance(document, dict) else None
+            if (
+                len(header) > 4096
+                or not header.endswith("\n")
+                or not isinstance(pid, int)
+                or isinstance(pid, bool)
+                or not 2 <= pid <= 2**31 - 1
+                or set(document) != {"pid"}
+            ):
+                raise ValueError("Invalid pool reader header.")
+            self.pid = pid
+            while True:
+                line = self.process.stdout.readline(4097)
+                if not line:
+                    if not self.stopping:
+                        self.failed = True
+                    break
+                if len(line) > 4096 or not line.endswith("\n"):
+                    raise ValueError("Invalid pool reader sample.")
+                raw = json.loads(line)
+                if not isinstance(raw, dict) or not isinstance(raw.get("pool"), dict):
+                    raise ValueError("Invalid pool reader sample.")
+                pool = numeric_fields(
+                    raw["pool"], (*POOL_FIELDS, *(f"sampler_{status}" for status in POOL_STATUSES))
+                )
+                snapshot = {
+                    "pool": pool,
+                    **numeric_fields(
+                        raw, ("monotonic_seconds", "cpu_seconds", "peak_memory_bytes")
+                    ),
+                }
+                if any(
+                    snapshot[name] is None
+                    for name in ("monotonic_seconds", "cpu_seconds", "peak_memory_bytes")
+                ):
+                    raise ValueError("Invalid pool reader counters.")
+                with self.lock:
+                    self.latest, self.received_at = snapshot, time.monotonic()
+                self.ready.set()
+        except (ValueError, OSError, TypeError):
+            self.failed = True
+        finally:
+            self.ready.set()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            if (
+                self.failed
+                or self.latest is None
+                or self.received_at is None
+                or time.monotonic() - self.received_at > 2
+            ):
+                raise ValueError("The pool reader snapshot is missing or stale.")
+            return dict(self.latest)
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.stopping = True
+        if self.pid is not None:
+            try:
+                self.stats.exec(self.identifier, ("/bin/kill", "-TERM", str(self.pid)))
+            except (ValueError, OSError):
+                self.failed = True
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+            if self.thread.ident is not None:
+                self.thread.join(timeout=2)
+            if self.thread.is_alive():
+                self.failed = True
+            if self.process.stdout is not None and not self.thread.is_alive():
+                self.process.stdout.close()
+
+
 class LoadObservations:
     """Write each sample at once; never retain the sample history in memory."""
 
@@ -173,15 +264,35 @@ class LoadObservations:
         self._output: Any = None
         self.executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="load-counter")
         self.max_sample_overhead_seconds = 0.0
+        self.pool_reader: PoolReader | None = None
 
     def __enter__(self) -> LoadObservations:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._output = self.path.open("x", encoding="utf-8")
         try:
-            self.capacity.update(numeric_fields(self.stats.get("/info"), ("NCPU", "MemTotal")))
-        except (ValueError, OSError):
-            self.capacity.update(NCPU=None, MemTotal=None)
-        self.thread.start()
+            try:
+                self.capacity.update(numeric_fields(self.stats.get("/info"), ("NCPU", "MemTotal")))
+            except InterruptedError:
+                raise
+            except (ValueError, OSError):
+                self.capacity.update(NCPU=None, MemTotal=None)
+            if "web" not in self.identifiers:
+                self._inventory()
+            self.pool_reader = PoolReader(self.stack, self.stats, self.identifiers["web"])
+            self.pool_reader.start()
+            self.thread.start()
+        except BaseException as error:
+            try:
+                if self.pool_reader is not None:
+                    self.pool_reader.close()
+            finally:
+                self.executor.shutdown(wait=True, cancel_futures=True)
+                self._output.close()
+            if isinstance(error, (InterruptedError, KeyboardInterrupt)):
+                raise
+            if isinstance(error, (ValueError, OSError, KeyError)):
+                raise ValueError("The bounded pool reader did not start.") from None
+            raise
         return self
 
     def __exit__(self, *arguments: object) -> None:
@@ -191,6 +302,11 @@ class LoadObservations:
             self.failed = True
             self.errors += 1
         self.executor.shutdown(wait=True, cancel_futures=True)
+        if self.pool_reader is not None:
+            self.pool_reader.close()
+            if self.pool_reader.failed:
+                self.failed = True
+                self.errors += 1
         if self._output is not None:
             self._output.close()
 
@@ -223,6 +339,25 @@ class LoadObservations:
             "wait_estimate": "Age of the oldest query waiting on a lock; not exact wait duration",
         }
 
+    def _inventory(self) -> None:
+        query = urlencode(
+            {
+                "all": "true",
+                "filters": json.dumps(
+                    {"label": [f"com.docker.compose.project={self.stack.project_name}"]}
+                ),
+            }
+        )
+        for row in self.stats.get_list(f"/containers/json?{query}"):
+            name = (row.get("Labels") or {}).get("com.docker.compose.service")
+            identifier = row.get("Id", "")
+            if (
+                name in SERVICES
+                and row.get("State") == "running"
+                and re.fullmatch(r"[a-f0-9]{12,64}", identifier)
+            ):
+                self.identifiers[name] = identifier
+
     def _sample(self) -> dict[str, object]:
         started = time.monotonic()
         usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -241,23 +376,7 @@ class LoadObservations:
         errors: list[str] = []
         try:
             if len(self.identifiers) < len(SERVICES):
-                query = urlencode(
-                    {
-                        "all": "true",
-                        "filters": json.dumps(
-                            {"label": [f"com.docker.compose.project={self.stack.project_name}"]}
-                        ),
-                    }
-                )
-                for row in self.stats.get_list(f"/containers/json?{query}"):
-                    name = (row.get("Labels") or {}).get("com.docker.compose.service")
-                    identifier = row.get("Id", "")
-                    if (
-                        name in SERVICES
-                        and row.get("State") == "running"
-                        and re.fullmatch(r"[a-f0-9]{12,64}", identifier)
-                    ):
-                        self.identifiers[name] = identifier
+                self._inventory()
         except (ValueError, OSError, KeyError, TypeError):
             errors.append("container_inventory_unavailable")
         jobs: dict[str, Future[Any]] = {
@@ -272,12 +391,6 @@ class LoadObservations:
                 self.identifiers["postgres"],
                 POSTGRES_COMMAND,
                 environment=POSTGRES_ENVIRONMENT,
-            )
-        if "web" in self.identifiers:
-            jobs["pool"] = self.executor.submit(
-                self.stats.exec,
-                self.identifiers["web"],
-                ("/app/.venv/bin/python", "-c", METRICS_COMMAND),
             )
         _, pending = wait(jobs.values(), timeout=max(0.0, started + 1 - time.monotonic()))
         if pending:
@@ -302,18 +415,26 @@ class LoadObservations:
                     sample["postgres"] = postgres
                     if all(item is not None for item in postgres.values()):
                         self.postgres_samples += 1
-                elif name == "pool":
-                    pool = pool_metrics(value)
-                    sample["pool"] = pool
-                    if pool.get("sampler_ok") == EXPECTED_POOL_WORKERS:
-                        self.pool_samples += 1
-                    if (numeric(pool.get("sampler_missing")) or 0) > 0:
-                        self.pool_missing_samples += 1
-                    if (numeric(pool.get("sampler_error")) or 0) > 0:
-                        self.pool_error_samples += 1
-                        errors.append("pool_sampler_error")
             except (ValueError, OSError, KeyError, TypeError):
                 errors.append(f"{name}_counters_unavailable")
+        reader: dict[str, Any] = {}
+        try:
+            if self.pool_reader is None:
+                raise ValueError("The pool reader is missing.")
+            reader = self.pool_reader.snapshot()
+            pool = reader["pool"]
+            sample["pool"] = pool
+            if pool.get("sampler_ok") == EXPECTED_POOL_WORKERS:
+                self.pool_samples += 1
+            if (numeric(pool.get("sampler_missing")) or 0) > 0:
+                self.pool_missing_samples += 1
+            if (numeric(pool.get("sampler_error")) or 0) > 0:
+                self.pool_error_samples += 1
+                errors.append("pool_sampler_error")
+        except (ValueError, KeyError, TypeError):
+            errors.append("pool_counters_unavailable")
+            self.failed = True
+            self.stop_event.set()
         sample["services"] = services
         sample["errors"] = errors
         self.errors += len(errors)
@@ -328,6 +449,8 @@ class LoadObservations:
             "child_cpu_seconds": children.ru_utime + children.ru_stime,
             "peak_memory_bytes": usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024),
             "sample_overhead_seconds": overhead,
+            "pool_reader_cpu_seconds": reader.get("cpu_seconds"),
+            "pool_reader_peak_memory_bytes": reader.get("peak_memory_bytes"),
         }
         return sample
 

@@ -6,6 +6,11 @@ import argparse
 import json
 from pathlib import Path
 
+if __package__:
+    from .proof_evidence import LOAD_CONFIGURATION
+else:
+    from proof_evidence import LOAD_CONFIGURATION  # type: ignore[import-not-found,no-redef]
+
 
 def validate(directory: Path, project: str) -> dict[str, int | float]:
     run = json.loads((directory / f"load-run-{project}.json").read_text())
@@ -15,7 +20,14 @@ def validate(directory: Path, project: str) -> dict[str, int | float]:
         or run.get("release_evidence_eligible") is not False
         or run.get("disposable_volumes_removed") is not True
         or workload.get("fixture_cleanup_complete") is not True
-        or workload.get("configuration", {}).get("duration_seconds") != 300
+        or any(
+            workload.get("configuration", {}).get(key) != value
+            for key, value in LOAD_CONFIGURATION.items()
+        )
+        or run.get("observations", {}).get("complete") is not True
+        or run.get("observations", {}).get("collector_failed") is not False
+        or not 1 <= run.get("diagnostic_lock_seconds", 0) <= 60
+        or workload.get("passed") is not False
         or workload.get("results", {}).get("expected_sends") != 15000
         or not workload.get("results", {}).get("failures_by_status")
     ):
