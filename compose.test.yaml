@@ -307,6 +307,9 @@ services:
   proxy-tests:
     extends:
       service: browser-tests
+    image: startunnel-proxy-tests:local
+    build:
+      target: proxy-tests
     profiles: !override [proxy-proof]
     environment:
       STARTUNNEL_PROXY_TESTS: "1"

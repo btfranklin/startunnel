@@ -137,6 +137,29 @@ def _safe_failure_report(output: str, environment: Mapping[str, str]) -> str:
     return "\n".join(safe_lines)
 
 
+def _combine_targets(
+    targets: Mapping[str, BakeTarget],
+) -> tuple[dict[str, BakeTarget], dict[str, str]]:
+    """Build equal inputs once and retain each service image tag."""
+
+    combined: dict[str, BakeTarget] = {}
+    owners: dict[str, str] = {}
+    signatures: dict[str, str] = {}
+    for service, target in targets.items():
+        signature = json.dumps(
+            {key: value for key, value in target.items() if key != "tags"}, sort_keys=True
+        )
+        owner = signatures.get(signature)
+        if owner is None:
+            owner = service
+            signatures[signature] = owner
+            combined[owner] = {**target, "tags": list(target.get("tags", []))}
+        else:
+            combined[owner]["tags"].extend(target.get("tags", []))
+        owners[service] = owner
+    return combined, owners
+
+
 def build_services(
     services: Sequence[str],
     *,
@@ -229,11 +252,18 @@ def build_services(
         target["labels"] = {**labels, "net.startunnel.source": revision}
         if no_cache:
             target["no-cache"] = True
-        scope = _safe_component(f"startunnel-{service}-{target_platform}")
+        targets[service] = target
+
+    targets, target_owners = _combine_targets(targets)
+    exported_scopes: set[str] = set()
+    for target in targets.values():
+        scope = _safe_component(f"startunnel-{target.get('target', 'default')}-{target_platform}")
         if cache_enabled:
             target["cache-from"] = [f"type=gha,version=2,scope={scope}"]
-            target["cache-to"] = [f"type=gha,version=2,scope={scope},mode=max"]
-        targets[service] = target
+            # One writer avoids competing exports for distinct inputs to one stage.
+            if scope not in exported_scopes:
+                target["cache-to"] = [f"type=gha,version=2,scope={scope},mode=max"]
+                exported_scopes.add(scope)
 
     started_at = datetime.now(UTC).isoformat()
     started = time.monotonic()
@@ -256,7 +286,7 @@ def build_services(
                     metadata_file.name,
                     "--file",
                     bake_file.name,
-                    *services,
+                    *targets,
                 ],
                 docker_environment,
                 timeout_seconds,
@@ -289,7 +319,7 @@ def build_services(
                         metadata_file.name,
                         "--file",
                         bake_file.name,
-                        *services,
+                        *targets,
                     ],
                     docker_environment,
                     timeout_seconds,
@@ -313,8 +343,8 @@ def build_services(
                                 and isinstance(value, str)
                                 and re.fullmatch(r"sha256:[0-9a-f]{64}", value)
                             }
-                            for service, entry in json_object(raw_metadata).items()
-                            if service in services and isinstance(entry, dict)
+                            for service, owner in target_owners.items()
+                            if isinstance(entry := json_object(raw_metadata).get(owner), dict)
                         }
                 except ValueError:
                     metadata = {}

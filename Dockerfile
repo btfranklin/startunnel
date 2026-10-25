@@ -235,6 +235,32 @@ RUN chown -R startunnel:startunnel /app /home/startunnel
 
 USER startunnel:startunnel
 
+# The production proxy proof uses Chromium and no documentation or Node tools.
+FROM development-dependencies AS proxy-tests
+
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates tini \
+    && groupadd --gid "${APP_GID}" startunnel \
+    && useradd --uid "${APP_UID}" --gid startunnel --create-home --home-dir /home/startunnel startunnel
+
+ENV HOME=/home/startunnel \
+    PYTHONPATH=/app/src
+
+RUN .venv/bin/playwright install --with-deps chromium \
+    && chown -R startunnel:startunnel /home/startunnel/.cache \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+COPY --chmod=0555 docker/app/entrypoint.sh /usr/local/bin/startunnel-entrypoint
+RUN chown -R startunnel:startunnel /app /home/startunnel
+
+USER startunnel:startunnel
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/startunnel-entrypoint"]
+
 FROM agent-dependencies AS agent-tests
 
 ARG APP_UID=10001
