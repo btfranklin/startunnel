@@ -107,6 +107,39 @@ RUN DJANGO_SETTINGS_MODULE=startunnel.settings.production \
     DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
     .venv/bin/python manage.py collectstatic --noinput
 
+# A small host-side load runner. It has only production Python dependencies and
+# the source required to provision fixtures and run the load profile.
+FROM python-base AS load-helper
+
+COPY --from=production-dependencies /app/.venv /app/.venv
+
+ARG APP_UID=10001
+ARG APP_GID=10001
+
+RUN addgroup -g "${APP_GID}" loadhelper \
+    && adduser -D -u "${APP_UID}" -G loadhelper -h /home/loadhelper loadhelper
+
+ARG STARTUNNEL_SOURCE_REVISION="unknown"
+LABEL net.startunnel.source="${STARTUNNEL_SOURCE_REVISION}"
+
+COPY manage.py ./manage.py
+COPY src ./src
+COPY tests/__init__.py ./tests/__init__.py
+COPY tests/load ./tests/load
+COPY scripts/__init__.py scripts/compose_isolation.py scripts/start_production.py scripts/proof_timing.py scripts/load_diagnostic.py scripts/proof_build.py ./scripts/
+
+ENV PYTHONPATH=/app/src
+
+RUN test -x /app/.venv/bin/python \
+    && ! command -v pdm \
+    && ! command -v node \
+    && ! command -v perfect-doc \
+    && /app/.venv/bin/python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('pytest', 'ruff', 'mypy', 'playwright', 'openapi_spec_validator'))" \
+    && /app/.venv/bin/python -c "import tests.load.run_profile" \
+    && chown -R loadhelper:loadhelper /app /home/loadhelper
+
+USER loadhelper:loadhelper
+
 FROM python-base AS runtime
 
 ARG APP_UID=10001

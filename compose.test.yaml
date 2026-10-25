@@ -69,6 +69,8 @@ services:
       DJANGO_SETTINGS_MODULE: tests.browser_settings
       STARTUNNEL_ALLOWED_HOSTS: localhost,127.0.0.1,web
       STARTUNNEL_BASE_URL: http://web:8000
+      STARTUNNEL_PROOF_METRICS: ${STARTUNNEL_PROOF_METRICS:-0}
+      PROMETHEUS_MULTIPROC_DIR: ${STARTUNNEL_PROOF_METRICS_DIRECTORY:-}
 
   tests:
     <<: *test-service
@@ -209,6 +211,16 @@ services:
     profiles:
       - load
     image: startunnel-load-tests:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: load-helper
+      labels: *test-build-labels
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.14.8-alpine3.23@sha256:e7cff362a12454395f8dc99607c21a602ea880cdce03538877b90c2ba932b16f}
+        PDM_VERSION: ${PDM_VERSION:-2.28.0}
+        APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
+        APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
     environment:
       <<: *test-environment
       # This isolated process owns fixture provisioning and cleanup. Public API
@@ -228,6 +240,8 @@ services:
       STARTUNNEL_LOAD_ACTIVITY_READERS: ${STARTUNNEL_LOAD_ACTIVITY_READERS:-100}
       STARTUNNEL_LOAD_DRAIN_SECONDS: ${STARTUNNEL_LOAD_DRAIN_SECONDS:-30}
       STARTUNNEL_LOAD_CREDENTIALS: ${STARTUNNEL_LOAD_CREDENTIALS:-500}
+      STARTUNNEL_LOAD_DIAGNOSTIC_LOCK_SECONDS: ${STARTUNNEL_LOAD_DIAGNOSTIC_LOCK_SECONDS:-0}
+      STARTUNNEL_LOAD_REPORT_FILENAME: ${STARTUNNEL_LOAD_REPORT_FILENAME:-}
       STARTUNNEL_LOAD_WEB_WORKERS: ${STARTUNNEL_WEB_WORKERS:-4}
       STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE: ${STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE:-18}
     volumes:
@@ -238,8 +252,9 @@ services:
       - /bin/sh
       - -ec
       - |
-        report="/artifacts/load-profile-$(date -u +%Y%m%dT%H%M%SZ).json"
-        exec pdm run python -m tests.load.run_profile \
+        report_name="$${STARTUNNEL_LOAD_REPORT_FILENAME:-load-profile-$$(date -u +%Y%m%dT%H%M%SZ).json}"
+        report="/artifacts/$${report_name}"
+        exec /app/.venv/bin/python -m tests.load.run_profile \
           --report "$${report}" \
           --duration-seconds "$${STARTUNNEL_LOAD_DURATION_SECONDS}" \
           --sends-per-second "$${STARTUNNEL_LOAD_SENDS_PER_SECOND}" \
