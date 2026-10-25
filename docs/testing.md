@@ -383,7 +383,9 @@ Missed submissions, capacity exhaustion, request errors, and unfinished sends
 fail the proof rather than extending its duration. Its report still requires
 at least 95% of the expected sends and successful fixture cleanup.
 CI retains each load attempt, including failed reports, safe status counts,
-send latencies, and cleanup results. Candidate identity is checked before fixture
+send latencies, and cleanup results. Transport failures also record counts by
+public HTTPX exception class and operation (`message_send` or `activity_poll`).
+The report excludes exception text and request data. Candidate identity is checked before fixture
 creation and again after the workload. The helper uses locked production Python
 dependencies and current proof source. It contains no documentation, browser,
 Node.js, or development test tools.

@@ -87,6 +87,17 @@ def _percentile(values: list[float], fraction: float) -> float:
     return round(ordered[index], 3)
 
 
+def _http_exception_type(error: httpx.HTTPError) -> str:
+    """Return a public HTTPX class name without exception or request data."""
+    for error_class in type(error).__mro__:
+        if (
+            issubclass(error_class, httpx.HTTPError)
+            and getattr(httpx, error_class.__name__, None) is error_class
+        ):
+            return str(error_class.__name__)
+    return "HTTPError"
+
+
 async def run_load_profile(
     *,
     base_url: str,
@@ -110,6 +121,14 @@ async def run_load_profile(
     common_headers = {"Host": host_header} if host_header else {}
     timings: list[float] = []
     failures: dict[str, int] = {}
+    transport_errors: dict[str, dict[str, int]] = {"message_send": {}, "activity_poll": {}}
+
+    def record_transport_error(operation: str, error: httpx.HTTPError) -> None:
+        failures["transport"] = failures.get("transport", 0) + 1
+        counts = transport_errors[operation]
+        name = _http_exception_type(error)
+        counts[name] = counts.get(name, 0) + 1
+
     sent = 0
     reads = 0
     stopped = asyncio.Event()
@@ -194,8 +213,8 @@ async def run_load_profile(
                             else:
                                 status = str(response.status_code)
                                 failures[status] = failures.get(status, 0) + 1
-                        except httpx.HTTPError:
-                            failures["transport"] = failures.get("transport", 0) + 1
+                        except httpx.HTTPError as error:
+                            record_transport_error("activity_poll", error)
 
                 readers = [
                     asyncio.create_task(reader(index))
@@ -232,8 +251,8 @@ async def run_load_profile(
                         else:
                             status = str(response.status_code)
                             failures[status] = failures.get(status, 0) + 1
-                    except httpx.HTTPError:
-                        failures["transport"] = failures.get("transport", 0) + 1
+                    except httpx.HTTPError as error:
+                        record_transport_error("message_send", error)
 
                 next_driver_sample = started
                 with phases.phase("traffic"):
@@ -348,6 +367,7 @@ async def run_load_profile(
                     "successful_sends": sent,
                     "activity_reads": reads,
                     "failures_by_status": failures,
+                    "transport_errors_by_operation": transport_errors,
                     "driver": {
                         "scheduled_sends": scheduled,
                         "unscheduled_sends": expected - scheduled,
