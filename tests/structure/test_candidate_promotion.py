@@ -664,3 +664,35 @@ def test_candidate_identity_rejects_missing_or_wrong_enabled_service(
     )
     with pytest.raises(isolation.LaneError, match=message):
         stack.verify_candidate_services()
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Compose rendering needs Docker.")
+@pytest.mark.parametrize("image", [None, IMAGE])
+@pytest.mark.parametrize("load", [False, True])
+def test_file_metrics_are_present_only_in_load_profile(
+    monkeypatch: pytest.MonkeyPatch, image: str | None, load: bool
+) -> None:
+    monkeypatch.setattr(isolation, "assert_local_docker", lambda environment: "unix:///safe")
+    monkeypatch.setattr(isolation, "assert_project_unused", lambda *args: None)
+    monkeypatch.setattr(isolation, "prune_disposable_images", lambda environment: None)
+    monkeypatch.setattr(isolation.IsolatedComposeProject, "cleanup", lambda self: None)
+    with isolation.IsolatedComposeProject(
+        "sttest-metrics-environment",
+        candidate_image=image,
+        profiles=("load",) if load else (),
+        source_environment={"PATH": os.environ["PATH"]},
+    ) as stack:
+        result = subprocess.run(
+            stack.compose_command("config", "--format", "json"),
+            cwd=isolation.ROOT,
+            env=stack.environment,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        environment = json.loads(result.stdout)["services"]["web"]["environment"]
+        if load:
+            assert environment["PROMETHEUS_MULTIPROC_DIR"] == "/tmp/startunnel-proof-metrics"
+            assert environment["STARTUNNEL_PROOF_METRICS"] == "1"
+        else:
+            assert "PROMETHEUS_MULTIPROC_DIR" not in environment

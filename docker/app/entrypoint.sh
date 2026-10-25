@@ -13,6 +13,9 @@ if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then
     esac
     mkdir -p -- "$PROMETHEUS_MULTIPROC_DIR"
     find "$PROMETHEUS_MULTIPROC_DIR" -type f -name '*.db' -delete
+else
+    # The metrics client selects file storage when this variable exists.
+    unset PROMETHEUS_MULTIPROC_DIR
 fi
 
 read_secret() {

@@ -229,8 +229,6 @@ def main(argv: list[str] | None = None) -> int:
                         "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "18",
                         "STARTUNNEL_WEB_WORKERS": "4",
                         "STARTUNNEL_PROOF_METRICS": "1",
-                        # This private path is inside the disposable container tmpfs.
-                        "STARTUNNEL_PROOF_METRICS_DIRECTORY": "/tmp/startunnel-proof-metrics",  # nosec B108
                         "STARTUNNEL_ACTIVE_CREDENTIAL_LIMIT": "500",
                         "STARTUNNEL_LOAD_DURATION_SECONDS": "300",
                         "STARTUNNEL_LOAD_SENDS_PER_SECOND": "50",

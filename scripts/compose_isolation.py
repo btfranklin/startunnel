@@ -338,7 +338,7 @@ class IsolatedComposeProject:
             except ValueError as error:
                 raise IsolationError(str(error)) from error
         self.candidate_image = candidate_image
-        self._candidate_overlay: Path | None = None
+        self._runtime_overlay: Path | None = None
         self.project_name = validate_project_name(project_name)
         self.profiles = tuple(profiles)
         self.source_environment = dict(
@@ -378,21 +378,28 @@ class IsolatedComposeProject:
         artifacts.mkdir(mode=0o700, exist_ok=True)
         if os.getuid() == 0:
             os.chown(artifacts, helper_uid, helper_gid)
-        if self.candidate_image:
-            self._candidate_overlay = Path(self._temporary.name) / "candidate.yaml"
+        if self.candidate_image or "load" in self.profiles:
+            self._runtime_overlay = Path(self._temporary.name) / "runtime.yaml"
             overlay = "services:\n"
-            for service in ("web", "migrate", "maintenance", "proxy-web"):
-                overlay += (
-                    f"  {service}:\n    build: !reset null\n    image: {self.candidate_image}\n"
-                )
+            services = (
+                ("web", "migrate", "maintenance", "proxy-web") if self.candidate_image else ("web",)
+            )
+            for service in services:
+                overlay += f"  {service}:\n"
+                if self.candidate_image:
+                    overlay += f"    build: !reset null\n    image: {self.candidate_image}\n"
                 if service == "web":
-                    # browser_settings only imports these development settings.
-                    overlay += (
-                        "    environment:\n"
-                        "      DJANGO_SETTINGS_MODULE: startunnel.settings.development\n"
-                    )
-            self._candidate_overlay.write_text(overlay, encoding="utf-8")
-            self._candidate_overlay.chmod(0o600)
+                    overlay += "    environment:\n"
+                    if self.candidate_image:
+                        overlay += "      DJANGO_SETTINGS_MODULE: startunnel.settings.development\n"
+                    if "load" in self.profiles:
+                        # Keep file metrics in the disposable container's private tmpfs.
+                        overlay += (
+                            '      STARTUNNEL_PROOF_METRICS: "1"\n'
+                            "      PROMETHEUS_MULTIPROC_DIR: /tmp/startunnel-proof-metrics\n"
+                        )
+            self._runtime_overlay.write_text(overlay, encoding="utf-8")
+            self._runtime_overlay.chmod(0o600)
         self._owned = True
         return self
 
@@ -418,8 +425,8 @@ class IsolatedComposeProject:
 
     def compose_files(self) -> tuple[str, ...]:
         files = tuple(COMPOSE_FILES)
-        if self._candidate_overlay is not None:
-            files += (str(self._candidate_overlay),)
+        if self._runtime_overlay is not None:
+            files += (str(self._runtime_overlay),)
         return files
 
     def compose_command(self, *arguments: str) -> list[str]:
