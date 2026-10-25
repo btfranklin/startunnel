@@ -96,6 +96,12 @@ GATES = [
         "Apply the recovery action printed by the documentation check.",
     ),
     Gate(
+        "Current release references",
+        (sys.executable, "scripts/check_release_references.py"),
+        ".agents/skills/release-startunnel/SKILL.md",
+        "Update current-version text and links, then run `pdm run release-references`.",
+    ),
+    Gate(
         "Perfect Doc structure",
         ("perfect-doc", "check", ".", "--offline", "--no-banner"),
         "docs/testing.md",
