@@ -227,13 +227,16 @@ class LifespanMiddleware:
             await self.application(scope, receive, send)
             return
         from .activity_listener import activity_listener
+        from .pool_metrics import pool_metrics_sampler
 
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
                 activity_listener.start()
+                await pool_metrics_sampler.start()
                 await send({"type": "lifespan.startup.complete"})
             elif message["type"] == "lifespan.shutdown":
+                await pool_metrics_sampler.stop()
                 await activity_listener.stop()
                 await send({"type": "lifespan.shutdown.complete"})
                 return

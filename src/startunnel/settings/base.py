@@ -106,6 +106,10 @@ TEMPLATES = [
 DATABASE_POOL_MAX_SIZE = int(env("STARTUNNEL_DATABASE_POOL_MAX_SIZE", "0"))
 if not 0 <= DATABASE_POOL_MAX_SIZE <= 40:
     raise RuntimeError("STARTUNNEL_DATABASE_POOL_MAX_SIZE must be from 0 through 40.")
+_proof_metrics = env("STARTUNNEL_PROOF_METRICS", "0")
+if _proof_metrics not in {"0", "1"}:
+    raise RuntimeError("STARTUNNEL_PROOF_METRICS must be 0 or 1.")
+STARTUNNEL_PROOF_METRICS = _proof_metrics == "1"
 
 
 def database_configuration(url: str) -> dict[str, Any]:

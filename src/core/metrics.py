@@ -49,6 +49,42 @@ MAINTENANCE_NOTIFICATION_WAKES = Gauge(
     "Maintenance wakes caused by PostgreSQL notifications",
     multiprocess_mode="mostrecent",
 )
+DATABASE_POOL_SIZE = Gauge(
+    "startunnel_database_pool_size",
+    "Connections in the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_AVAILABLE = Gauge(
+    "startunnel_database_pool_available",
+    "Available connections in the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_WAITING = Gauge(
+    "startunnel_database_pool_waiting",
+    "Requests waiting for a connection in the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_QUEUED = Gauge(
+    "startunnel_database_pool_queued",
+    "Requests queued for a connection in the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_REQUESTS_WAIT_MS = Gauge(
+    "startunnel_database_pool_requests_wait_ms",
+    "Cumulative milliseconds that requests waited for a default PostgreSQL pool connection",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_ERRORS = Gauge(
+    "startunnel_database_pool_errors",
+    "Cumulative connection and request errors reported by the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_SAMPLER_STATUS = Gauge(
+    "startunnel_database_pool_sampler_status",
+    "Workers in each pool stats sampler status category",
+    ["status"],
+    multiprocess_mode="livesum",
+)
 
 
 def render_metrics() -> bytes:
