@@ -36,6 +36,8 @@ or the npm vulnerability audit.
 | `scripts/release_workflow.py` | Promotion workflow; typed record and release-note steps | `tests/structure/test_versioned_releases.py` |
 | `scripts/release_draft.py` | Promotion workflow; create or recover only a matching draft | `tests/structure/test_candidate_promotion.py` |
 | `scripts/release_status.py` | Read-only CLI and workflow summaries; readiness, blockers, attempts, artifact IDs, and dependency timing | `tests/tools/test_release_status.py` |
+| `scripts/check_release_references.py` | Aggregate gate; current-version statements, links, and supported predecessors | `tests/tools/test_release_references.py` |
+| `scripts/verify_public_release.py` | Public release, anonymous image identity, deployment record, and guide verification | `tests/tools/test_public_release.py` |
 | `scripts/release_cleanup.py` | Local cache preview and removal; protect retained proofs and unknown directories | `tests/tools/test_release_cleanup.py` |
 | `scripts/stamp_client.py` | Docker build; stamp server and downloadable CLI identity | `tests/tools/test_client_build.py`, `tests/docs/test_agent_cli.py` |
 | `scripts/run_security_release.py` | Source CI and candidate image scan | `tests/structure/test_secret_scan_scope.py`; hosted source and image scanner runs |

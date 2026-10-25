@@ -55,6 +55,10 @@ proof runner owns disposable containers and volumes.
 7. Report the version, release URL, source, digest, evidence, limits, and cleanup.
    A tag, draft, or green CI run alone is not a published release.
 
+Before long image proofs, the candidate workflow runs the maintained production
+helper's `--preflight` mode. It checks exact image identity, Compose inputs, and
+native Linux secret readability. A preflight report cannot replace a full proof.
+
 ## Check manual version references
 
 Before source CI and candidate validation, read `VERSION` and the target release
@@ -66,6 +70,10 @@ specification. Update these maintained spots for that target:
 - `docs/releases.md`: the current specification and supported upgrade route.
 - `releases/vMAJOR.MINOR.PATCH.json` and `releases/vMAJOR.MINOR.PATCH.md`: matching
   version, tested compatibility, operator instructions, and tagged setup links.
+
+Run `pdm run release-references`. The aggregate check includes this gate. It
+checks the designated current-version statements and links while preserving
+older compatibility references.
 
 Review version references in the homepage, copied prompts, and public agent
 guide. Keep installation entry points directed to published GitHub releases and
@@ -82,6 +90,11 @@ verify the live homepage and agent guide, GitHub's published release, tagged
 setup links, and attached record agree. Update the public website through its
 maintained build and workflow if its source changed. Report a mismatch before
 calling the release complete.
+Use `pdm run release-verify-public --tag vMAJOR.MINOR.PATCH --output REPORT.json`
+for public verification. It uses anonymous HTTPS requests and an empty temporary
+Docker configuration. It verifies the latest stable release, tagged guides,
+current agent guide, deployment record checksum, and immutable image identity.
+Run the maintained production proof separately after publication.
 
 ## Handle failures and improve the process
 

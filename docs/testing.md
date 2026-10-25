@@ -472,7 +472,10 @@ operators can use an image from their own registry pinned with `@sha256:`.
 Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
 proof helpers, and verify application service image IDs. Helper builds use BuildKit. Hosted proof builds import and export a separate
-cache for each service and platform. Local builds use the local layer cache.
+cache for each Docker target and platform. Equal build definitions share one
+Bake output with all service tags; each service retains its own image checks and
+provenance. Distinct build inputs stay separate, with one cache exporter per
+target/platform scope. Local builds use the local layer cache.
 A cache failure is recorded and can fall back once to a build without the remote
 cache. The build still checks source labels, platform, and image IDs. Cache
 credentials are given only to the host build process. Changed source files
@@ -481,13 +484,31 @@ Browser and example suites run once in source CI. The system proof checks
 health, runtime image contents, an active reader across a web restart, a
 post-restart agent exchange, database privileges, backup, restore, and database
 loss and recovery, plus the Caddy HTTPS and browser CSRF proof. It builds the
-client and browser helpers that it uses.
-Image scanning, system proof, and load testing run in parallel. All three must
+client and browser helpers that it uses. The proxy proof uses a Chromium-only
+helper with no Perfect Doc or Node tools. The full source browser lane keeps all
+three browser engines.
+Production input preflight checks exact image identity, Compose settings, and
+native Linux secret readability before system and load tests start. It starts
+no application services and cannot substitute for their full proof reports.
+Image scanning can run in parallel with preflight. All required checks must
 pass for promotion. The system proof tests the exact runtime image in an
 isolated development configuration and a separate production-settings proxy
 service; it does not prove a particular public
 server's TLS or secret-file configuration. Perform the external production
 checks before publishing the reviewed draft. See [release policy](releases.md).
+
+Release-tool changes also have focused checks:
+
+```shell
+pdm run release-references
+pdm run pytest tests/tools/test_public_release.py tests/tools/test_release_references.py tests/tools/test_production_release_proof.py tests/tools/test_proof_build.py --no-cov
+```
+
+Public verification uses mocked failures in unit tests. An optional read-only
+check of the current published release is `pdm run release-verify-public --json`.
+It does not start a release. Record helper build measurements with their source,
+platform, cache state, and input hashes. Local warm builds do not establish a
+hosted cold-build speed gain.
 
 The image check reads static sources and collected manifest assets, loads CA
 certificates, and checks that pip and documentation build tools are excluded.

@@ -71,6 +71,10 @@ commands do not check for updates. There is no package-manager release.
    structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
    Linux, macOS, and Windows with Python 3.10 and 3.15. Main CI checks restored
    databases from the synthetic baseline and the published v0.1.0, v0.2.0, v0.3.0, and v0.4.0 images.
+   The aggregate gate includes `pdm run release-references`. It checks the
+   designated current-version statements, tagged links, and supported
+   predecessors against `VERSION` and the release specification. Older upgrade
+   routes and minimum client versions remain valid references.
 3. Select **Run workflow** for `release-candidate.yml` on `main`, or run:
 
    ```sh
@@ -84,8 +88,11 @@ commands do not check for updates. There is no package-manager release.
 4. A new candidate builds one Linux amd64 `runtime` image under a unique GHCR
    candidate tag. The build reuses cached layers. Version and source labels are
    also embedded in the downloadable client for `startunnel version`.
-   Image scanning, the system proof, and fixed-load testing then run in parallel
-   against that digest. All must pass. Browser and example suites stay in source
+   Before long system and load tests, production preflight checks the Compose
+   inputs, exact source, version, platform, and secret readability. It starts no
+   application services. Its separate report cannot qualify as a full proof.
+   Image scanning can run in parallel with preflight. System and fixed-load tests
+   wait for preflight to pass. All must pass. Browser and example suites stay in source
    CI; the system proof checks runtime contents, restart behavior, and recovery.
    The same job then runs the production installation proof. It checks the
    production Compose model, mounted secrets, exact runtime images, downloaded
@@ -226,6 +233,21 @@ Review the draft notes, candidate evidence, image labels, and deployment record.
 Perform an installation/upgrade smoke check using the exact digest. Publish the
 draft after those checks pass, then verify pulling the public image and repeat
 external deployment verification. Record the version, source, digest, and results.
+
+Run the maintained public check after publication:
+
+```shell
+pdm run release-verify-public --tag vMAJOR.MINOR.PATCH --output REPORT.json
+```
+
+Use the actual published tag. The command checks the latest stable release,
+anonymous asset downloads and image pull, deployment-record checksum, immutable
+image source/version/platform, tagged guides, and the current live agent guide.
+It uses the current local Docker engine with a new empty Docker configuration
+and removes that configuration on success or failure. It changes no release,
+registry tag, source file, or installation. A failed check returns nonzero and
+retains a safe partial report. Existing report paths are never overwritten.
+The production installation proof remains a separate required check.
 
 Use the same maintained production proof command for a disposable installation:
 
