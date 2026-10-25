@@ -1816,6 +1816,32 @@ def test_manual_release_workflow_limits_provider_settings_to_live_proof_step() -
 
 
 @pytest.mark.parametrize(
+    ("run_id", "attempt"),
+    [("1", "1"), ("40228856354", "2"), ("99999999999999999999", "2")],
+)
+def test_hosted_release_proof_project_names_pass_the_isolation_contract(
+    run_id: str, attempt: str
+) -> None:
+    workflow = load_workflow("release-validation.yml")
+    names_by_job: dict[str, list[str]] = {}
+    for job_id, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            command = (
+                step.get("run", "")
+                .replace("${{ github.run_id }}", run_id)
+                .replace("${{ github.run_attempt }}", attempt)
+            )
+            for name in re.findall(r"--project-name\s+([^\s\\]+)", command):
+                names_by_job.setdefault(job_id, []).append(name)
+                assert isolation.validate_project_name(name) == name
+    assert {job_id: len(names) for job_id, names in names_by_job.items()} == {
+        "system": 2,
+        "full-load": 1,
+        "live-agents": 1,
+    }
+
+
+@pytest.mark.parametrize(
     ("baseline_ref", "candidate_cpu", "expected_status"),
     [(None, 0.1, 0), ("main", 0.1, 0), (None, 2.0, 1)],
 )

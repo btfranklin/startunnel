@@ -144,7 +144,7 @@ jobs:
         run: >-
           python3 scripts/prove_production_release.py
           --candidate-image "$CANDIDATE_IMAGE"
-          --project-name stproof-production-${{ github.run_id }}-${{ github.run_attempt }}
+          --project-name stproof-install-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Record the system proof attempt
         if: always()
         env:
