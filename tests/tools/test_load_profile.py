@@ -114,6 +114,14 @@ async def test_load_keeps_its_deadline_and_separates_long_polls(
     assert message_clients.isdisjoint(activity_clients)
     assert isinstance(clients[1].limits, httpx.Limits)
     assert clients[1].limits.max_connections == (2 if rotate_readers else 100)
+    from uvicorn import Config
+
+    server_idle_seconds = Config("startunnel.asgi:application").timeout_keep_alive
+    for connection_client in clients:
+        limits = connection_client.limits
+        assert isinstance(limits, httpx.Limits)
+        assert limits.keepalive_expiry is not None
+        assert 0 < limits.keepalive_expiry <= server_idle_seconds / 2
     if rotate_readers:
         assert activity_credentials == {f"Bearer test-key-{index}" for index in range(10)}
     assert report["passed"] is not stall_sends

@@ -21,6 +21,8 @@ from scripts.proof_timing import PhaseTimings
 from core.json_types import JsonValue, json_object, json_value
 
 MAX_IN_FLIGHT_SENDS = 256
+# Expire idle client connections before the server's five-second idle close.
+CLIENT_KEEPALIVE_SECONDS = 1.0
 
 
 class LoadProfileError(RuntimeError):
@@ -243,13 +245,17 @@ async def run_load_profile(
                 limits=httpx.Limits(
                     max_connections=MAX_IN_FLIGHT_SENDS,
                     max_keepalive_connections=MAX_IN_FLIGHT_SENDS,
+                    keepalive_expiry=CLIENT_KEEPALIVE_SECONDS,
                 ),
             ) as client,
             httpx.AsyncClient(
                 base_url=base_url,
                 timeout=30,
                 headers=common_headers,
-                limits=httpx.Limits(max_connections=max(1, config.concurrent_activity_readers)),
+                limits=httpx.Limits(
+                    max_connections=max(1, config.concurrent_activity_readers),
+                    keepalive_expiry=CLIENT_KEEPALIVE_SECONDS,
+                ),
             ) as activity_client,
         ):
             with phases.phase("tunnel_setup"):

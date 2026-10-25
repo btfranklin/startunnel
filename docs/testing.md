@@ -465,7 +465,11 @@ The load proof schedules 50 sends per second for five minutes with 100 activity
 readers and 500 disposable agent credentials held by one fixture admin. Only its
 isolated stack raises the active credential capacity to 500; per-credential rate
 limits remain unchanged. Readers rotate credentials to distribute their traffic.
-Long polls use a separate HTTP connection pool. The isolated web service uses
+Long polls use a separate HTTP connection pool. Both client pools expire idle
+connections after one second, before the server's five-second idle close. This
+margin reduces reuse near the server's close boundary. Transport errors still
+fail the proof; the driver does not retry or ignore them.
+The isolated web service uses
 four workers with 18 database connections per pool. Message submissions overlap,
 with at most 256 in flight, and have a bounded drain after the workload deadline.
 Missed submissions, capacity exhaustion, request errors, and unfinished sends
