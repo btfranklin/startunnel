@@ -58,10 +58,7 @@ def test_multiprocess_metrics_aggregate_two_worker_shards(tmp_path: Path) -> Non
     assert "startunnel_database_pool_waiting 3.0" in rendered.stdout
     assert "startunnel_database_pool_queued 10.0" in rendered.stdout
 
-    mark_dead = (
-        "from prometheus_client import multiprocess; "
-        "multiprocess.mark_process_dead({pid})"
-    )
+    mark_dead = "from prometheus_client import multiprocess; multiprocess.mark_process_dead({pid})"
     first_dead = _run(mark_dead.format(pid=first_pool.stdout.strip()), environment)
     after_one_worker = _run(
         "from core.metrics import render_metrics; print(render_metrics().decode(), end='')",

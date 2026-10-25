@@ -106,6 +106,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/proof-build
       - name: Run the isolated service lane
         run: >-
           python3 scripts/run_isolated_test_lane.py postgres
@@ -144,6 +145,16 @@ jobs:
           git fetch --depth=1 origin refs/tags/v0.3.0:refs/tags/v0.3.0
           gh release download v0.3.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.3.0"
           pdm run python scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.3.0/release.json"
+      - name: Retain safe helper build records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: source-build-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/proof-build-*.json
+            artifacts/proof-build-failure-*.log
+          if-no-files-found: warn
+          retention-days: 90
 
   external-proofs:
     name: ${{ matrix.lane }} proof
@@ -161,10 +172,21 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/proof-build
       - name: Run the isolated proof
         run: >-
           python3 scripts/run_isolated_test_lane.py ${{ matrix.lane }}
           --project-name stci-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Retain safe helper build records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: source-build-${{ matrix.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/proof-build-*.json
+            artifacts/proof-build-failure-*.log
+          if-no-files-found: warn
+          retention-days: 90
 
   browser:
     name: Chromium, Firefox, and WebKit
@@ -176,7 +198,43 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: ./.github/actions/proof-build
       - name: Run the isolated browser lane
         run: >-
           python3 scripts/run_isolated_test_lane.py browser
           --project-name stci-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Retain safe helper build records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: source-build-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/proof-build-*.json
+            artifacts/proof-build-failure-*.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  timing:
+    name: Workflow timing
+    if: always()
+    needs: [standalone-cli, canonical, postgres, external-proofs, browser]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Report observed source CI time
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/release_status.py --run-id ${{ github.run_id }}
+          --output artifacts/source-ci-timing.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: source-ci-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/source-ci-timing.json
+          if-no-files-found: error
+          retention-days: 90

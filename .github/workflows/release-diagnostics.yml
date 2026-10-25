@@ -1,0 +1,85 @@
+name: Release process diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      diagnostic:
+        description: Select a measured diagnostic. These results cannot promote a release.
+        required: true
+        type: choice
+        options: [helpers, lock, both]
+        default: helpers
+      candidate_image:
+        description: Exact immutable candidate digest. Required for the lock diagnostic.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  helpers:
+    if: inputs.diagnostic == 'helpers' || inputs.diagnostic == 'both'
+    name: Cold and warm helper comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/proof-build
+      - name: Measure helper build cost
+        run: >-
+          python3 scripts/benchmark_proof_helpers.py
+          --project-name stproof-helpers-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: helper-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/proof-helper-benchmark-*/
+          if-no-files-found: error
+          retention-days: 90
+
+  lock:
+    if: inputs.diagnostic == 'lock' || inputs.diagnostic == 'both'
+    name: Controlled load lock failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/proof-build
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run and verify the expected diagnostic failure
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+          PROOF_PROJECT: stload-lock-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          test -n "$CANDIDATE_IMAGE"
+          set +e
+          python3 scripts/run_full_load_profile.py --candidate-image "$CANDIDATE_IMAGE" \
+            --project-name "$PROOF_PROJECT" --diagnostic-lock-seconds 10
+          result=$?
+          set -e
+          test "$result" -eq 1
+          python3 scripts/validate_load_diagnostic.py --project-name "$PROOF_PROJECT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: load-lock-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/load-profile-*.json
+            artifacts/load-profile-*.driver.jsonl
+            artifacts/load-run-*.json
+            artifacts/load-observations-*.jsonl
+            artifacts/proof-build-*.json
+            artifacts/proof-build-failure-*.log
+          if-no-files-found: error
+          retention-days: 90

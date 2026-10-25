@@ -55,9 +55,7 @@ def sample_pool_stats(stats: Mapping[str, int] | None) -> str:
     else:
         for key, gauge in _POOL_STAT_KEYS.items():
             gauge.set(max(0, int(stats.get(key, 0))))
-        DATABASE_POOL_ERRORS.set(
-            sum(max(0, int(stats.get(key, 0))) for key in _POOL_ERROR_KEYS)
-        )
+        DATABASE_POOL_ERRORS.set(sum(max(0, int(stats.get(key, 0))) for key in _POOL_ERROR_KEYS))
         status = "ok"
     DATABASE_POOL_SAMPLER_STATUS.labels(status="ok").set(int(status == "ok"))
     DATABASE_POOL_SAMPLER_STATUS.labels(status="missing").set(int(status == "missing"))

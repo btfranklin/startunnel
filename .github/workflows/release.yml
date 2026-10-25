@@ -48,7 +48,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.ci.outputs.run_id }}
-          name: release-candidate
+          name: ${{ steps.ci.outputs.artifact_name }}
           path: artifacts/promotion
       - name: Verify retained evidence and write deployment record
         id: candidate
@@ -108,3 +108,15 @@ jobs:
           PY
       - name: Create or recover the draft release
         run: python3 scripts/release_draft.py "$RELEASE_TAG"
+      - name: Report promotion time
+        if: always()
+        run: >-
+          python3 scripts/release_status.py --run-id ${{ github.run_id }}
+          --output artifacts/promotion-timing.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: promotion-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/promotion-timing.json
+          if-no-files-found: error
+          retention-days: 90

@@ -81,9 +81,9 @@ commands do not check for updates. There is no package-manager release.
    Image scanning, the system proof, and fixed-load testing then run in parallel
    against that digest. All must pass. Browser and example suites stay in source
    CI; the system proof checks runtime contents, restart behavior, and recovery.
-5. The candidate workflow retains `release-candidate` for 90 days. It records
-   the digest, exact commit, version, source CI run, reports, and evidence
-   checksums. Only a successful manual candidate run on `main` with retained
+5. The candidate workflow retains `release-candidate-RUN-ATTEMPT` for 90 days.
+   It records the digest, exact commit, version, source CI run, selected proof
+   artifacts, earlier attempts, helper inputs, cleanup, and evidence checksums. Only a successful manual candidate run on `main` with retained
    evidence can be promoted. Expired evidence requires a new candidate run.
 
 A fresh candidate includes a fixed five-minute load test plus setup. Prepare it
@@ -93,6 +93,43 @@ Candidate validation also runs through the manual release-validation workflow.
 Without a candidate argument, that manual workflow builds its own diagnostic
 images; those results do not produce a promotable CI artifact. Live-agent checks
 remain opt-in and do not receive provider credentials during candidate validation.
+
+## Inspect time and retry a failed proof
+
+Use the read-only status command for the current source:
+
+```sh
+pdm run release-status --run-id RUN_ID
+pdm run release-status --run-id RUN_ID --json
+```
+
+The report shows job results, run attempts, artifact IDs, elapsed time, and the
+longest observed dependency path. Queue time is shown only when Actions supplies
+its boundary. The candidate summary also includes source CI, the immutable
+image, helper cache results, and proof phase times. Parallel jobs are not added
+as serial work. Missing counters and timestamps remain unavailable.
+
+Proof artifacts include their run and attempt. A failed report is retained when
+a later attempt passes. Selection uses explicit manifests and file checksums.
+Source, image digest, platform, proof inputs, profiles, load settings, helper
+inputs, and cleanup must agree before reuse. Artifact lookup errors stop the
+operation. Expired or incomplete evidence cannot pass promotion.
+
+One reviewed diagnostic retry is permitted for unchanged inputs. Check the
+status and preserve the failed report, then rerun only failed jobs:
+
+```sh
+gh run rerun RUN_ID --failed
+```
+
+The workflow permits two attempts. It does not retry a proof automatically.
+A source change requires source CI and a new candidate for that commit. A
+passing retry does not identify the cause of the earlier failure.
+
+The manual `release-diagnostics.yml` workflow can compare cold and warm helper
+builds or run a controlled database-lock failure. Select the exact candidate
+digest for the lock test. These reports cannot promote a release. The tests use
+disposable resources and keep the standard load and worker budgets.
 
 ## Tag and promote
 
@@ -107,7 +144,7 @@ git push origin v0.2.1
 Use the prepared version and replace `TESTED_COMMIT` with its full SHA. The
 release workflow checks the tag against `VERSION`, finds retained evidence from
 a successful `release-candidate.yml` run on `main` for that exact commit, and
-downloads its `release-candidate` artifact.
+downloads its selected `release-candidate-RUN-ATTEMPT` artifact.
 It checks report status, candidate identity, runtime image IDs, cleanup, and
 retained evidence checksums before promotion.
 

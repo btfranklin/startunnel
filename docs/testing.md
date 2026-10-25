@@ -348,8 +348,12 @@ For official release promotion, use the official digest reference. Self-hosted
 operators can use an image from their own registry pinned with `@sha256:`.
 Its revision and version labels must match the source checkout. The isolated
 runners pull and inspect the image revision and version before use, build only
-proof helpers, and verify application service image IDs. Helper builds use the
-Docker cache; changed source files still cause their copy layers to rebuild.
+proof helpers, and verify application service image IDs. Helper builds use BuildKit. Hosted proof builds import and export a separate
+cache for each service and platform. Local builds use the local layer cache.
+A cache failure is recorded and can fall back once to a build without the remote
+cache. The build still checks source labels, platform, and image IDs. Cache
+credentials are given only to the host build process. Changed source files
+cause their copy layers to rebuild.
 Browser and example suites run once in source CI. The system proof checks
 health, runtime image contents, an active reader across a web restart, a
 post-restart agent exchange, database privileges, backup, restore, and database
@@ -378,4 +382,46 @@ with at most 256 in flight, and have a bounded drain after the workload deadline
 Missed submissions, capacity exhaustion, request errors, and unfinished sends
 fail the proof rather than extending its duration. Its report still requires
 at least 95% of the expected sends and successful fixture cleanup.
-CI retains failed load reports, including safe status counts and send latencies.
+CI retains each load attempt, including failed reports, safe status counts,
+send latencies, and cleanup results. Candidate identity is checked before fixture
+creation and again after the workload. The helper uses locked production Python
+dependencies and current proof source. It contains no documentation, browser,
+Node.js, or development test tools.
+
+The load lane enables one-second pool sampling in each web worker through
+`STARTUNNEL_PROOF_METRICS=1`. Normal application runs do not start this sampler.
+Worker gauges use the existing multiprocess metrics directory and remove dead
+worker values on shutdown. Host observations record per-service CPU, throttling,
+memory, available pressure counters, database connection and lock counters,
+pool waits, and collector cost. Driver observations record scheduling lag and
+in-flight sends. Unavailable values are null. No report includes SQL text,
+credentials, addresses, connection strings, or message content.
+
+Safe reports also record build, startup, fixture, traffic, drain, verification,
+and cleanup time. Collection is bounded and does not queue catch-up samples.
+A failed or interrupted run keeps its partial reports. A successful release
+proof requires complete observations and both fixture and stack cleanup.
+
+Use the isolated helper benchmark to measure build cost without traffic:
+
+```shell
+pdm run python scripts/benchmark_proof_helpers.py
+```
+
+It compares the full development helper with cold and warm focused helpers on
+one host. It checks the same source, platform, and locked inputs, tool imports,
+image size, warm cache use, and cleanup. Its results are diagnostic evidence.
+
+To test observations during a known failure, use a separate disposable stack:
+
+```shell
+pdm run python scripts/run_full_load_profile.py --candidate-image IMAGE_DIGEST --diagnostic-lock-seconds 10 --project-name stload-lock-diagnostic
+pdm run python scripts/validate_load_diagnostic.py --project-name stload-lock-diagnostic
+```
+
+The first command must fail with a retained load report. The second command
+checks for the expected failure, observed lock waits, and successful cleanup.
+The lock lasts at most the selected interval and is removed if the child exits.
+The workload still schedules 15,000 sends over five minutes with the standard
+reader, credential, worker, and pool budgets. This run cannot certify a release.
+It does not explain the cause of an earlier, uncontrolled failure.

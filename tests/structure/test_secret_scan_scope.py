@@ -91,7 +91,10 @@ def test_security_artifact_upload_runs_after_gate_failure() -> None:
         if step.get("uses", "").split("@")[0] == "actions/upload-artifact"
     )
     assert upload["if"] == "always()"
-    assert upload["with"]["path"] == "artifacts/security/"
+    assert upload["with"]["path"].splitlines() == [
+        "artifacts/security/",
+        "artifacts/proof-security.json",
+    ]
     assert upload["with"]["if-no-files-found"] == "warn"
 
 

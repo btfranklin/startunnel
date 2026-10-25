@@ -50,6 +50,12 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 |---|---|
 | [run_isolated_test_lane.py](run_isolated_test_lane.py) | Run canonical, PostgreSQL, example, agent, browser, proxy, system, or resource lanes |
 | [compose_isolation.py](compose_isolation.py) | Own disposable Compose resources and cleanup |
+| [proof_build.py](proof_build.py) | Build current proof helpers with scoped caches and safe provenance |
+| [proof_timing.py](proof_timing.py) | Record wall and monotonic phase times |
+| [load_observations.py](load_observations.py) | Collect safe service, database, pool, and collector counters |
+| [load_diagnostic.py](load_diagnostic.py) | Own a bounded database lock in a disposable diagnostic |
+| [validate_load_diagnostic.py](validate_load_diagnostic.py) | Verify the expected lock failure and cleanup |
+| [benchmark_proof_helpers.py](benchmark_proof_helpers.py) | Compare cold and warm helper cost on one host |
 | [system_proof.py](system_proof.py) | Coordinate clean-stack exchange, restart, backup, and restore checks |
 | [prove_admin_upgrade.py](prove_admin_upgrade.py) | Verify forward migrations and published-image backup recovery |
 | [prove_published_upgrade.py](prove_published_upgrade.py) | Verify restored published data, forward upgrade, and admin recovery |
@@ -63,6 +69,8 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | Tool | Purpose |
 |---|---|
 | [release_candidate.py](release_candidate.py) | Reuse exact-commit CI and verify candidate evidence |
+| [proof_evidence.py](proof_evidence.py) | Bind proof attempts to current inputs and file checksums |
+| [release_status.py](release_status.py) | Show measured workflow time and retained attempts |
 | [release_record.py](release_record.py) | Validate specifications and write deployment records |
 | [release_draft.py](release_draft.py) | Verify draft-release identity and recovery |
 | [run_security_release.py](run_security_release.py) | Run separate source and image security checks |
