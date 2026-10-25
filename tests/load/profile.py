@@ -227,9 +227,10 @@ async def run_load_profile(
     sent = 0
     reads = 0
     stopped = asyncio.Event()
+    reader_group_started = asyncio.Event()
     tunnel_count = min(10, max(1, len(manifest.credentials) // 3))
     tunnels: list[_LoadTunnel] = []
-    readers: list[asyncio.Task[None]] = []
+    reader_supervisor: asyncio.Task[None] | None = None
     send_tasks: set[asyncio.Task[None]] = set()
 
     try:
@@ -317,10 +318,19 @@ async def run_load_profile(
                         except httpx.HTTPError as error:
                             record_transport_error("activity_poll", error)
 
-                readers = [
-                    asyncio.create_task(reader(index))
-                    for index in range(config.concurrent_activity_readers)
-                ]
+                async def supervise_readers() -> None:
+                    try:
+                        async with asyncio.TaskGroup() as group:
+                            for index in range(config.concurrent_activity_readers):
+                                group.create_task(reader(index))
+                            reader_group_started.set()
+                            await stopped.wait()
+                            group.cancel()
+                    except ExceptionGroup:
+                        raise LoadProfileError("The activity readers failed.") from None
+
+                reader_supervisor = asyncio.create_task(supervise_readers())
+                await reader_group_started.wait()
                 started = time.monotonic()
                 target_sends = int(config.duration_seconds * config.sends_per_second)
                 deadline = started + config.duration_seconds
@@ -408,7 +418,9 @@ async def run_load_profile(
                         await asyncio.sleep(remaining)
                 with phases.phase("drain"):
                     stopped.set()
-                    outstanding = [*readers, *send_tasks]
+                    if reader_supervisor is not None:
+                        await reader_supervisor
+                    outstanding = list(send_tasks)
                     if outstanding:
                         done, pending = await asyncio.wait(
                             outstanding, timeout=config.drain_seconds
@@ -441,12 +453,13 @@ async def run_load_profile(
 
     finally:
         stopped.set()
-        outstanding = [*readers, *send_tasks]
-        for task in outstanding:
+        if reader_supervisor is not None:
+            await asyncio.gather(reader_supervisor, return_exceptions=True)
+        for task in send_tasks:
             if not task.done():
                 task.cancel()
-        if outstanding:
-            await asyncio.gather(*outstanding, return_exceptions=True)
+        if send_tasks:
+            await asyncio.gather(*send_tasks, return_exceptions=True)
         expected = int(config.duration_seconds * config.sends_per_second)
         passed = workload_completed and not failures and sent >= max(1, int(expected * 0.95))
         report.update(

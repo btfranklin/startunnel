@@ -14,12 +14,12 @@ from core.json_types import JsonValue, load_json
 from .models import Cycle, Message
 
 
-class TextContentData(TypedDict):
+class TextContentData(TypedDict, closed=True):
     type: Literal["text"]
     text: str
 
 
-class JsonContentData(TypedDict):
+class JsonContentData(TypedDict, closed=True):
     type: Literal["json"]
     value: JsonValue
 
@@ -27,18 +27,18 @@ class JsonContentData(TypedDict):
 type MessageContentData = TextContentData | JsonContentData
 
 
-class SenderData(TypedDict):
+class SenderData(TypedDict, closed=True):
     id: str
     name: str
     session: str | None
 
 
-class MentionData(TypedDict):
+class MentionData(TypedDict, closed=True):
     id: str
     name: str
 
 
-class MessageData(TypedDict):
+class MessageData(TypedDict, closed=True):
     id: str
     cycle_id: str
     cycle_number: int
@@ -52,7 +52,7 @@ class MessageData(TypedDict):
     created_at: str | datetime
 
 
-class CycleData(TypedDict):
+class CycleData(TypedDict, closed=True):
     id: UUID
     number: int
     label: str

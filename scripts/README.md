@@ -11,6 +11,7 @@ Compose proofs must use disposable projects through the isolated runner.
 | [check.py](check.py) | Run the aggregate fast gates: `pdm run check` |
 | [check_critical_coverage.py](check_critical_coverage.py) | Check critical line and branch coverage |
 | [check_docs.py](check_docs.py) | Check documentation routes, links, and example includes |
+| [check_markdown_links.py](check_markdown_links.py) | Check local Markdown links in repository source: `pdm run docs-links` |
 | [check_examples.py](check_examples.py) | Check example syntax and credential handling |
 | [check_openapi.py](check_openapi.py) | Generate or check the public wire schema |
 | [generate_client_contract.py](generate_client_contract.py) | Generate or check the bundled CLI response definitions |
@@ -49,7 +50,8 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 
 | Tool | Purpose |
 |---|---|
-| [run_isolated_test_lane.py](run_isolated_test_lane.py) | Run canonical, PostgreSQL, example, agent, browser, proxy, system, or resource lanes |
+| [run_isolated_test_lane.py](run_isolated_test_lane.py) | Run canonical, PostgreSQL, UUID benchmark, example, agent, browser, proxy, system, or resource lanes |
+| [benchmark_uuid.py](benchmark_uuid.py) | Compare UUID generation and indexed inserts with synthetic PostgreSQL rows |
 | [compose_isolation.py](compose_isolation.py) | Own disposable Compose resources and cleanup |
 | [proof_build.py](proof_build.py) | Build current proof helpers with scoped caches and safe provenance |
 | [proof_timing.py](proof_timing.py) | Record wall and monotonic phase times |

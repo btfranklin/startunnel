@@ -249,6 +249,48 @@ def _minimal_created_tunnel() -> JsonObject:
 
 
 @pytest.mark.asyncio
+async def test_reader_task_failure_stops_the_proof_without_private_error_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, path: str, **kwargs: object) -> httpx.Response:
+            if path == "/api/v1/tunnels":
+                return httpx.Response(201, json=_minimal_created_tunnel())
+            if path == "/api/v1/activity":
+                raise RuntimeError("private-transport-details")
+            return httpx.Response(201)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    initial = set(asyncio.all_tasks())
+    report: dict[str, object] = {}
+
+    with pytest.raises(LoadProfileError, match="The activity readers failed") as caught:
+        await run_load_profile(
+            base_url="http://fixture",
+            host_header=None,
+            manifest=CredentialManifest("run", (Credential("id", "private-key"),)),
+            config=LoadConfig(
+                duration_seconds=1, sends_per_second=1, concurrent_activity_readers=1
+            ),
+            partial_report=report,
+        )
+
+    assert report["passed"] is False
+    assert "private" not in str(caught.value)
+    assert "private" not in json.dumps(report)
+    assert set(asyncio.all_tasks()) == initial
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("field", "value"),
     [

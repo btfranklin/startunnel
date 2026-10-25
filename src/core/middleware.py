@@ -139,17 +139,13 @@ class RequestIdMiddleware(_DualModeMiddleware):
         if self.async_mode:
             return self.__acall__(request)
         token, started_at = self._begin(request)
-        try:
+        with token:
             return self._complete(request, self._sync_response(request), started_at)
-        finally:
-            request_id_var.reset(token)
 
     async def __acall__(self, request: HttpRequest) -> HttpResponse:
         token, started_at = self._begin(request)
-        try:
+        with token:
             return self._complete(request, await self._async_response(request), started_at)
-        finally:
-            request_id_var.reset(token)
 
 
 class SecurityHeadersMiddleware(_DualModeMiddleware):

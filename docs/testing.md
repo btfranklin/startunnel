@@ -38,8 +38,9 @@ their fixture data with `transaction=True`.
 
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
 It runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
-External web links are not fetched. Run `pdm run linkbust --no-color` for a
-focused link check. Documentation tests parse CLI examples with the actual
+External web links are not fetched. Run `pdm run docs-links` for a
+focused link check. Both source scans omit ignored reports and build output.
+Documentation tests parse CLI examples with the actual
 command-line parser and compare documented CLI environment names with the
 client source.
 CLI contract tests compare agent and admin operations with OpenAPI, including
@@ -88,6 +89,71 @@ server. CI runs it without project packages on Linux, Windows, and macOS with Py
 3.10 and 3.15. These jobs check real runtimes; the existing AST check separately
 checks Python 3.10 syntax. The isolated examples lane proves the installed
 client against the application and PostgreSQL.
+
+## Async diagnostics
+
+The application requires Python 3.15. The locked Django release is 6.1.2.
+This combination passes through the same local and isolated checks as other
+runtime changes. Official Django support for Python 3.15 is planned for
+[Django 6.1.3](https://docs.djangoproject.com/en/dev/releases/6.1.3/).
+
+Use these tools with a local diagnostic process that runs the same Python
+minor version. Replace `PID` with that process ID:
+
+```shell
+pdm run async-tasks PID
+pdm run async-tree PID
+pdm run profile attach --mode cpu --all-threads -d 30 --flamegraph -o artifacts/cpu-profile.html PID
+pdm run profile attach --async-aware --async-mode all -d 30 --flamegraph -o artifacts/async-profile.html PID
+```
+
+The task table and tree show pending coroutines and their wait relationships.
+The CPU profile samples all threads. The async profile also includes tasks
+that wait for I/O. Read both profiles with the database pool and lock counters.
+A normal long poll spends most of its time waiting for an activity notice.
+
+Process inspection requires permission to read the target process. Use a
+disposable diagnostic process when the normal container restrictions prevent
+inspection. Keep those restrictions on normal application containers. Capture
+profiles with synthetic traffic and keep the output in the ignored `artifacts`
+directory. These tools are opt-in; normal request handling does not start a
+profiler. JIT and free threading are not enabled by this change.
+
+See the Python [task inspection](https://docs.python.org/3.15/library/asyncio-tools.html)
+and [sampling profiler](https://docs.python.org/3.15/library/profiling.sampling.html)
+references for platform requirements.
+
+## UUID benchmark
+
+Run the UUID comparison through the isolated runner:
+
+```shell
+pdm run python scripts/run_isolated_test_lane.py uuid-benchmark
+```
+
+The benchmark uses synthetic rows in PostgreSQL temporary tables. It compares
+Python UUID generation, indexed insertion time, and primary-key index size.
+It repeats both variants in alternating order. Each variant has the same
+columns, indexes, batch size, and payload size. The report contains numeric
+measurements and runtime versions, with no UUID values or application data.
+
+Temporary tables do not measure durable WAL writes, ORM work, or the complete
+message transaction. Use the results to select further tests. A faster result
+alone does not justify changing persisted IDs. Message sequence values and
+PostgreSQL locks continue to control message order.
+
+The 2026-10-25 diagnostic used Python 3.15.1 and PostgreSQL 18.4 in local
+Docker. It ran five trials of 100,000 rows per UUID type, with a 256-byte
+payload. Other validation work ran on the same host. The medians were:
+
+| UUID type | Generate 100,000 IDs | Insert 100,000 rows | Combined B-tree index size |
+|---|---:|---:|---:|
+| UUIDv4 | 63.197 ms | 210.687 ms | 8,478,720 bytes |
+| UUIDv7 | 78.565 ms | 173.351 ms | 7,258,112 bytes |
+
+UUIDv7 reduced bulk insert time by 17.7 percent and index size by 14.4 percent.
+Its generation time increased by 24.3 percent. Keep UUIDv4 for application IDs:
+this diagnostic does not establish a gain for the complete message transaction.
 
 ## Select a lane
 

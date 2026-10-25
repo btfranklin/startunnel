@@ -121,6 +121,7 @@ source = "scm"
 
 [tool.pdm.scripts]
 docs-structure = "perfect-doc check . --offline --no-banner"
+docs-links = "python -m scripts.check_markdown_links"
 manage = "python manage.py"
 dev = "python scripts/start_development.py"
 test = "pytest"
@@ -130,6 +131,9 @@ mypy = { cmd = "mypy", env = { PYTHONPATH = "src" } }
 types = "python -m scripts.check_types"
 openapi = { composite = ["python manage.py export_openapi --output generated/openapi.json", "python scripts/generate_client_contract.py"] }
 inspect = "python manage.py inspect_runtime"
+async-tasks = "python -m asyncio ps"
+async-tree = "python -m asyncio pstree"
+profile = "python -m profiling.sampling"
 load-profile = "python scripts/run_full_load_profile.py"
 production-up = "python scripts/start_production.py"
 postgres-credentials = "python scripts/rotate_postgres_passwords.py"

@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory
 from tests.factories import CredentialFactory, UserFactory
 
-from core.logging import SafeJsonFormatter
+from core.logging import SafeJsonFormatter, request_id_var
 from core.metrics import API_REQUEST_SECONDS
 from core.middleware import RequestIdMiddleware
 
@@ -181,6 +181,23 @@ def test_request_logger_normalizes_an_unknown_method(
     assert getattr(record, "method", None) == "OTHER"
     formatted = SafeJsonFormatter().format(record)
     assert marker not in formatted
+
+
+def test_request_id_context_restores_nested_requests_and_exceptions() -> None:
+    with request_id_var.set("outer-request"):
+        request = RequestFactory().get("/safe-path/")
+
+        def endpoint(value: HttpRequest) -> HttpResponse:
+            outer_request_id = request_id_var.get()
+            inner_request = RequestFactory().get("/nested/")
+            RequestIdMiddleware(lambda nested: HttpResponse())(inner_request)
+            assert request_id_var.get() == outer_request_id
+            raise RuntimeError("request failed")
+
+        with pytest.raises(RuntimeError, match="request failed"):
+            RequestIdMiddleware(endpoint)(request)
+
+        assert request_id_var.get() == "outer-request"
 
 
 @pytest.mark.django_db

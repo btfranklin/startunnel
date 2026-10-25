@@ -26,11 +26,11 @@ class AgentResourceData(TypedDict):
     available: bool
 
 
-class KeyResourceData(AgentResourceData):
+class KeyResourceData(AgentResourceData, closed=True):
     admin_id: str
 
 
-class AccountResourceData(TypedDict):
+class AccountResourceData(TypedDict, closed=True):
     id: str
     username: str
     active: bool
@@ -39,7 +39,7 @@ class AccountResourceData(TypedDict):
     initial_key: NotRequired[KeyResourceData]
 
 
-class TunnelResourceData(TypedDict):
+class TunnelResourceData(TypedDict, closed=True):
     id: str
     label: str
     state: str
@@ -51,7 +51,7 @@ class TunnelResourceData(TypedDict):
     retirement_confirmation: str
 
 
-class AuditResourceData(TypedDict):
+class AuditResourceData(TypedDict, closed=True):
     id: str
     actor_id: str | None
     credential_id: str | None
@@ -64,7 +64,7 @@ class AuditResourceData(TypedDict):
     metadata: JsonObject
 
 
-class CycleResourceData(TypedDict):
+class CycleResourceData(TypedDict, closed=True):
     id: str
     number: int
     state: str
@@ -72,7 +72,7 @@ class CycleResourceData(TypedDict):
     created_at: str
 
 
-class TunnelRetirementData(TypedDict):
+class TunnelRetirementData(TypedDict, closed=True):
     credential_id: str
     retired_tunnel_ids: list[str]
 
@@ -194,36 +194,36 @@ def audit_resource(event: AuditEvent) -> AuditResourceData:
     }
 
 
-class OperationReference(TypedDict):
+class OperationReference(TypedDict, closed=True):
     id: str
     audit_event_id: str
 
 
-class AdminOperationResult(TypedDict):
+class AdminOperationResult(TypedDict, closed=True):
     resource: AdminResourceData
     operation: OperationReference
     secret: NotRequired[str]
 
 
-class DatabaseStatusData(TypedDict):
+class DatabaseStatusData(TypedDict, closed=True):
     healthy: bool
     engine: NotRequired[str]
 
 
-class MaintenanceStatusData(TypedDict):
+class MaintenanceStatusData(TypedDict, closed=True):
     healthy: bool
     cleanup_lag_seconds: float | None
     due_work_count: int | None
 
 
-class CapacityStatusData(TypedDict):
+class CapacityStatusData(TypedDict, closed=True):
     active_agent_credentials: int
     non_retired_tunnels: int
     active_credential_limit: int
     tunnel_limit: int
 
 
-class AdminStatusData(TypedDict):
+class AdminStatusData(TypedDict, closed=True):
     healthy: bool
     database: DatabaseStatusData
     maintenance: NotRequired[MaintenanceStatusData]
@@ -232,7 +232,7 @@ class AdminStatusData(TypedDict):
     runtime: NotRequired[dict[str, bool]]
 
 
-class AdminPageData(TypedDict):
+class AdminPageData(TypedDict, closed=True):
     items: list[ListedResourceData]
     next_cursor: str | None
 

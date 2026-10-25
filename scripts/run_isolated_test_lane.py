@@ -53,6 +53,11 @@ LANES = {
         ),
         2_400,
     ),
+    "uuid-benchmark": LaneSpec(
+        (),
+        ("run", "--rm", "tests", "pdm", "run", "python", "scripts/benchmark_uuid.py"),
+        600,
+    ),
     "examples": LaneSpec(
         ("examples",),
         ("run", "--rm", "example-tests"),

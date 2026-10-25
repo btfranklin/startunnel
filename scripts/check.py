@@ -103,9 +103,9 @@ GATES = [
     ),
     Gate(
         "Markdown links and headings",
-        ("linkbust", "--no-color"),
+        (sys.executable, "-m", "scripts.check_markdown_links"),
         "docs/README.md",
-        "Correct the named local link or heading, then run `pdm run linkbust --no-color`.",
+        "Correct the named local link or heading, then run `pdm run docs-links`.",
     ),
     Gate(
         "OpenAPI drift",

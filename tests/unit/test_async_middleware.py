@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -12,6 +13,7 @@ from django.test import RequestFactory
 from django.utils.module_loading import import_string
 
 from api.middleware import ApiErrorEnvelopeMiddleware
+from core.logging import request_id_var
 from core.middleware import (
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
@@ -63,6 +65,26 @@ async def test_project_middleware_awaits_an_async_downstream(
     response = await pending
     assert response.status_code == 200
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_request_id_context_restores_after_async_cancellation() -> None:
+    with request_id_var.set("outer-request"):
+
+        async def endpoint(request: HttpRequest) -> HttpResponse:
+            del request
+            assert request_id_var.get() != "outer-request"
+            raise asyncio.CancelledError
+
+        request = RequestFactory().get("/cancelled/")
+        middleware = RequestIdMiddleware(endpoint)
+        pending = middleware(request)
+        assert not isinstance(pending, HttpResponse)
+
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+
+        assert request_id_var.get() == "outer-request"
 
 
 @pytest.mark.asyncio
