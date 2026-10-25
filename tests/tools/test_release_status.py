@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from scripts import release_status
 from scripts.release_status import job_timings, render_summary
 
 
@@ -108,3 +109,24 @@ def test_longest_path_can_finish_before_a_later_short_job() -> None:
     assert result["longest_observed_dependency_path"] == ["early"]
     assert result["longest_path_seconds"] == 90
     assert result["elapsed_seconds"] == 110
+
+
+def test_rerun_gap_is_not_reported_as_workflow_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    def api(repository: str, path: str, *, paginate: bool = False) -> Any:
+        if "/jobs?" in path:
+            return [{"jobs": []}]
+        if "/artifacts?" in path:
+            return [{"artifacts": []}]
+        return {
+            "head_sha": "a" * 40,
+            "html_url": "https://example.invalid/run",
+            "path": ".github/workflows/ci.yml",
+            "status": "completed",
+            "conclusion": "success",
+            "run_attempt": 2,
+            "created_at": "2026-10-24T00:00:00Z",
+            "run_started_at": "2026-10-24T01:00:00Z",
+        }
+
+    monkeypatch.setattr(release_status, "github_api", api)
+    assert release_status.workflow_status("owner/repo", 42)["queue_seconds"] is None

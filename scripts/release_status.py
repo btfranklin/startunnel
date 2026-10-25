@@ -164,7 +164,7 @@ def workflow_status(repository: str, run_id: int) -> dict[str, Any]:
         "queue_seconds": max(
             0, (_time(run.get("run_started_at")) or 0) - (_time(run.get("created_at")) or 0)
         )
-        if run.get("run_started_at") and run.get("created_at")
+        if run.get("run_attempt") == 1 and run.get("run_started_at") and run.get("created_at")
         else None,
         "timing": job_timings(jobs, _dependencies(jobs, run["path"].rsplit("/", 1)[-1])),
         "artifacts": [

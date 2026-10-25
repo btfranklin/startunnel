@@ -176,7 +176,7 @@ class LoadObservations:
         self._output = self.path.open("x", encoding="utf-8")
         try:
             self.capacity.update(numeric_fields(self.stats.get("/info"), ("NCPU", "MemTotal")))
-        except ValueError, OSError:
+        except (ValueError, OSError):
             self.capacity.update(NCPU=None, MemTotal=None)
         self.thread.start()
         return self
@@ -259,10 +259,10 @@ class LoadObservations:
                         )
                     )
                     self.services_seen.add(name)
-                except ValueError, OSError:
+                except (ValueError, OSError):
                     errors.append(f"{name}_counters_unavailable")
             sample["services"] = services
-        except ValueError, OSError, subprocess.SubprocessError, KeyError, TypeError:
+        except (ValueError, OSError, subprocess.SubprocessError, KeyError, TypeError):
             errors.append("container_inventory_unavailable")
         try:
             raw = _command(
@@ -289,7 +289,7 @@ class LoadObservations:
             sample["postgres"] = postgres
             if all(value is not None for value in postgres.values()):
                 self.postgres_samples += 1
-        except ValueError, OSError, subprocess.SubprocessError:
+        except (ValueError, OSError, subprocess.SubprocessError):
             errors.append("postgres_counters_unavailable")
         try:
             pool = pool_metrics(
@@ -305,7 +305,7 @@ class LoadObservations:
             if (numeric(pool.get("sampler_error")) or 0) > 0:
                 self.pool_error_samples += 1
                 errors.append("pool_sampler_error")
-        except ValueError, OSError, subprocess.SubprocessError:
+        except (ValueError, OSError, subprocess.SubprocessError):
             errors.append("pool_counters_unavailable")
         sample["errors"] = errors
         self.errors += len(errors)

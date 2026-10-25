@@ -46,6 +46,7 @@ line-length = 100
 src = ["src", "tests", "examples"]
 
 [tool.ruff.per-file-target-version]
+"scripts/*.py" = "py312"
 "cli/*.py" = "py310"
 "tests/cli_standalone.py" = "py310"
 

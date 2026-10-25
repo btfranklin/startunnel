@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
@@ -1671,3 +1672,8 @@ def test_resource_measurement_runs_only_requested_stacks(
     assert reports[0]["method"]["baseline_ref"] == baseline_ref
     assert (reports[0]["baseline"] is not None) == bool(baseline_ref)
     assert reports[0]["acceptance"]["candidate_idle_cpu_below_one_percent"] == (candidate_cpu < 1.0)
+
+
+def test_host_proof_scripts_parse_on_runner_python() -> None:
+    for path in (ROOT / "scripts").glob("*.py"):
+        ast.parse(path.read_text(), filename=str(path), feature_version=(3, 12))
