@@ -355,7 +355,11 @@ def main() -> int:
                 image=args.candidate_image,
                 status=args.proof_status,
             )
-            return 0 if record["status"] == "passed" or args.proof_status != "success" else 1
+            return (
+                0
+                if record["status"] in ("passed", "diagnostic") or args.proof_status != "success"
+                else 1
+            )
         if args.collect_run:
             collect_evidence(os.environ["GITHUB_REPOSITORY"], args.collect_run, args.directory)
             candidate = verify_evidence(args.directory, commit=commit, version=version)

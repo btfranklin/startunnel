@@ -1475,6 +1475,7 @@ def test_system_report_records_every_used_service_image(
 
     assert set(image_ids) == {
         "postgres",
+        "migrate",
         "web",
         "maintenance",
         "example-tests",

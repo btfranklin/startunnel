@@ -47,6 +47,7 @@ ACTIVITY_FAILURE_STAGE_PREFIX = "STARTUNNEL_ACTIVITY_FAILURE_STAGE_"
 ACTIVITY_FAILURE_STAGES = frozenset({"CONFIGURATION", "PROVISIONING", "EXCHANGE", "REVOCATION"})
 SYSTEM_SERVICES = (
     "postgres",
+    "migrate",
     "web",
     "maintenance",
     "example-tests",

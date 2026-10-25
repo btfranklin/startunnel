@@ -114,6 +114,7 @@ def record_proof(
     """Write one attempt manifest, including failed and incomplete attempts."""
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     inputs = proof_inputs(kind, commit)
+    diagnostic_success = status == "success" and not image
     record: dict[str, Any] = {
         "kind": kind,
         "source_commit": commit,
@@ -121,7 +122,11 @@ def record_proof(
         "platform": "linux/amd64",
         "run_id": int(os.environ["GITHUB_RUN_ID"]),
         "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-        "status": "passed" if status == "success" else "failed",
+        "status": "diagnostic"
+        if diagnostic_success
+        else "passed"
+        if status == "success"
+        else "failed",
         "inputs": inputs,
         "input_fingerprint": fingerprint(inputs),
         "recorded_at": datetime.now(UTC).isoformat(),
@@ -172,6 +177,7 @@ def record_proof(
             for path in directory.glob(pattern)
             if path.is_file() and not path.is_symlink()
         }
+    record["release_evidence_eligible"] = record["status"] == "passed"
     (directory / f"proof-{kind}.json").write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n"
     )

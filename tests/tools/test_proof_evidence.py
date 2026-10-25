@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +218,108 @@ def test_collection_rejects_expired_missing_duplicate_and_excess_attempt_artifac
     monkeypatch.setattr(candidate, "_download", download)
     with pytest.raises(ValueError):
         candidate.collect_evidence("owner/repository", 42, tmp_path / "retained")
+
+
+@pytest.mark.parametrize("kind", proof_evidence.KINDS)
+def test_success_without_candidate_image_is_checksum_protected_diagnostic(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    attempt_dir = tmp_path / "proofs" / kind / "1"
+    if kind == "security":
+        path = attempt_dir / "security/scan/validated-image.json"
+        path.write_text(json.dumps({"status": "passed", "image": ""}))
+    elif kind == "system":
+        path = attempt_dir / "system-proof-fixture.json"
+        report = json.loads(path.read_text())
+        report.update(
+            candidate_image="",
+            build_mode="reused-current-images",
+            release_evidence_eligible=False,
+        )
+        path.write_text(json.dumps(report))
+    else:
+        workload_path = attempt_dir / "load-workload.json"
+        workload = json.loads(workload_path.read_text())
+        workload["provenance"]["build_mode"] = "reused-current-images"
+        workload_path.write_text(json.dumps(workload))
+        execution_path = attempt_dir / "load-run-fixture.json"
+        execution = json.loads(execution_path.read_text())
+        execution.update(candidate_image="", release_evidence_eligible=False)
+        execution_path.write_text(json.dumps(execution))
+
+    monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
+    monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "release_candidate.py",
+            "--proof",
+            kind,
+            "--proof-status",
+            "success",
+            "--directory",
+            str(attempt_dir),
+        ],
+    )
+    assert candidate.main() == 0
+    record = proof_evidence.read_object(attempt_dir / f"proof-{kind}.json")
+
+    assert record["status"] == "diagnostic"
+    assert record["files"]
+    assert record["reports"]
+    for name, checksum in record["files"].items():
+        assert proof_evidence.checksum(attempt_dir / name) == checksum
+    with pytest.raises(ValueError, match="status"):
+        proof_evidence.validate_proof(record, attempt_dir, kind=kind, commit=COMMIT, image="")
+
+
+def test_candidate_promotion_rejects_a_diagnostic_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    attempt_dir = tmp_path / "proofs/security/1"
+    proof = proof_evidence.record_proof(
+        "security", attempt_dir, commit=COMMIT, image="", status="success"
+    )
+    selection_path = tmp_path / "proof-selection.json"
+    selection = json.loads(selection_path.read_text())
+    for reference in [selection["selected"]["security"], *selection["history"]]:
+        if reference["kind"] == "security":
+            reference["status"] = proof["status"]
+            reference["sha256"] = proof_evidence.checksum(attempt_dir / "proof-security.json")
+    selection_path.write_text(json.dumps(selection))
+
+    with pytest.raises(ValueError, match="another source or image"):
+        verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
+
+
+def test_success_with_missing_diagnostic_report_remains_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(candidate, "git_commit", lambda: COMMIT)
+    monkeypatch.setattr(candidate, "candidate_version", lambda: "v0.1.0")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "release_candidate.py",
+            "--proof",
+            "security",
+            "--proof-status",
+            "success",
+            "--directory",
+            str(tmp_path),
+        ],
+    )
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    assert candidate.main() == 1
+    manifest = proof_evidence.read_object(tmp_path / "proof-security.json")
+    assert manifest["status"] == "failed"
+    assert manifest["incomplete"] is True
 
 
 def test_input_hash_change_invalidates_recorded_proof(
