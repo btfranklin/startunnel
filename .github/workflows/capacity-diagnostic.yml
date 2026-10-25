@@ -1,0 +1,65 @@
+name: Short capacity diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  capacity:
+    if: github.ref == 'refs/heads/main'
+    name: Observe two minutes of unchanged load
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/proof-build
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Read the application version
+        id: version
+        run: echo "version=$(python3 scripts/release_candidate.py --version)" >> "$GITHUB_OUTPUT"
+      - name: Build the exact combined source for diagnosis
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: build
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+          tags: ghcr.io/btfranklin/startunnel:capacity-diagnostic-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          build-args: |
+            STARTUNNEL_CLIENT_VERSION=${{ steps.version.outputs.version }}
+            STARTUNNEL_SOURCE_REVISION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/btfranklin/startunnel
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            net.startunnel.capacity-diagnostic=true
+      - name: Collect diagnostic evidence without changing application behavior
+        env:
+          APPLICATION_SOURCE: ${{ github.sha }}
+          CANDIDATE_IMAGE: ghcr.io/btfranklin/startunnel@${{ steps.build.outputs.digest }}
+          PROOF_PROJECT: stload-capacity-${{ github.run_id }}-${{ github.run_attempt }}
+        run: >-
+          python3 -B scripts/run_capacity_diagnostic.py
+          --application-source "$APPLICATION_SOURCE"
+          --candidate-image "$CANDIDATE_IMAGE"
+          --project-name "$PROOF_PROJECT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: capacity-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/stload-capacity-*/
+          if-no-files-found: error
+          retention-days: 90

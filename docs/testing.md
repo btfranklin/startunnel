@@ -454,3 +454,20 @@ The lock lasts at most the selected interval and is removed if the child exits.
 The workload still schedules 15,000 sends over five minutes with the standard
 reader, credential, worker, and pool budgets. This run cannot certify a release.
 It does not explain the cause of an earlier, uncontrolled failure.
+
+For a short capacity investigation, run the manual diagnostic workflow:
+
+```shell
+gh workflow run capacity-diagnostic.yml --ref main
+```
+
+It builds a diagnostic application image from the exact `main` commit and runs
+120 seconds of traffic on a four-CPU, 16-GiB runner. The send rate, readers,
+fixtures, web workers, database pools, sender limit, and drain match the full
+load proof. A temporary source overlay adds numeric task-completion counts,
+catch-up burst size, per-worker pool and CPU values, database wait classes,
+and host scheduling counters. It does not change workload scheduling.
+
+The reports record the application digest, source commits, overlay file hashes,
+measurement cost, workload result, and cleanup. A failed workload still retains
+its diagnostic evidence. These reports cannot be used for release promotion.
