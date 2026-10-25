@@ -10,8 +10,8 @@ from urllib.parse import urlsplit
 
 
 class UnixConnection(http.client.HTTPConnection):
-    def __init__(self, path: str) -> None:
-        super().__init__("localhost", timeout=30)
+    def __init__(self, path: str, timeout: float = 30) -> None:
+        super().__init__("localhost", timeout=timeout)
         self.socket_path = path
 
     def connect(self) -> None:
@@ -23,21 +23,26 @@ class UnixConnection(http.client.HTTPConnection):
 class DockerStats:
     """Use the already validated local Docker endpoint."""
 
-    def __init__(self, endpoint: str) -> None:
+    def __init__(self, endpoint: str, *, timeout: float = 30) -> None:
         self.endpoint = urlsplit(endpoint)
+        self.timeout = timeout
         if self.endpoint.scheme not in {"unix", "tcp"}:
             raise ValueError(
                 "Resource measurement requires a local Unix socket or TCP Docker endpoint."
             )
 
     def get(self, path: str) -> dict[str, Any]:
-        connection = (
-            UnixConnection(self.endpoint.path)
-            if self.endpoint.scheme == "unix"
-            else http.client.HTTPConnection(
-                self.endpoint.hostname or "localhost", self.endpoint.port, timeout=30
+        connection: http.client.HTTPConnection
+        if self.endpoint.scheme == "unix":
+            connection = (
+                UnixConnection(self.endpoint.path)
+                if self.timeout == 30
+                else UnixConnection(self.endpoint.path, self.timeout)
             )
-        )
+        else:
+            connection = http.client.HTTPConnection(
+                self.endpoint.hostname or "localhost", self.endpoint.port, timeout=self.timeout
+            )
         try:
             connection.request("GET", path)
             response = connection.getresponse()

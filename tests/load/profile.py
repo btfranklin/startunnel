@@ -6,12 +6,16 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
+from scripts.load_diagnostic import DiagnosticLock
+from scripts.proof_timing import PhaseTimings
 
 MAX_IN_FLIGHT_SENDS = 256
 
@@ -89,8 +93,20 @@ async def run_load_profile(
     host_header: str | None,
     manifest: CredentialManifest,
     config: LoadConfig,
+    diagnostic_lock_seconds: int = 0,
+    phases: PhaseTimings | None = None,
+    partial_report: dict[str, object] | None = None,
+    driver_observer: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
     config.validate()
+    phases = phases or PhaseTimings()
+    report = partial_report if partial_report is not None else {}
+    scheduled = 0
+    max_in_flight = 0
+    max_scheduling_lag = 0.0
+    total_scheduling_lag = 0.0
+    scheduling_observations = 0
+    workload_completed = False
     common_headers = {"Host": host_header} if host_header else {}
     timings: list[float] = []
     failures: dict[str, int] = {}
@@ -99,199 +115,262 @@ async def run_load_profile(
     stopped = asyncio.Event()
     tunnel_count = min(10, max(1, len(manifest.credentials) // 3))
     tunnels: list[dict[str, str]] = []
+    readers: list[asyncio.Task[None]] = []
+    send_tasks: set[asyncio.Task[None]] = set()
 
-    # Long polls must not occupy the connections used to submit messages.
-    async with (
-        httpx.AsyncClient(
-            base_url=base_url,
-            timeout=30,
-            headers=common_headers,
-            limits=httpx.Limits(
-                max_connections=MAX_IN_FLIGHT_SENDS,
-                max_keepalive_connections=MAX_IN_FLIGHT_SENDS,
-            ),
-        ) as client,
-        httpx.AsyncClient(
-            base_url=base_url,
-            timeout=30,
-            headers=common_headers,
-            limits=httpx.Limits(max_connections=max(1, config.concurrent_activity_readers)),
-        ) as activity_client,
-    ):
-        for index in range(tunnel_count):
-            credential = manifest.credentials[index]
-            response = await client.post(
-                "/api/v1/tunnels",
-                headers={
-                    "Authorization": f"Bearer {credential.key}",
-                    "Idempotency-Key": f"load-create-{uuid4().hex}",
-                },
-                json={
-                    "label": f"Load tunnel {index}",
-                    "cycle": {
-                        "label": "Load cycle",
-                        "expires_in_seconds": 3600,
-                        "root": {"content": {"type": "text", "text": "Load root."}},
-                    },
-                },
-            )
-            if response.status_code != 201:
-                raise LoadProfileError("The load proof could not create its tunnels.")
-            body = response.json()
-            tunnels.append(
-                {
-                    "address": str(body["tunnel"]["address"]),
-                    "cycle_id": str(body["cycle"]["id"]),
-                    "root_id": str(body["cycle"]["root"]["id"]),
-                    "cursor": str(body["activity_cursor"]),
-                    "creator_key": credential.key,
-                }
-            )
-
-        async def reader(reader_index: int) -> None:
-            nonlocal reads
-            tunnel = tunnels[reader_index % len(tunnels)]
-            cursor = tunnel["cursor"]
-            request_index = reader_index
-            while not stopped.is_set():
-                credential = manifest.credentials[request_index % len(manifest.credentials)]
-                request_index += config.concurrent_activity_readers
-                try:
-                    response = await activity_client.post(
-                        "/api/v1/activity",
-                        headers={"Authorization": f"Bearer {credential.key}"},
+    try:
+        # Long polls must not occupy the connections used to submit messages.
+        async with (
+            httpx.AsyncClient(
+                base_url=base_url,
+                timeout=30,
+                headers=common_headers,
+                limits=httpx.Limits(
+                    max_connections=MAX_IN_FLIGHT_SENDS,
+                    max_keepalive_connections=MAX_IN_FLIGHT_SENDS,
+                ),
+            ) as client,
+            httpx.AsyncClient(
+                base_url=base_url,
+                timeout=30,
+                headers=common_headers,
+                limits=httpx.Limits(max_connections=max(1, config.concurrent_activity_readers)),
+            ) as activity_client,
+        ):
+            with phases.phase("tunnel_setup"):
+                for index in range(tunnel_count):
+                    credential = manifest.credentials[index]
+                    response = await client.post(
+                        "/api/v1/tunnels",
+                        headers={
+                            "Authorization": f"Bearer {credential.key}",
+                            "Idempotency-Key": f"load-create-{uuid4().hex}",
+                        },
                         json={
-                            "address": tunnel["address"],
-                            "after_cursor": cursor,
-                            "wait_seconds": 20,
-                            "limit": 100,
+                            "label": f"Load tunnel {index}",
+                            "cycle": {
+                                "label": "Load cycle",
+                                "expires_in_seconds": 3600,
+                                "root": {"content": {"type": "text", "text": "Load root."}},
+                            },
                         },
                     )
-                    if response.status_code == 200:
-                        cursor = str(response.json()["next_cursor"])
-                        reads += 1
-                    else:
-                        status = str(response.status_code)
-                        failures[status] = failures.get(status, 0) + 1
-                except httpx.HTTPError:
-                    failures["transport"] = failures.get("transport", 0) + 1
+                    if response.status_code != 201:
+                        raise LoadProfileError("The load proof could not create its tunnels.")
+                    body = response.json()
+                    tunnels.append(
+                        {
+                            "address": str(body["tunnel"]["address"]),
+                            "cycle_id": str(body["cycle"]["id"]),
+                            "root_id": str(body["cycle"]["root"]["id"]),
+                            "cursor": str(body["activity_cursor"]),
+                            "creator_key": credential.key,
+                        }
+                    )
+            with DiagnosticLock(diagnostic_lock_seconds, Path(__file__).resolve().parents[2]):
 
-        readers = [
-            asyncio.create_task(reader(index))
-            for index in range(config.concurrent_activity_readers)
-        ]
-        started = time.monotonic()
-        target_sends = int(config.duration_seconds * config.sends_per_second)
-        deadline = started + config.duration_seconds
-        send_tasks: set[asyncio.Task[None]] = set()
+                async def reader(reader_index: int) -> None:
+                    nonlocal reads
+                    tunnel = tunnels[reader_index % len(tunnels)]
+                    cursor = tunnel["cursor"]
+                    request_index = reader_index
+                    while not stopped.is_set():
+                        credential = manifest.credentials[request_index % len(manifest.credentials)]
+                        request_index += config.concurrent_activity_readers
+                        try:
+                            response = await activity_client.post(
+                                "/api/v1/activity",
+                                headers={"Authorization": f"Bearer {credential.key}"},
+                                json={
+                                    "address": tunnel["address"],
+                                    "after_cursor": cursor,
+                                    "wait_seconds": 20,
+                                    "limit": 100,
+                                },
+                            )
+                            if response.status_code == 200:
+                                cursor = str(response.json()["next_cursor"])
+                                reads += 1
+                            else:
+                                status = str(response.status_code)
+                                failures[status] = failures.get(status, 0) + 1
+                        except httpx.HTTPError:
+                            failures["transport"] = failures.get("transport", 0) + 1
 
-        async def send(index: int) -> None:
-            nonlocal sent
-            tunnel = tunnels[index % len(tunnels)]
-            credential = manifest.credentials[(index + tunnel_count) % len(manifest.credentials)]
-            request_started = time.monotonic()
-            try:
-                response = await client.post(
-                    "/api/v1/messages",
-                    headers={
-                        "Authorization": f"Bearer {credential.key}",
-                        "Idempotency-Key": f"load-reply-{uuid4().hex}",
-                    },
-                    json={
-                        "address": tunnel["address"],
-                        "parent_id": tunnel["root_id"],
-                        "content": {"type": "text", "text": "Load reply."},
-                    },
-                )
-                timings.append((time.monotonic() - request_started) * 1000)
-                if response.status_code == 201:
-                    sent += 1
-                else:
-                    status = str(response.status_code)
-                    failures[status] = failures.get(status, 0) + 1
-            except httpx.HTTPError:
-                failures["transport"] = failures.get("transport", 0) + 1
+                readers = [
+                    asyncio.create_task(reader(index))
+                    for index in range(config.concurrent_activity_readers)
+                ]
+                started = time.monotonic()
+                target_sends = int(config.duration_seconds * config.sends_per_second)
+                deadline = started + config.duration_seconds
+                send_tasks = set()
 
-        for index in range(target_sends):
-            delay = started + index / config.sends_per_second - time.monotonic()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            if time.monotonic() >= deadline:
-                failures["missed_schedule"] = target_sends - index
-                break
-            if len(send_tasks) >= MAX_IN_FLIGHT_SENDS:
-                failures["sender_capacity"] = failures.get("sender_capacity", 0) + 1
-                continue
-            task = asyncio.create_task(send(index))
-            send_tasks.add(task)
-            task.add_done_callback(send_tasks.discard)
-            if index and index % max(1, int(config.sends_per_second * 60)) == 0:
-                print(f"Load progress: {index} scheduled, {sent} successful sends.", flush=True)
+                async def send(index: int) -> None:
+                    nonlocal sent
+                    tunnel = tunnels[index % len(tunnels)]
+                    credential = manifest.credentials[
+                        (index + tunnel_count) % len(manifest.credentials)
+                    ]
+                    request_started = time.monotonic()
+                    try:
+                        response = await client.post(
+                            "/api/v1/messages",
+                            headers={
+                                "Authorization": f"Bearer {credential.key}",
+                                "Idempotency-Key": f"load-reply-{uuid4().hex}",
+                            },
+                            json={
+                                "address": tunnel["address"],
+                                "parent_id": tunnel["root_id"],
+                                "content": {"type": "text", "text": "Load reply."},
+                            },
+                        )
+                        timings.append((time.monotonic() - request_started) * 1000)
+                        if response.status_code == 201:
+                            sent += 1
+                        else:
+                            status = str(response.status_code)
+                            failures[status] = failures.get(status, 0) + 1
+                    except httpx.HTTPError:
+                        failures["transport"] = failures.get("transport", 0) + 1
 
-        remaining = deadline - time.monotonic()
-        if remaining > 0:
-            await asyncio.sleep(remaining)
+                next_driver_sample = started
+                with phases.phase("traffic"):
+                    for index in range(target_sends):
+                        delay = started + index / config.sends_per_second - time.monotonic()
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        now = time.monotonic()
+                        lag = max(0.0, now - (started + index / config.sends_per_second))
+                        max_scheduling_lag = max(max_scheduling_lag, lag)
+                        total_scheduling_lag += lag
+                        scheduling_observations += 1
+                        if driver_observer is not None and now >= next_driver_sample:
+                            driver_observer(
+                                {
+                                    "captured_at": datetime.now(UTC).isoformat(),
+                                    "monotonic_seconds": now,
+                                    "scheduling_lag_seconds": lag,
+                                    "due_unscheduled": max(
+                                        0,
+                                        min(
+                                            target_sends,
+                                            int((now - started) * config.sends_per_second) + 1,
+                                        )
+                                        - index,
+                                    ),
+                                    "in_flight_sends": len(send_tasks),
+                                    "scheduled_sends": scheduled,
+                                }
+                            )
+                            next_driver_sample = now + 1
+                        if time.monotonic() >= deadline:
+                            failures["missed_schedule"] = target_sends - index
+                            break
+                        if len(send_tasks) >= MAX_IN_FLIGHT_SENDS:
+                            failures["sender_capacity"] = failures.get("sender_capacity", 0) + 1
+                            continue
+                        task = asyncio.create_task(send(index))
+                        scheduled += 1
+                        send_tasks.add(task)
+                        max_in_flight = max(max_in_flight, len(send_tasks))
+                        task.add_done_callback(send_tasks.discard)
+                        if index and index % max(1, int(config.sends_per_second * 60)) == 0:
+                            print(
+                                f"Load progress: {index} scheduled, {sent} successful sends.",
+                                flush=True,
+                            )
 
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                with phases.phase("drain"):
+                    stopped.set()
+                    outstanding = [*readers, *send_tasks]
+                    if outstanding:
+                        done, pending = await asyncio.wait(
+                            outstanding, timeout=config.drain_seconds
+                        )
+                        unfinished_sends = sum(task in send_tasks for task in pending)
+                        if unfinished_sends:
+                            failures["send_drain_timeout"] = unfinished_sends
+                        for task in pending:
+                            task.cancel()
+                        await asyncio.gather(*done, *pending, return_exceptions=True)
+                with phases.phase("cycle_close_verification"):
+                    for tunnel in tunnels:
+                        response = await client.post(
+                            "/api/v1/cycles/close",
+                            headers={
+                                "Authorization": f"Bearer {tunnel['creator_key']}",
+                                "Idempotency-Key": f"load-close-{uuid4().hex}",
+                            },
+                            json={
+                                "address": tunnel["address"],
+                                "expected_cycle_id": tunnel["cycle_id"],
+                            },
+                        )
+                        if response.status_code != 204:
+                            failures[str(response.status_code)] = (
+                                failures.get(str(response.status_code), 0) + 1
+                            )
+        workload_completed = True
+
+    finally:
         stopped.set()
         outstanding = [*readers, *send_tasks]
-        if outstanding:
-            done, pending = await asyncio.wait(outstanding, timeout=config.drain_seconds)
-            unfinished_sends = sum(task in send_tasks for task in pending)
-            if unfinished_sends:
-                failures["send_drain_timeout"] = unfinished_sends
-            for task in pending:
+        for task in outstanding:
+            if not task.done():
                 task.cancel()
-            await asyncio.gather(*done, *pending, return_exceptions=True)
-
-        for tunnel in tunnels:
-            response = await client.post(
-                "/api/v1/cycles/close",
-                headers={
-                    "Authorization": f"Bearer {tunnel['creator_key']}",
-                    "Idempotency-Key": f"load-close-{uuid4().hex}",
+        if outstanding:
+            await asyncio.gather(*outstanding, return_exceptions=True)
+        expected = int(config.duration_seconds * config.sends_per_second)
+        passed = workload_completed and not failures and sent >= max(1, int(expected * 0.95))
+        report.update(
+            {
+                "passed": passed,
+                "configuration": {
+                    "duration_seconds": config.duration_seconds,
+                    "drain_seconds": config.drain_seconds,
+                    "sends_per_second": config.sends_per_second,
+                    "concurrent_activity_readers": config.concurrent_activity_readers,
+                    "max_in_flight_sends": MAX_IN_FLIGHT_SENDS,
+                    "web_workers": os.getenv("STARTUNNEL_LOAD_WEB_WORKERS", "unknown"),
+                    "web_database_pool_max_size": os.getenv(
+                        "STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE", "unknown"
+                    ),
+                    "credential_count": len(manifest.credentials),
+                    "tunnel_count": tunnel_count,
                 },
-                json={
-                    "address": tunnel["address"],
-                    "expected_cycle_id": tunnel["cycle_id"],
+                "results": {
+                    "expected_sends": expected,
+                    "successful_sends": sent,
+                    "activity_reads": reads,
+                    "failures_by_status": failures,
+                    "driver": {
+                        "scheduled_sends": scheduled,
+                        "unscheduled_sends": expected - scheduled,
+                        "max_in_flight_sends": max_in_flight,
+                        "max_scheduling_lag_seconds": max_scheduling_lag,
+                        "mean_scheduling_lag_seconds": total_scheduling_lag
+                        / max(1, scheduling_observations),
+                    },
+                    "send_latency_ms": {
+                        "p50": _percentile(timings, 0.50),
+                        "p95": _percentile(timings, 0.95),
+                        "p99": _percentile(timings, 0.99),
+                    },
                 },
-            )
-            if response.status_code != 204:
-                failures[str(response.status_code)] = failures.get(str(response.status_code), 0) + 1
-
-    expected = int(config.duration_seconds * config.sends_per_second)
-    passed = not failures and sent >= max(1, int(expected * 0.95))
-    return {
-        "passed": passed,
-        "configuration": {
-            "duration_seconds": config.duration_seconds,
-            "sends_per_second": config.sends_per_second,
-            "concurrent_activity_readers": config.concurrent_activity_readers,
-            "max_in_flight_sends": MAX_IN_FLIGHT_SENDS,
-            "web_workers": os.getenv("STARTUNNEL_LOAD_WEB_WORKERS", "unknown"),
-            "web_database_pool_max_size": os.getenv(
-                "STARTUNNEL_LOAD_WEB_DATABASE_POOL_MAX_SIZE", "unknown"
-            ),
-            "credential_count": len(manifest.credentials),
-            "tunnel_count": tunnel_count,
-        },
-        "results": {
-            "expected_sends": expected,
-            "successful_sends": sent,
-            "activity_reads": reads,
-            "failures_by_status": failures,
-            "send_latency_ms": {
-                "p50": _percentile(timings, 0.50),
-                "p95": _percentile(timings, 0.95),
-                "p99": _percentile(timings, 0.99),
-            },
-        },
-        "provenance": {
-            "build_mode": os.getenv("STARTUNNEL_LOAD_BUILD_MODE", "unknown"),
-            "docker_version": os.getenv("STARTUNNEL_LOAD_DOCKER_VERSION", "unknown"),
-            "image_ids": os.getenv("STARTUNNEL_LOAD_IMAGE_DIGESTS", "unknown"),
-        },
-        "fixture_cleanup_complete": False,
-    }
+                "provenance": {
+                    "build_mode": os.getenv("STARTUNNEL_LOAD_BUILD_MODE", "unknown"),
+                    "docker_version": os.getenv("STARTUNNEL_LOAD_DOCKER_VERSION", "unknown"),
+                    "image_ids": os.getenv("STARTUNNEL_LOAD_IMAGE_DIGESTS", "unknown"),
+                },
+                "fixture_cleanup_complete": False,
+            }
+        )
+    return report
 
 
 def finalize_fixture_cleanup(report: dict[str, object], *, complete: bool) -> None:
