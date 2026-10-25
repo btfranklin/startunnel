@@ -108,6 +108,9 @@ longest observed dependency path. Queue time is shown only when Actions supplies
 its boundary. The candidate summary also includes source CI, the immutable
 image, helper cache results, and proof phase times. Parallel jobs are not added
 as serial work. Missing counters and timestamps remain unavailable.
+Promotion timing records the dispatch source separately from the tagged release
+source. Source CI, candidate identity, and proof reuse still require the exact
+tagged source commit.
 
 Proof artifacts include their run and attempt. A failed report is retained when
 a later attempt passes. Selection uses explicit manifests and file checksums.

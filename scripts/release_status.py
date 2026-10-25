@@ -129,6 +129,7 @@ class ReleaseStatus(TypedDict):
     workflows: list[WorkflowStatus]
     candidate: NotRequired[CandidateData]
     proof_details: NotRequired[dict[str, ProofDetails]]
+    promotion: NotRequired[WorkflowStatus]
 
 
 def _optional_text(value: object) -> str | None:
@@ -312,7 +313,12 @@ def workflow_status(repository: str, run_id: int) -> WorkflowStatus:
 
 def render_summary(status: ReleaseStatus) -> str:
     lines = [f"Release source: `{status['source_commit']}`", ""]
-    for workflow in status["workflows"]:
+    workflows = list(status["workflows"])
+    if "promotion" in status:
+        promotion = status["promotion"]
+        lines += [f"Promotion dispatch source: `{promotion['source_commit']}`.", ""]
+        workflows.append(promotion)
+    for workflow in workflows:
         lines += [
             f"[{workflow['workflow']}]({workflow['url']}): "
             f"{workflow['status']} / {workflow['conclusion'] or 'pending'}; "
@@ -373,7 +379,9 @@ def render_summary(status: ReleaseStatus) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-id", type=int)
+    run_group = parser.add_mutually_exclusive_group()
+    run_group.add_argument("--run-id", type=int)
+    run_group.add_argument("--promotion-run-id", type=int)
     parser.add_argument(
         "--repository", default=os.getenv("GITHUB_REPOSITORY", "btfranklin/startunnel")
     )
@@ -465,6 +473,11 @@ def main() -> int:
         status["proof_details"] = details
     if any(workflow["source_commit"] != commit for workflow in status["workflows"]):
         raise ValueError("Workflow status belongs to a different source commit.")
+    if arguments.promotion_run_id:
+        promotion = workflow_status(arguments.repository, arguments.promotion_run_id)
+        if promotion["workflow"] != ".github/workflows/release.yml":
+            raise ValueError("Promotion timing requires the release workflow.")
+        status["promotion"] = promotion
     summary = render_summary(status)
     if arguments.output:
         arguments.output.parent.mkdir(parents=True, exist_ok=True)

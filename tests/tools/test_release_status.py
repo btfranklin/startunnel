@@ -1,10 +1,13 @@
 """Release timing uses observed job boundaries and preserves attempt history."""
 
+import json
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from scripts import release_status
-from scripts.json_data import JsonObject
+from scripts.json_data import JsonObject, json_object
 from scripts.release_status import ReleaseStatus, job_timings, render_summary
 from tests.json_values import json_at
 
@@ -162,3 +165,68 @@ def test_rerun_gap_is_not_reported_as_workflow_queue(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(release_status, "github_api", api)
     assert release_status.workflow_status("owner/repo", 42)["queue_seconds"] is None
+
+
+@pytest.mark.parametrize("promotion", [False, True])
+def test_dispatch_source_is_separate_only_for_promotion_timing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    promotion: bool,
+) -> None:
+    tagged_source = "a" * 40
+    dispatch_source = "b" * 40
+    output = tmp_path / "status.json"
+    workflow: release_status.WorkflowStatus = {
+        "run_id": 42,
+        "source_commit": dispatch_source,
+        "url": "https://example.invalid/run/42",
+        "workflow": ".github/workflows/release.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "queue_seconds": None,
+        "timing": job_timings([], {}),
+        "artifacts": [],
+    }
+    monkeypatch.setattr(release_status, "git_commit", lambda: tagged_source)
+    monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
+    monkeypatch.setattr(release_status, "github_api", lambda *args, **kwargs: {"workflow_runs": []})
+    option = "--promotion-run-id" if promotion else "--run-id"
+    monkeypatch.setattr(sys, "argv", ["release-status", option, "42", "--output", str(output)])
+    if promotion:
+        assert release_status.main() == 0
+        report = json_object(json.loads(output.read_text()))
+        assert report["source_commit"] == tagged_source
+        assert json_at(report, "promotion", "source_commit") == dispatch_source
+        assert report["workflows"] == []
+        summary = capsys.readouterr().out
+        assert f"Release source: `{tagged_source}`" in summary
+        assert f"Promotion dispatch source: `{dispatch_source}`" in summary
+    else:
+        with pytest.raises(ValueError, match="different source commit"):
+            release_status.main()
+        assert not output.exists()
+
+
+def test_promotion_timing_rejects_an_unrelated_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow: release_status.WorkflowStatus = {
+        "run_id": 42,
+        "source_commit": "a" * 40,
+        "url": "https://example.invalid/run/42",
+        "workflow": ".github/workflows/ci.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "queue_seconds": None,
+        "timing": job_timings([], {}),
+        "artifacts": [],
+    }
+    monkeypatch.setattr(release_status, "git_commit", lambda: "a" * 40)
+    monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
+    monkeypatch.setattr(release_status, "github_api", lambda *args, **kwargs: {"workflow_runs": []})
+    monkeypatch.setattr(sys, "argv", ["release-status", "--promotion-run-id", "42"])
+    with pytest.raises(ValueError, match="requires the release workflow"):
+        release_status.main()
