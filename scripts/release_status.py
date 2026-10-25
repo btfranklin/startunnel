@@ -291,6 +291,15 @@ def _dependencies(jobs: Sequence[Mapping[str, object]], workflow: str) -> dict[s
         result[build] = [prepare]
         proofs = [name for name in names if name.startswith("validation /")]
         result.update({name: [build] for name in proofs})
+        preflight = next(
+            (name for name in proofs if name.endswith("Production input preflight")), None
+        )
+        if preflight:
+            for name in proofs:
+                if name.endswith(
+                    ("Isolated clean-stack system proof", "Isolated fixed load proof")
+                ):
+                    result[name] = [preflight]
         result[evidence] = proofs or [build]
     return result
 

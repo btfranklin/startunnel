@@ -416,3 +416,21 @@ def test_expired_or_duplicate_artifacts_cannot_produce_verified_status(
     workflow["artifacts"].append(workflow["artifacts"][0].copy())
     with pytest.raises(ValueError, match="duplicate"):
         release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40)
+
+
+def test_candidate_timing_includes_the_early_production_preflight() -> None:
+    prepare = "Reuse completed validation"
+    build = "Build one release image"
+    preflight = "validation / Production input preflight"
+    load = "validation / Isolated fixed load proof"
+    security = "validation / Security and supply chain"
+    jobs = [
+        job(prepare, 0, 2),
+        job(build, 2, 10),
+        job(preflight, 10, 15),
+        job(load, 15, 50),
+        job(security, 10, 30),
+    ]
+    result = job_timings(jobs, release_status._dependencies(jobs, "release-candidate.yml"))
+    assert result["longest_observed_dependency_path"] == [prepare, build, preflight, load]
+    assert result["longest_path_seconds"] == result["elapsed_seconds"] == 50

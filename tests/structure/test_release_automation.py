@@ -1835,10 +1835,31 @@ def test_hosted_release_proof_project_names_pass_the_isolation_contract(
                 names_by_job.setdefault(job_id, []).append(name)
                 assert isolation.validate_project_name(name) == name
     assert {job_id: len(names) for job_id, names in names_by_job.items()} == {
+        "production-preflight": 1,
         "system": 2,
         "full-load": 1,
         "live-agents": 1,
     }
+
+
+def test_production_preflight_uses_candidate_image_and_gates_long_proofs() -> None:
+    jobs = load_workflow("release-validation.yml")["jobs"]
+    preflight = jobs["production-preflight"]
+    assert preflight["if"] == "inputs.candidate_image != ''"
+    step = next(
+        step for step in preflight["steps"] if step.get("name") == "Run production input preflight"
+    )
+    assert step["env"] == {"CANDIDATE_IMAGE": "${{ inputs.candidate_image }}"}
+    assert "scripts/prove_production_release.py --preflight" in step["run"]
+    assert '--candidate-image "$CANDIDATE_IMAGE"' in step["run"]
+    assert jobs["system"]["needs"] == "production-preflight"
+    assert jobs["full-load"]["needs"] == "production-preflight"
+    no_image_or_passed = (
+        "always() && (needs.production-preflight.result == 'success' || "
+        "needs.production-preflight.result == 'skipped')"
+    )
+    assert jobs["system"]["if"] == no_image_or_passed
+    assert jobs["full-load"]["if"] == no_image_or_passed
 
 
 @pytest.mark.parametrize(

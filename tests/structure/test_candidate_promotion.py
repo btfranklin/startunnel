@@ -52,10 +52,12 @@ def test_candidate_pull_selects_the_proof_platform_independently_of_the_host(
     assert calls == [["docker", "pull", "--platform", "linux/amd64", IMAGE]]
 
 
-def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None:
+def test_image_checks_follow_preflight_and_all_gate_retained_evidence() -> None:
     validation = load_workflow("release-validation.yml")["jobs"]
-    for name in ("security", "system", "full-load"):
+    for name in ("security", "production-preflight"):
         assert not validation[name].get("needs")
+    for name in ("system", "full-load"):
+        assert validation[name]["needs"] == "production-preflight"
     workflow = load_workflow("release-candidate.yml")["jobs"]
     assert workflow["build"]["needs"] == "prepare"
     assert workflow["build"]["if"] == "needs.prepare.outputs.reuse_run_id == ''"

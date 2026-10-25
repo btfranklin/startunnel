@@ -109,6 +109,10 @@ class ReleaseReport(TypedDict):
     release_evidence_eligible: bool
 
 
+class PreflightReport(ReleaseReport):
+    preflight_only: bool
+
+
 class ProductionComposeProject(IsolatedComposeProject):
     """Use only production Compose files and the private smoke override."""
 
@@ -937,6 +941,129 @@ def run_proof(
     return report
 
 
+def run_preflight(
+    *, image: str, commit: str, version: str, project_name: str, report_path: Path
+) -> PreflightReport:
+    """Check production inputs and native Linux secret readability without starting services."""
+    report: PreflightReport = {**new_report(commit, version, image), "preflight_only": True}
+    report["status"] = "preflight_failed"
+    report["checks"] = {
+        "source_identity": False,
+        "production_settings": False,
+        "secret_ownership": False,
+    }
+    checks = report["checks"]
+    private = tempfile.TemporaryDirectory(prefix="startunnel-production-preflight-")
+    private_directory = Path(private.name)
+    private_directory.chmod(0o700)
+    stack: ProductionComposeProject | None = None
+    contexts = contextlib.ExitStack()
+    current_step = "prepare"
+    try:
+        stack, base_url, secret_directory, port = prepare_stack(
+            private_directory, image=image, project_name=project_name
+        )
+        with termination_signals():
+            contexts.enter_context(stack)
+            set_production_environment(
+                stack.environment,
+                image=image,
+                base_url=base_url,
+                secret_directory=secret_directory,
+                proxy_prefix=available_proxy_prefix(stack.environment),
+            )
+            current_step = "render_compose"
+            rendered = stack.capture("render_compose", "config", "--format", "json")
+            model = object_value(json.loads(rendered), "render_compose")
+            verify_compose_model(model, image=image, port=port, secret_directory=secret_directory)
+            current_step = "pull_candidate"
+            run_process(
+                ["docker", "pull", "--platform", PLATFORM, image],
+                environment=stack.environment,
+                timeout=600,
+                step=current_step,
+            )
+            labels, platform = image_metadata(image, stack.environment)
+            validate_candidate_metadata(labels, platform=platform, commit=commit, version=version)
+            checks["source_identity"] = True
+            checks["production_settings"] = True
+            current_step = "secret_ownership"
+            set_secret_ownership(
+                secret_directory,
+                image=image,
+                project_name=project_name,
+                environment=stack.environment,
+            )
+            if sys.platform == "linux":
+                run_process(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--pull",
+                        "never",
+                        "--platform",
+                        PLATFORM,
+                        "--network",
+                        "none",
+                        "--read-only",
+                        "--user",
+                        "startunnel:startunnel",
+                        "--name",
+                        f"{project_name}-secret-readable",
+                        "--label",
+                        f"com.docker.compose.project={project_name}",
+                        "--label",
+                        "com.docker.compose.service=secret-readable",
+                        "--entrypoint",
+                        "/bin/sh",
+                        *(
+                            argument
+                            for name in SECRET_NAMES
+                            for argument in (
+                                "--mount",
+                                f"type=bind,source={secret_directory / name},"
+                                f"target=/run/secrets/{name},readonly",
+                            )
+                        ),
+                        image,
+                        "-c",
+                        " && ".join(f"test -r /run/secrets/{name}" for name in SECRET_NAMES),
+                    ],
+                    environment=stack.environment,
+                    timeout=60,
+                    step=current_step,
+                )
+            checks["secret_ownership"] = True
+    except BaseException as error:
+        report["failure_type"] = type(error.__cause__ or error).__name__
+        report["failed_step"] = error.step if isinstance(error, LaneError) else current_step
+    finally:
+        try:
+            contexts.close()
+        except BaseException as error:
+            if report["failure_type"] is None:
+                report["failure_type"] = type(error).__name__
+                report["failed_step"] = "cleanup"
+        try:
+            private.cleanup()
+        except BaseException as error:
+            if report["failure_type"] is None:
+                report["failure_type"] = type(error).__name__
+                report["failed_step"] = "cleanup"
+        cleanup_ok = bool(stack and stack.cleanup_complete)
+        private_ok = not private_directory.exists()
+        report["disposable_volumes_removed"] = cleanup_ok
+        report["private_files_removed"] = private_ok
+        if report["failure_type"] is None and not (cleanup_ok and private_ok):
+            report["failure_type"] = "cleanup_failed"
+            report["failed_step"] = "cleanup"
+        if report["failure_type"] is None:
+            report["status"] = "preflight_passed"
+        write_report(report_path, report)
+    return report
+
+
 def run_process(
     command: Sequence[str], *, environment: Mapping[str, str], timeout: int, step: str
 ) -> str:
@@ -992,6 +1119,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--candidate-image", required=True, help="Immutable image reference with @sha256 digest"
     )
     parser.add_argument(
+        "--preflight", action="store_true", help="Check inputs and Linux secret access only"
+    )
+    parser.add_argument(
         "--project-name", help="Optional unique name with an approved stproof- prefix"
     )
     parser.add_argument("--output", help="Safe report path; existing paths are never overwritten")
@@ -1012,11 +1142,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             else generated_project_name("system")
         )
         destination = output_path(args.output, project_name)
+        if args.preflight:
+            report_name = destination.name.replace(
+                "production-release-proof-", "production-release-preflight-"
+            )
+            destination = destination.with_name(report_name)
         if destination.exists() or destination.is_symlink():
             raise ValueError("Report path already exists.")
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         print(f"Production release proof setup failed: {type(error).__name__}.", file=sys.stderr)
         return 2
+    if args.preflight:
+        preflight_report = run_preflight(
+            image=image,
+            commit=commit,
+            version=version,
+            project_name=project_name,
+            report_path=destination,
+        )
+        print(
+            json.dumps(
+                {
+                    "status": preflight_report["status"],
+                    "report": str(destination),
+                    "release_evidence_eligible": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0 if preflight_report["status"] == "preflight_passed" else 1
     report = run_proof(
         image=image,
         commit=commit,

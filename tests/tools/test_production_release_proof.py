@@ -7,6 +7,7 @@ import json
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -790,3 +791,127 @@ def test_secret_ownership_failure_keeps_safe_report_and_cleans_private_files(
     assert report["private_files_removed"] is True
     assert report["release_evidence_eligible"] is False
     assert "private-operation-details" not in json.dumps(report)
+
+
+def test_preflight_checks_rendered_production_inputs_and_linux_readability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, _ = install_fake_run(monkeypatch)
+    monkeypatch.setattr(sys, "platform", "linux")
+    ownership: list[Path] = []
+    commands: list[list[str]] = []
+
+    def own(directory: Path, **_kwargs: object) -> None:
+        ownership.append(directory)
+
+    def run(command: Sequence[str], **_kwargs: object) -> str:
+        commands.append(list(command))
+        return ""
+
+    monkeypatch.setattr(proof, "set_secret_ownership", own)
+    monkeypatch.setattr(
+        proof,
+        "run_process",
+        run,
+    )
+    path = tmp_path / "preflight.json"
+    report = proof.run_preflight(
+        image=IMAGE,
+        commit=COMMIT,
+        version=VERSION,
+        project_name="stproof-preflight-test",
+        report_path=path,
+    )
+    assert report["status"] == "preflight_passed"
+    assert report["release_evidence_eligible"] is False
+    assert report["preflight_only"] is True
+    assert report["disposable_volumes_removed"] is True
+    assert report["private_files_removed"] is True
+    assert len(ownership) == 1
+    assert len(commands) == 2
+    assert "startunnel:startunnel" in commands[1]
+    readable_check = " && ".join(f"test -r /run/secrets/{name}" for name in proof.SECRET_NAMES)
+    assert readable_check in commands[1]
+    mounts = [
+        commands[1][index + 1]
+        for index, argument in enumerate(commands[1])
+        if argument == "--mount"
+    ]
+    assert mounts == [
+        f"type=bind,source={ownership[0] / name},target=/run/secrets/{name},readonly"
+        for name in proof.SECRET_NAMES
+    ]
+    assert "stproof-preflight-test-secret-readable" in commands[1]
+    assert "com.docker.compose.project=stproof-preflight-test" in commands[1]
+    assert "com.docker.compose.service=secret-readable" in commands[1]
+    assert "--network" in commands[1] and "none" in commands[1]
+    assert projects[0].cleanup_complete is True
+    persisted = json.loads(path.read_text())
+    assert persisted["status"] == "preflight_passed"
+    assert persisted["release_evidence_eligible"] is False
+    with pytest.raises(ValueError):
+        proof.validate_report(persisted, commit=COMMIT, image=IMAGE, version=VERSION)
+
+
+def test_preflight_cleanup_failure_still_writes_partial_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fake_run(monkeypatch)
+    original_cleanup = tempfile.TemporaryDirectory.cleanup
+
+    def cleanup_then_fail(directory: tempfile.TemporaryDirectory[str]) -> None:
+        original_cleanup(directory)
+        raise OSError("private cleanup failed")
+
+    monkeypatch.setattr(tempfile.TemporaryDirectory, "cleanup", cleanup_then_fail)
+    path = tmp_path / "preflight-cleanup-failure.json"
+    report = proof.run_preflight(
+        image=IMAGE,
+        commit=COMMIT,
+        version=VERSION,
+        project_name="stproof-preflight-cleanup",
+        report_path=path,
+    )
+    assert report["status"] == "preflight_failed"
+    assert report["failure_type"] == "OSError"
+    assert report["failed_step"] == "cleanup"
+    assert report["release_evidence_eligible"] is False
+    assert report["private_files_removed"] is True
+    persisted = json.loads(path.read_text())
+    assert persisted["failure_type"] == "OSError"
+    assert persisted["status"] == "preflight_failed"
+
+
+def test_preflight_rejects_image_identity_before_ownership_and_cleans(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, _ = install_fake_run(monkeypatch)
+    monkeypatch.setattr(
+        proof,
+        "image_metadata",
+        lambda *_args, **_kwargs: (
+            {
+                "org.opencontainers.image.revision": "d" * 40,
+                "org.opencontainers.image.version": VERSION,
+            },
+            proof.PLATFORM,
+        ),
+    )
+    ownership: list[bool] = []
+
+    def own(*_args: object, **_kwargs: object) -> None:
+        ownership.append(True)
+
+    monkeypatch.setattr(proof, "set_secret_ownership", own)
+    report = proof.run_preflight(
+        image=IMAGE,
+        commit=COMMIT,
+        version=VERSION,
+        project_name="stproof-preflight-mismatch",
+        report_path=tmp_path / "preflight.json",
+    )
+    assert report["status"] == "preflight_failed"
+    assert report["failed_step"] == "source_identity"
+    assert ownership == []
+    assert report["private_files_removed"] is True
+    assert projects[0].cleanup_complete is True
