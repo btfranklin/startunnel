@@ -49,7 +49,18 @@ POOL_FIELDS = (
     "waiting",
     "queued",
     "errors",
+    "request_errors",
+    "connection_errors",
+    "connections_lost",
     "requests_wait_ms",
+    "dependency_pool_timeout",
+    "dependency_pool_queue_full",
+    "dependency_deadlock",
+    "dependency_serialization_failure",
+    "dependency_connection_failure",
+    "dependency_query_cancelled",
+    "dependency_lock_unavailable",
+    "dependency_other",
 )
 POOL_STATUSES = ("ok", "missing", "error")
 EXPECTED_POOL_WORKERS = 4

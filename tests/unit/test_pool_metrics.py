@@ -10,8 +10,11 @@ from prometheus_client import multiprocess
 
 from core import pool_metrics
 from core.metrics import (
+    DATABASE_POOL_CONNECTION_ERRORS,
+    DATABASE_POOL_CONNECTIONS_LOST,
     DATABASE_POOL_ERRORS,
     DATABASE_POOL_QUEUED,
+    DATABASE_POOL_REQUEST_ERRORS,
     DATABASE_POOL_REQUESTS_WAIT_MS,
     DATABASE_POOL_SAMPLER_STATUS,
     DATABASE_POOL_SIZE,
@@ -29,11 +32,25 @@ def metric_value(metric: object, name: str, labels: dict[str, str] | None = None
 
 
 def test_missing_pool_reports_zeroes_and_missing_status() -> None:
+    pool_metrics.sample_pool_stats(
+        {"requests_errors": 1, "connections_errors": 2, "connections_lost": 3}
+    )
     assert pool_metrics.sample_pool_stats(None) == "missing"
     assert metric_value(DATABASE_POOL_SIZE, "startunnel_database_pool_size") == 0
     assert metric_value(DATABASE_POOL_WAITING, "startunnel_database_pool_waiting") == 0
     assert metric_value(DATABASE_POOL_QUEUED, "startunnel_database_pool_queued") == 0
     assert metric_value(DATABASE_POOL_ERRORS, "startunnel_database_pool_errors") == 0
+    assert (
+        metric_value(DATABASE_POOL_REQUEST_ERRORS, "startunnel_database_pool_request_errors") == 0
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTION_ERRORS, "startunnel_database_pool_connection_errors")
+        == 0
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTIONS_LOST, "startunnel_database_pool_connections_lost")
+        == 0
+    )
     assert (
         metric_value(
             DATABASE_POOL_SAMPLER_STATUS,
@@ -68,11 +85,33 @@ def test_pool_snapshot_reports_stats_and_counter_reset() -> None:
         == 125
     )
     assert metric_value(DATABASE_POOL_ERRORS, "startunnel_database_pool_errors") == 7
+    assert (
+        metric_value(DATABASE_POOL_REQUEST_ERRORS, "startunnel_database_pool_request_errors") == 4
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTION_ERRORS, "startunnel_database_pool_connection_errors")
+        == 2
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTIONS_LOST, "startunnel_database_pool_connections_lost")
+        == 1
+    )
 
     # Stats are cumulative snapshots. If psycopg resets them, report the new
     # value rather than retaining a stale delta from the previous sample.
     pool_metrics.sample_pool_stats({"requests_errors": 1})
     assert metric_value(DATABASE_POOL_ERRORS, "startunnel_database_pool_errors") == 1
+    assert (
+        metric_value(DATABASE_POOL_REQUEST_ERRORS, "startunnel_database_pool_request_errors") == 1
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTION_ERRORS, "startunnel_database_pool_connection_errors")
+        == 0
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTIONS_LOST, "startunnel_database_pool_connections_lost")
+        == 0
+    )
     assert metric_value(DATABASE_POOL_SIZE, "startunnel_database_pool_size") == 0
 
 
@@ -113,16 +152,43 @@ def test_stats_sampler_reads_initialized_pool_and_marks_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Pool:
+        reads = 0
+
         def get_stats(self) -> dict[str, int]:
-            return {"pool_size": 4}
+            self.reads += 1
+            return {
+                "pool_size": 4,
+                "requests_errors": 2,
+                "connections_errors": 3,
+                "connections_lost": 4,
+            }
+
+        def pop_stats(self) -> dict[str, int]:
+            raise AssertionError("Sampling must not reset the pool counters.")
+
+    pool = Pool()
 
     class Wrapper:
         alias = "default"
-        _connection_pools: dict[str, object] = {"default": Pool()}
+        _connection_pools: dict[str, object] = {"default": pool}
 
     monkeypatch.setattr(pool_metrics, "connections", {"default": Wrapper()})
     pool_metrics.sample_pool_once()
+    pool_metrics.sample_pool_once()
+    assert pool.reads == 2
     assert metric_value(DATABASE_POOL_SIZE, "startunnel_database_pool_size") == 4
+    assert metric_value(DATABASE_POOL_ERRORS, "startunnel_database_pool_errors") == 9
+    assert (
+        metric_value(DATABASE_POOL_REQUEST_ERRORS, "startunnel_database_pool_request_errors") == 2
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTION_ERRORS, "startunnel_database_pool_connection_errors")
+        == 3
+    )
+    assert (
+        metric_value(DATABASE_POOL_CONNECTIONS_LOST, "startunnel_database_pool_connections_lost")
+        == 4
+    )
 
     class BrokenPool:
         def get_stats(self) -> dict[str, int]:

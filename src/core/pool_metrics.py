@@ -14,8 +14,11 @@ from prometheus_client import multiprocess
 
 from .metrics import (
     DATABASE_POOL_AVAILABLE,
+    DATABASE_POOL_CONNECTION_ERRORS,
+    DATABASE_POOL_CONNECTIONS_LOST,
     DATABASE_POOL_ERRORS,
     DATABASE_POOL_QUEUED,
+    DATABASE_POOL_REQUEST_ERRORS,
     DATABASE_POOL_REQUESTS_WAIT_MS,
     DATABASE_POOL_SAMPLER_STATUS,
     DATABASE_POOL_SIZE,
@@ -30,6 +33,9 @@ _POOL_STAT_KEYS = {
     "requests_waiting": DATABASE_POOL_WAITING,
     "requests_queued": DATABASE_POOL_QUEUED,
     "requests_wait_ms": DATABASE_POOL_REQUESTS_WAIT_MS,
+    "requests_errors": DATABASE_POOL_REQUEST_ERRORS,
+    "connections_errors": DATABASE_POOL_CONNECTION_ERRORS,
+    "connections_lost": DATABASE_POOL_CONNECTIONS_LOST,
 }
 _POOL_ERROR_KEYS = ("requests_errors", "connections_errors", "connections_lost")
 

@@ -556,13 +556,14 @@ def test_metrics_probe_reads_existing_worker_files_without_creating_shards(tmp_p
         "PROMETHEUS_MULTIPROC_DIR": str(tmp_path),
         "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
     }
-    for _ in range(4):
+    for worker in range(1, 5):
         subprocess.run(
             [
                 sys.executable,
                 "-c",
-                "from core.metrics import DATABASE_POOL_SAMPLER_STATUS; "
-                "DATABASE_POOL_SAMPLER_STATUS.labels(status='ok').set(1)",
+                "from core.pool_metrics import sample_pool_stats; "
+                f"sample_pool_stats({{'requests_errors': {worker}, "
+                f"'connections_errors': {worker * 2}, 'connections_lost': {worker * 3}}})",
             ],
             env=environment,
             capture_output=True,
@@ -582,6 +583,10 @@ def test_metrics_probe_reads_existing_worker_files_without_creating_shards(tmp_p
         )
         rows = [json.loads(line) for line in result.stdout.splitlines()]
         assert rows[1]["pool"]["sampler_ok"] == 4
+        assert rows[1]["pool"]["request_errors"] == 10
+        assert rows[1]["pool"]["connection_errors"] == 20
+        assert rows[1]["pool"]["connections_lost"] == 30
+        assert rows[1]["pool"]["errors"] == 60
         assert rows[1]["cpu_seconds"] >= 0
         assert rows[1]["peak_memory_bytes"] > 0
         assert sorted(path.name for path in tmp_path.iterdir()) == files
@@ -734,10 +739,112 @@ def test_pool_reader_ignores_unrelated_metric_names_and_labels() -> None:
             name="startunnel_database_pool_available", labels={"secret": "key"}, value=7
         ),
         SimpleNamespace(name="startunnel_database_pool_waiting", labels={}, value=2),
+        SimpleNamespace(name="startunnel_database_pool_request_errors", labels={}, value=5),
+        SimpleNamespace(
+            name="startunnel_database_pool_connection_errors", labels={"secret": "key"}, value=7
+        ),
+        SimpleNamespace(name="startunnel_database_pool_connections_lost", labels={}, value=-1),
+        SimpleNamespace(name="startunnel_database_pool_unknown_field", labels={}, value=99),
     ]
     registry = SimpleNamespace(collect=lambda: [SimpleNamespace(samples=samples)])
     result = read_pool(cast(CollectorRegistry, registry))
     assert result["size"] is None
     assert result["available"] is None
     assert result["waiting"] == 2
+    assert result["request_errors"] == 5
+    assert result["connection_errors"] is None
+    assert result["connections_lost"] is None
+    assert "unknown_field" not in result
     assert "secret" not in json.dumps(result)
+
+
+def test_pool_reader_reports_counter_resets_and_missing_categories() -> None:
+    from scripts.proof_pool_reader import read_pool
+
+    samples = [SimpleNamespace(name="startunnel_database_pool_request_errors", labels={}, value=5)]
+    registry = cast(
+        CollectorRegistry, SimpleNamespace(collect=lambda: [SimpleNamespace(samples=samples)])
+    )
+    assert read_pool(registry)["request_errors"] == 5
+    samples[0].value = 0
+    assert read_pool(registry)["request_errors"] == 0
+    samples.clear()
+    values = read_pool(registry)
+    assert values["request_errors"] is None
+    assert values["connection_errors"] is None
+    assert values["connections_lost"] is None
+
+
+def test_host_pool_reader_retains_only_fixed_numeric_error_categories() -> None:
+    import io
+
+    data = {
+        "pool": {
+            "errors": 9,
+            "request_errors": 2,
+            "connection_errors": 3,
+            "connections_lost": 4,
+            "unknown_error": 100,
+            "secret": "private-key",
+        },
+        "monotonic_seconds": 1,
+        "cpu_seconds": 0.01,
+        "peak_memory_bytes": 1024,
+    }
+    reader = load_observations.PoolReader(
+        cast(IsolatedComposeProject, None), cast(DockerStats, None), "a" * 64
+    )
+    reader.stopping = True
+    reader.process = cast(
+        subprocess.Popen[str],
+        SimpleNamespace(stdout=io.StringIO('{"pid": 2}\n' + json.dumps(data) + "\n")),
+    )
+    reader._read()
+    assert not reader.failed
+    snapshot = reader.snapshot()
+    assert snapshot["pool"]["errors"] == 9
+    assert snapshot["pool"]["request_errors"] == 2
+    assert snapshot["pool"]["connection_errors"] == 3
+    assert snapshot["pool"]["connections_lost"] == 4
+    assert "unknown_error" not in snapshot["pool"]
+    assert "private-key" not in json.dumps(snapshot)
+
+
+def test_dependency_counters_are_fixed_numeric_fields_without_exception_data() -> None:
+    from scripts.proof_pool_reader import read_pool
+
+    samples = [
+        SimpleNamespace(
+            name="startunnel_database_dependency_failures_total",
+            labels={"reason": "pool_timeout"},
+            value=2,
+        ),
+        SimpleNamespace(
+            name="startunnel_database_dependency_failures_total",
+            labels={"reason": "private-query"},
+            value=99,
+        ),
+        SimpleNamespace(
+            name="startunnel_database_dependency_failures_total",
+            labels={"reason": "deadlock", "request": "private-key"},
+            value=99,
+        ),
+        SimpleNamespace(
+            name="startunnel_database_dependency_failures_total",
+            labels={"reason": "other"},
+            value=float("nan"),
+        ),
+    ]
+    registry = cast(
+        CollectorRegistry, SimpleNamespace(collect=lambda: [SimpleNamespace(samples=samples)])
+    )
+    values = read_pool(registry)
+    assert values["dependency_pool_timeout"] == 2
+    assert values["dependency_deadlock"] is None
+    assert values["dependency_other"] is None
+    assert "private" not in json.dumps(values)
+    assert set(values) <= set(load_observations.POOL_FIELDS) | {
+        "sampler_ok",
+        "sampler_missing",
+        "sampler_error",
+    }

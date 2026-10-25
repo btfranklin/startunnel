@@ -117,6 +117,12 @@ longest observed dependency path. Queue time is shown only when Actions supplies
 its boundary. The candidate summary also includes source CI, the immutable
 image, helper cache results, and proof phase times. Parallel jobs are not added
 as serial work. Missing counters and timestamps remain unavailable.
+Pool request errors, connection errors, and lost connections have separate
+numeric counts. HTTP failures retain their fixed operation and status. Handled
+database failures have fixed cause categories, including pool timeout, queue
+capacity, connection failure, and deadlock. These fields do not retain exception
+text, SQL, credentials, addresses, or message content. A matching count alone
+does not establish the cause of an earlier failure.
 The readiness view states whether a new candidate or promotion can start and
 lists blockers. It checks the local branch and source changes, the remote tag,
 exact-source CI, the candidate run, and retained evidence. A successful candidate
@@ -234,6 +240,8 @@ also checks Caddy HTTPS; neither check establishes a particular public server's
 DNS or certificate state. Follow the selected instance's external setup checks.
 Each production proof writes a new project-scoped report and removes its stack,
 volumes, and private files. An existing report is never overwritten.
+On native Linux, it applies the documented secret-file ownership before startup
+and keeps the files at mode `0600`.
 
 The first GHCR package must be made **public** in package settings. Verify an
 anonymous digest pull before publishing the first release. GitHub creates

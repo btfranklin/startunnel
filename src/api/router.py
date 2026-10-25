@@ -17,6 +17,7 @@ from agents.models import AgentCredential
 from core import cursors
 from core import limits as instance_limits
 from core.errors import (
+    DependencyUnavailable,
     DomainError,
     InvalidCredential,
     InvalidCursor,
@@ -24,6 +25,7 @@ from core.errors import (
     PublicErrorCode,
     TunnelUnavailable,
 )
+from core.metrics import record_dependency_failure
 from tunnels.activity import commit_checkpoint, read_activity_async
 from tunnels.beacons import publish_beacon, read_board, wait_for_board, withdraw_beacon
 from tunnels.codec import InvalidAddress, address_transcription
@@ -182,6 +184,8 @@ def _error_response(
 
 @api.exception_handler(DomainError)
 def tunnel_error_handler(request: HttpRequest, error: DomainError) -> HttpResponse:
+    if isinstance(error, DependencyUnavailable):
+        record_dependency_failure(error)
     return _error_response(
         request,
         code=error.code,
@@ -226,7 +230,8 @@ def validation_error_handler(request: HttpRequest, error: NinjaValidationError) 
     )
 
 
-def _dependency_error_response(request: HttpRequest) -> HttpResponse:
+def _dependency_error_response(request: HttpRequest, error: BaseException) -> HttpResponse:
+    record_dependency_failure(error)
     return _error_response(
         request,
         code="dependency_unavailable",
@@ -237,12 +242,12 @@ def _dependency_error_response(request: HttpRequest) -> HttpResponse:
 
 @api.exception_handler(OperationalError)
 def operational_error_handler(request: HttpRequest, error: OperationalError) -> HttpResponse:
-    return _dependency_error_response(request)
+    return _dependency_error_response(request, error)
 
 
 @api.exception_handler(InterfaceError)
 def interface_error_handler(request: HttpRequest, error: InterfaceError) -> HttpResponse:
-    return _dependency_error_response(request)
+    return _dependency_error_response(request, error)
 
 
 def _credential(request: HttpRequest) -> AgentCredential:

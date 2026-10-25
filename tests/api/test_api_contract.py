@@ -931,3 +931,44 @@ def test_address_read_rechecks_a_key_revoked_after_authentication(
     response = _post(client, "/api/v1/tree", {"address": created["tunnel"]["address"]}, key=key)
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_credential"
+
+
+@pytest.mark.parametrize("wrapped", ["operational", "interface", "domain"])
+def test_dependency_503_counts_the_safe_underlying_pool_cause(
+    client: Client,
+    credential_factory: CredentialFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    wrapped: str,
+) -> None:
+    from django.db import InterfaceError
+    from prometheus_client import REGISTRY
+    from psycopg_pool import PoolTimeout
+
+    from core.errors import DependencyUnavailable
+
+    _, key = credential_factory()
+    before = (
+        REGISTRY.get_sample_value(
+            "startunnel_database_dependency_failures_total", {"reason": "pool_timeout"}
+        )
+        or 0
+    )
+
+    def fail_authentication(raw_key: str) -> None:
+        error = {
+            "operational": OperationalError,
+            "interface": InterfaceError,
+            "domain": DependencyUnavailable,
+        }[wrapped]()
+        raise error from PoolTimeout("private-query-and-credential")
+
+    monkeypatch.setattr("api.auth.authenticate_key", fail_authentication)
+    response = client.get("/api/v1/me", headers=_auth(key))
+    _assert_safe_error(response, status=503, code="dependency_unavailable")
+    assert "private" not in response.content.decode()
+    assert (
+        REGISTRY.get_sample_value(
+            "startunnel_database_dependency_failures_total", {"reason": "pool_timeout"}
+        )
+        == before + 1
+    )

@@ -78,12 +78,73 @@ DATABASE_POOL_ERRORS = Gauge(
     "Cumulative connection and request errors reported by the default PostgreSQL pool",
     multiprocess_mode="livesum",
 )
+DATABASE_POOL_REQUEST_ERRORS = Gauge(
+    "startunnel_database_pool_request_errors",
+    "Cumulative failed connection requests reported by the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_CONNECTION_ERRORS = Gauge(
+    "startunnel_database_pool_connection_errors",
+    "Cumulative connection creation errors reported by the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
+DATABASE_POOL_CONNECTIONS_LOST = Gauge(
+    "startunnel_database_pool_connections_lost",
+    "Cumulative lost connections reported by the default PostgreSQL pool",
+    multiprocess_mode="livesum",
+)
 DATABASE_POOL_SAMPLER_STATUS = Gauge(
     "startunnel_database_pool_sampler_status",
     "Workers in each pool stats sampler status category",
     ["status"],
     multiprocess_mode="livesum",
 )
+DEPENDENCY_FAILURE_REASONS = (
+    "pool_timeout",
+    "pool_queue_full",
+    "deadlock",
+    "serialization_failure",
+    "connection_failure",
+    "query_cancelled",
+    "lock_unavailable",
+    "other",
+)
+DATABASE_DEPENDENCY_FAILURES = Counter(
+    "startunnel_database_dependency_failures_total",
+    "Handled database dependency failures by fixed reason",
+    ["reason"],
+)
+for _reason in DEPENDENCY_FAILURE_REASONS:
+    DATABASE_DEPENDENCY_FAILURES.labels(reason=_reason)
+
+
+def record_dependency_failure(error: BaseException) -> None:
+    """Count a fixed cause category without retaining exception data."""
+    from psycopg_pool import PoolTimeout, TooManyRequests
+
+    reason = "other"
+    current: BaseException | None = error
+    for _ in range(8):
+        if current is None:
+            break
+        if isinstance(current, PoolTimeout):
+            reason = "pool_timeout"
+            break
+        if isinstance(current, TooManyRequests):
+            reason = "pool_queue_full"
+            break
+        state: object = getattr(current, "sqlstate", None)
+        if isinstance(state, str):
+            reason = {
+                "40P01": "deadlock",
+                "40001": "serialization_failure",
+                "57014": "query_cancelled",
+                "55P03": "lock_unavailable",
+            }.get(state, "connection_failure" if state.startswith("08") else "other")
+            if reason != "other":
+                break
+        current = current.__cause__ or current.__context__
+    DATABASE_DEPENDENCY_FAILURES.labels(reason=reason).inc()
 
 
 def render_metrics() -> bytes:

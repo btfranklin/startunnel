@@ -11,8 +11,28 @@ import time
 
 from prometheus_client import CollectorRegistry, multiprocess
 
-POOL_FIELDS = ("size", "available", "waiting", "queued", "errors", "requests_wait_ms")
+POOL_FIELDS = (
+    "size",
+    "available",
+    "waiting",
+    "queued",
+    "errors",
+    "request_errors",
+    "connection_errors",
+    "connections_lost",
+    "requests_wait_ms",
+)
 POOL_STATUSES = ("ok", "missing", "error")
+DEPENDENCY_REASONS = (
+    "pool_timeout",
+    "pool_queue_full",
+    "deadlock",
+    "serialization_failure",
+    "connection_failure",
+    "query_cancelled",
+    "lock_unavailable",
+    "other",
+)
 
 
 def read_pool(registry: CollectorRegistry) -> dict[str, int | float | None]:
@@ -20,9 +40,16 @@ def read_pool(registry: CollectorRegistry) -> dict[str, int | float | None]:
     values: dict[str, int | float | None] = {
         **{name: None for name in POOL_FIELDS},
         **{f"sampler_{status}": None for status in POOL_STATUSES},
+        **{f"dependency_{reason}": None for reason in DEPENDENCY_REASONS},
     }
     for metric in registry.collect():
         for sample in metric.samples:
+            if sample.name == "startunnel_database_dependency_failures_total":
+                if math.isfinite(sample.value) and sample.value >= 0:
+                    for reason in DEPENDENCY_REASONS:
+                        if sample.labels == {"reason": reason}:
+                            values[f"dependency_{reason}"] = sample.value
+                continue
             if not sample.name.startswith("startunnel_database_pool_"):
                 continue
             name = sample.name.removeprefix("startunnel_database_pool_")

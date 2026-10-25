@@ -59,6 +59,7 @@ module type checks. Keep new Python logic in `scripts/`.
 | `tests/load/profile.py` and `tests/load/run_profile.py` | Load helper; fixture setup, traffic, drain, and cleanup | `tests/tools/test_load_profile.py`, load observation and diagnostic tests; hosted full proof |
 | `scripts/load_observations.py` | Load runner; bounded safe numeric collection | `tests/tools/test_load_observations.py` |
 | `scripts/proof_pool_reader.py` | Observation runner; read approved multiprocess pool fields | `tests/tools/test_load_observations.py` |
+| `src/core/pool_metrics.py` and `src/core/metrics.py` | Opt-in worker pool samples and fixed database failure counters | `tests/unit/test_pool_metrics.py`, `tests/unit/test_dependency_metrics.py`, API contract and load observation tests |
 
 Source CI checks restored data from each published predecessor listed by its
 workflow. A version in `supported_from` also needs exact-image upgrade and

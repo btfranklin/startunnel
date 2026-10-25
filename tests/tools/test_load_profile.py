@@ -406,3 +406,53 @@ async def test_malformed_activity_cursor_fails_with_a_safe_report(
     assert results["successful_sends"] == 1
     assert results["activity_reads"] == 0
     assert "private" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["message_send", "activity_poll", "cycle_close"])
+async def test_http_failures_preserve_operation_and_status_without_response_data(
+    monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    failed = False
+    paths = {
+        "message_send": "/api/v1/messages",
+        "activity_poll": "/api/v1/activity",
+        "cycle_close": "/api/v1/cycles/close",
+    }
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            pass
+
+        async def post(self, path: str, **kwargs: object) -> httpx.Response:
+            nonlocal failed
+            if path == "/api/v1/tunnels":
+                return httpx.Response(201, json=_minimal_created_tunnel())
+            if path == paths[operation] and not failed:
+                failed = True
+                return httpx.Response(503, json={"private-response": "private-credential"})
+            if path == "/api/v1/activity":
+                await asyncio.Event().wait()
+            return httpx.Response(201 if path == "/api/v1/messages" else 204)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    report = await run_load_profile(
+        base_url="http://fixture",
+        host_header=None,
+        manifest=CredentialManifest("run", (Credential("id", "private-key"),)),
+        config=LoadConfig(duration_seconds=1, sends_per_second=1, concurrent_activity_readers=1),
+    )
+    assert failed and report["passed"] is False
+    results = report["results"]
+    assert isinstance(results, dict)
+    assert results["failures_by_status"] == {"503": 1}
+    assert results["http_failures_by_operation"] == {
+        name: {"503": 1} if name == operation else {} for name in paths
+    }
+    assert "private" not in json.dumps(report)

@@ -213,10 +213,23 @@ async def run_load_profile(
     common_headers = {"Host": host_header} if host_header else {}
     timings: list[float] = []
     failures: dict[str, int] = {}
+    http_failures: dict[Literal["message_send", "activity_poll", "cycle_close"], dict[str, int]] = {
+        "message_send": {},
+        "activity_poll": {},
+        "cycle_close": {},
+    }
     transport_errors: dict[Literal["message_send", "activity_poll"], dict[str, int]] = {
         "message_send": {},
         "activity_poll": {},
     }
+
+    def record_http_failure(
+        operation: Literal["message_send", "activity_poll", "cycle_close"], status_code: int
+    ) -> None:
+        status = str(status_code)
+        failures[status] = failures.get(status, 0) + 1
+        counts = http_failures[operation]
+        counts[status] = counts.get(status, 0) + 1
 
     def record_transport_error(
         operation: Literal["message_send", "activity_poll"], error: httpx.HTTPError
@@ -319,8 +332,7 @@ async def run_load_profile(
                                     return
                                 reads += 1
                             else:
-                                status = str(response.status_code)
-                                failures[status] = failures.get(status, 0) + 1
+                                record_http_failure("activity_poll", response.status_code)
                         except httpx.HTTPError as error:
                             record_transport_error("activity_poll", error)
 
@@ -367,8 +379,7 @@ async def run_load_profile(
                         if response.status_code == 201:
                             sent += 1
                         else:
-                            status = str(response.status_code)
-                            failures[status] = failures.get(status, 0) + 1
+                            record_http_failure("message_send", response.status_code)
                     except httpx.HTTPError as error:
                         record_transport_error("message_send", error)
 
@@ -452,9 +463,7 @@ async def run_load_profile(
                             json=close_request,
                         )
                         if response.status_code != 204:
-                            failures[str(response.status_code)] = (
-                                failures.get(str(response.status_code), 0) + 1
-                            )
+                            record_http_failure("cycle_close", response.status_code)
         workload_completed = True
 
     finally:
@@ -489,6 +498,7 @@ async def run_load_profile(
                     "successful_sends": sent,
                     "activity_reads": reads,
                     "failures_by_status": failures,
+                    "http_failures_by_operation": http_failures,
                     "transport_errors_by_operation": transport_errors,
                     "driver": {
                         "scheduled_sends": scheduled,
