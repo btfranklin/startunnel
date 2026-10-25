@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 if __package__:
+    from .proof_evidence import (
+        KINDS,
+        checksum,
+        read_object,
+        record_proof,
+        referenced_file,
+        validate_proof,
+    )
     from .release_record import ROOT, candidate_version
 else:
+    from proof_evidence import (  # type: ignore[import-not-found,no-redef]
+        KINDS,
+        checksum,
+        read_object,
+        record_proof,
+        referenced_file,
+        validate_proof,
+    )
     from release_record import ROOT, candidate_version  # type: ignore[import-not-found,no-redef]
 
 OFFICIAL_IMAGE = re.compile(r"ghcr\.io/btfranklin/startunnel@sha256:[0-9a-f]{64}")
@@ -70,14 +85,12 @@ def source_run(repository: str, commit: str) -> int:
 
 
 def validated_run(repository: str, commit: str) -> int | None:
-    pages = github_api(
-        repository, "actions/artifacts?name=release-candidate&per_page=100", paginate=True
-    )
+    pages = github_api(repository, "actions/artifacts?per_page=100", paginate=True)
     for page in pages:
         for artifact in page["artifacts"]:
             source = artifact.get("workflow_run", {})
             if (
-                artifact.get("name") != "release-candidate"
+                not re.fullmatch(r"release-candidate-[0-9]+-[12]", artifact.get("name", ""))
                 or artifact.get("expired") is not False
                 or source.get("head_sha") != commit
                 or source.get("head_branch") != "main"
@@ -103,7 +116,7 @@ def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
                     "--repo",
                     repository,
                     "--name",
-                    "release-candidate",
+                    retained_artifact(repository, run_id)["name"],
                     "--dir",
                     directory,
                 ],
@@ -117,56 +130,189 @@ def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
     return {"reuse_run_id": "", "source_run_id": run_id}
 
 
-def one_report(directory: Path, pattern: str) -> tuple[Path, dict[str, Any]]:
-    paths = list(directory.rglob(pattern))
-    if len(paths) != 1:
-        raise ValueError(f"Expected exactly one {pattern} report in the candidate evidence.")
-    data = json.loads(paths[0].read_text())
-    if not isinstance(data, dict):
-        raise ValueError("Evidence report must be a JSON object.")
-    return paths[0], data
+def retained_artifact(repository: str, run_id: int) -> dict[str, Any]:
+    artifacts = [
+        item
+        for page in github_api(
+            repository, f"actions/runs/{run_id}/artifacts?per_page=100", paginate=True
+        )
+        for item in page["artifacts"]
+        if re.fullmatch(rf"release-candidate-{run_id}-[12]", item.get("name", ""))
+    ]
+    if not artifacts:
+        raise ValueError("The selected run has no retained candidate artifact.")
+    artifact = max(artifacts, key=lambda item: int(item["name"].rsplit("-", 1)[1]))
+    if artifact.get("expired") is not False:
+        raise ValueError("Retained candidate evidence has expired.")
+    return cast(dict[str, Any], artifact)
+
+
+def _download(repository: str, run_id: int, artifact: dict[str, Any], directory: Path) -> None:
+    subprocess.run(
+        [
+            "gh",
+            "run",
+            "download",
+            str(run_id),
+            "--repo",
+            repository,
+            "--name",
+            artifact["name"],
+            "--dir",
+            str(directory),
+        ],
+        check=True,
+    )
+
+
+def collect_evidence(repository: str, run_id: int, directory: Path) -> None:
+    """Select attempts explicitly and retain failed attempts beside them."""
+    artifacts = [
+        item
+        for page in github_api(
+            repository, f"actions/runs/{run_id}/artifacts?per_page=100", paginate=True
+        )
+        for item in page["artifacts"]
+    ]
+    named = {item["name"]: item for item in artifacts}
+    if len(named) != len(artifacts):
+        raise ValueError("The workflow contains duplicate artifact names.")
+    directory.mkdir(parents=True, exist_ok=True)
+    candidates = [
+        item
+        for name, item in named.items()
+        if re.fullmatch(rf"candidate-image-{run_id}-[12]", name)
+    ]
+    if not candidates:
+        raise ValueError("The candidate image artifact is missing.")
+    candidate_artifact = max(candidates, key=lambda item: int(item["name"].rsplit("-", 1)[1]))
+    if candidate_artifact.get("expired") is not False:
+        raise ValueError("The candidate image artifact has expired.")
+    _download(repository, run_id, candidate_artifact, directory)
+    selection: dict[str, Any] = {"selected": {}, "history": []}
+    for kind in KINDS:
+        attempts = sorted(
+            (
+                item
+                for name, item in named.items()
+                if re.fullmatch(rf"proof-{kind}-{run_id}-[0-9]+", name)
+            ),
+            key=lambda item: int(item["name"].rsplit("-", 1)[1]),
+        )
+        if not attempts or len(attempts) > 2:
+            raise ValueError(f"The {kind} proof is missing or exceeds the bounded retry limit.")
+        for artifact in attempts:
+            attempt = int(artifact["name"].rsplit("-", 1)[1])
+            if attempt not in (1, 2) or artifact.get("expired") is not False:
+                raise ValueError("A required proof attempt is expired or outside the retry limit.")
+            destination = directory / "proofs" / kind / str(attempt)
+            _download(repository, run_id, artifact, destination)
+            path = destination / f"proof-{kind}.json"
+            record = read_object(path)
+            if (
+                record.get("run_id") != run_id
+                or record.get("attempt") != attempt
+                or record.get("kind") != kind
+            ):
+                raise ValueError("Proof attempt metadata differs from its artifact name.")
+            reference = {
+                "kind": kind,
+                "run_id": run_id,
+                "attempt": attempt,
+                "artifact_id": artifact["id"],
+                "artifact_digest": artifact.get("digest"),
+                "manifest": str(path.relative_to(directory)),
+                "sha256": checksum(path),
+                "status": record.get("status"),
+            }
+            selection["history"].append(reference)
+        latest = selection["history"][-1]
+        if latest["status"] != "passed":
+            raise ValueError(f"The latest {kind} attempt did not pass.")
+        selection["selected"][kind] = latest
+    (directory / "proof-selection.json").write_text(
+        json.dumps(selection, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def verify_evidence(directory: Path, *, commit: str, version: str) -> dict[str, Any]:
-    _, candidate = one_report(directory, "candidate-image.json")
+    candidate = read_object(referenced_file(directory, "candidate-image.json"))
     validate_candidate(candidate, commit=commit, version=version)
-    security_path, security = one_report(directory, "validated-image.json")
-    system_path, system = one_report(directory, "system-proof-*.json")
-    load_image_path, load_image = one_report(directory, "validated-load-image.json")
-    load_path, load = one_report(directory, "load-profile-*.json")
-    for report in (security, load_image):
-        if report.get("status") != "passed" or report.get("image") != candidate["image"]:
-            raise ValueError("Security and load evidence must validate the candidate digest.")
-    if (
-        system.get("status") != "passed"
-        or system.get("build_mode") != "immutable-candidate"
-        or system.get("candidate_image") != candidate["image"]
-        or system.get("release_evidence_eligible") is not True
-        or system.get("disposable_volumes_removed") is not True
-    ):
-        raise ValueError("System proof must pass against the candidate and clean up its volumes.")
-    if (
-        load.get("passed") is not True
-        or load.get("fixture_cleanup_complete") is not True
-        or load.get("provenance", {}).get("build_mode") != "immutable-candidate"
-    ):
-        raise ValueError("Load proof must pass against the candidate with fixture cleanup.")
-    web_image = system.get("image_ids", {}).get("web", "")
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", web_image):
-        raise ValueError("System proof must record the actual runtime image ID.")
-    load_ids = dict(pair.split("=", 1) for pair in load["provenance"]["image_ids"].split(","))
-    if any(load_ids.get(service) != web_image for service in ("web", "maintenance")):
+    selection_path = referenced_file(directory, "proof-selection.json")
+    selection = read_object(selection_path)
+    if set(selection.get("selected", {})) != set(KINDS):
+        raise ValueError("Candidate evidence must select all required proofs.")
+    evidence: dict[str, str] = {"proof-selection.json": checksum(selection_path)}
+    runtime_ids: dict[str, str] = {}
+    history = selection.get("history")
+    if not isinstance(history, list) or not history:
+        raise ValueError("Candidate proof attempt history is missing.")
+    seen: set[tuple[str, int]] = set()
+    for reference in history:
+        kind = reference["kind"]
+        attempt = reference["attempt"]
+        if (
+            kind not in KINDS
+            or type(attempt) is not int
+            or attempt not in (1, 2)
+            or (kind, attempt) in seen
+        ):
+            raise ValueError("Candidate proof attempts are ambiguous or outside the retry limit.")
+        seen.add((kind, attempt))
+        if (
+            type(reference.get("artifact_id")) is not int
+            or reference["artifact_id"] <= 0
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", reference.get("artifact_digest", ""))
+        ):
+            raise ValueError("Proof artifact identity and digest are required.")
+        manifest_path = referenced_file(directory, reference["manifest"])
+        if checksum(manifest_path) != reference["sha256"]:
+            raise ValueError("Retained proof manifest checksum differs.")
+        proof = read_object(manifest_path)
+        if any(
+            proof.get(key) != reference.get(key) for key in ("kind", "run_id", "attempt", "status")
+        ):
+            raise ValueError("Proof reference differs from the retained manifest.")
+        if (
+            proof.get("source_commit") != commit
+            or proof.get("candidate_image") != candidate["image"]
+        ):
+            raise ValueError("Retained attempt belongs to another source or image.")
+        evidence[reference["manifest"]] = checksum(manifest_path)
+        for name, expected in proof.get("files", {}).items():
+            path = referenced_file(manifest_path.parent, name)
+            if checksum(path) != expected:
+                raise ValueError("Retained evidence checksums do not match.")
+            evidence[str(path.relative_to(directory))] = expected
+    for kind, reference in selection["selected"].items():
+        if reference not in history or reference["attempt"] != max(
+            attempt for recorded_kind, attempt in seen if recorded_kind == kind
+        ):
+            raise ValueError("A selected proof must be the latest retained attempt.")
+        manifest_path = referenced_file(directory, reference["manifest"])
+        proof = read_object(manifest_path)
+        validate_proof(
+            proof, manifest_path.parent, kind=kind, commit=commit, image=candidate["image"]
+        )
+        if kind == "system":
+            system = read_object(referenced_file(manifest_path.parent, proof["reports"]["system"]))
+            runtime_ids = system["image_ids"]
+        if kind == "load":
+            load = read_object(referenced_file(manifest_path.parent, proof["reports"]["workload"]))
+            load_ids = dict(
+                pair.split("=", 1) for pair in load["provenance"]["image_ids"].split(",")
+            )
+    if any(
+        runtime_ids.get(service) != runtime_ids["web"]
+        for service in ("migrate", "maintenance", "proxy-web")
+    ) or any(load_ids.get(service) != runtime_ids["web"] for service in ("web", "maintenance")):
         raise ValueError("System and load proofs ran different runtime images.")
-    candidate["evidence"] = {
-        str(path.relative_to(directory)): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (security_path, system_path, load_image_path, load_path)
-    }
-    candidate["status"] = "validated"
+    candidate.update(
+        evidence=evidence, proofs=selection["selected"], attempts=history, status="validated"
+    )
     retained = directory / "release-candidate.json"
-    if retained.exists():
-        old = json.loads(retained.read_text())
-        if old != candidate:
-            raise ValueError("Retained promotion record does not match its evidence checksums.")
+    if retained.exists() and read_object(retained) != candidate:
+        raise ValueError("Retained promotion record does not match its evidence checksums.")
     return candidate
 
 
@@ -184,6 +330,11 @@ def main() -> int:
     action.add_argument("--verify", type=Path, metavar="DIRECTORY")
     action.add_argument("--find-run", metavar="TAG")
     action.add_argument("--prepare", action="store_true")
+    action.add_argument("--collect-run", type=int)
+    action.add_argument("--proof", choices=KINDS)
+    parser.add_argument("--directory", type=Path, default=ROOT / "artifacts")
+    parser.add_argument("--candidate-image", default="")
+    parser.add_argument("--proof-status", default="failure")
     action.add_argument("--check-digest", nargs=2, metavar=("INSPECTION_FILE", "IMAGE"))
     parser.add_argument("--source-run-id", type=int)
     args = parser.parse_args()
@@ -196,7 +347,22 @@ def main() -> int:
             print(version)
             return 0
         commit = git_commit()
-        if args.record:
+        if args.proof:
+            record = record_proof(
+                args.proof,
+                args.directory,
+                commit=commit,
+                image=args.candidate_image,
+                status=args.proof_status,
+            )
+            return 0 if record["status"] == "passed" or args.proof_status != "success" else 1
+        if args.collect_run:
+            collect_evidence(os.environ["GITHUB_REPOSITORY"], args.collect_run, args.directory)
+            candidate = verify_evidence(args.directory, commit=commit, version=version)
+            (args.directory / "release-candidate.json").write_text(
+                json.dumps(candidate, indent=2) + "\n"
+            )
+        elif args.record:
             candidate = {
                 "version": version,
                 "source_commit": commit,
@@ -225,7 +391,10 @@ def main() -> int:
                     raise ValueError(
                         "No retained validated candidate exists for this exact commit."
                     )
-                outputs = {"run_id": run_id}
+                outputs = {
+                    "run_id": run_id,
+                    "artifact_name": retained_artifact(repository, run_id)["name"],
+                }
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as destination:
                 for name, value in outputs.items():
                     destination.write(f"{name}={value}\n")

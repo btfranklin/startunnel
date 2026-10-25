@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from scripts import compose_isolation as isolation
+from scripts import proof_evidence
 from scripts import release_candidate as candidate
 from scripts import release_draft as draft
 from tests.structure.workflows import load_workflow
@@ -63,7 +64,14 @@ def test_failed_artifact_lookup_does_not_trigger_new_build_work(
         candidate.prepare("owner/repository", COMMIT, "v0.1.0")
 
 
-def evidence(directory: Path) -> dict[str, Any]:
+def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    monkeypatch.setattr(
+        proof_evidence,
+        "proof_inputs",
+        lambda kind, commit: {"kind": kind, "source_commit": commit, "platform": "linux/amd64"},
+    )
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     record = {
         "source_commit": COMMIT,
         "version": "v0.1.0",
@@ -71,58 +79,125 @@ def evidence(directory: Path) -> dict[str, Any]:
         "platform": "linux/amd64",
         "source_validation_run_id": 7,
     }
-    files = {
-        "candidate-image.json": record,
-        "validated-image.json": {"status": "passed", "image": IMAGE},
-        "validated-load-image.json": {"status": "passed", "image": IMAGE},
-        "system-proof-fixture.json": {
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "candidate-image.json").write_text(json.dumps(record))
+    selection: dict[str, Any] = {"selected": {}, "history": []}
+    for kind in proof_evidence.KINDS:
+        attempt_dir = directory / "proofs" / kind / "1"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        if kind == "security":
+            report = attempt_dir / "security" / "scan" / "validated-image.json"
+            report.parent.mkdir(parents=True)
+            report.write_text(json.dumps({"status": "passed", "image": IMAGE}))
+        elif kind == "system":
+            (attempt_dir / "system-proof-fixture.json").write_text(
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "build_mode": "immutable-candidate",
+                        "candidate_image": IMAGE,
+                        "release_evidence_eligible": True,
+                        "disposable_volumes_removed": True,
+                        "image_ids": {
+                            service: IMAGE_ID
+                            for service in ("web", "migrate", "maintenance", "proxy-web")
+                        },
+                    }
+                )
+            )
+        else:
+            (attempt_dir / "load-workload.json").write_text(
+                json.dumps(
+                    {
+                        "passed": True,
+                        "fixture_cleanup_complete": True,
+                        "configuration": proof_evidence.LOAD_CONFIGURATION,
+                        "provenance": {
+                            "build_mode": "immutable-candidate",
+                            "image_ids": f"web={IMAGE_ID},maintenance={IMAGE_ID}",
+                        },
+                    }
+                )
+            )
+            (attempt_dir / "load-observations.jsonl").write_text("{}\n")
+            (attempt_dir / "load-driver-observations.jsonl").write_text("{}\n")
+            (attempt_dir / "load-run-fixture.json").write_text(
+                json.dumps(
+                    {
+                        "status": "passed",
+                        "candidate_image": IMAGE,
+                        "source_commit": COMMIT,
+                        "platform": "linux/amd64",
+                        "release_evidence_eligible": True,
+                        "disposable_volumes_removed": True,
+                        "workload_report": "load-workload.json",
+                        "observations_file": "load-observations.jsonl",
+                        "driver_observations_file": "load-driver-observations.jsonl",
+                    }
+                )
+            )
+        if kind != "security":
+            source_hashes = {
+                name: proof_evidence.checksum(proof_evidence.ROOT / name)
+                for name in ("Dockerfile", "pyproject.toml", "pdm.lock")
+            }
+            (attempt_dir / "proof-build-fixture.json").write_text(
+                json.dumps(
+                    {
+                        "source_revision": COMMIT,
+                        "platform": "linux/amd64",
+                        "hashes": source_hashes,
+                    }
+                )
+            )
+        proof_evidence.record_proof(kind, attempt_dir, commit=COMMIT, image=IMAGE, status="success")
+        relative_manifest = str((attempt_dir / f"proof-{kind}.json").relative_to(directory))
+        reference = {
+            "kind": kind,
+            "run_id": 42,
+            "attempt": 1,
+            "artifact_id": 100 + proof_evidence.KINDS.index(kind),
+            "artifact_digest": "sha256:" + "e" * 64,
+            "manifest": relative_manifest,
+            "sha256": proof_evidence.checksum(attempt_dir / f"proof-{kind}.json"),
             "status": "passed",
-            "build_mode": "immutable-candidate",
-            "candidate_image": IMAGE,
-            "release_evidence_eligible": True,
-            "disposable_volumes_removed": True,
-            "image_ids": {"web": IMAGE_ID},
-        },
-        "load-profile-fixture.json": {
-            "passed": True,
-            "fixture_cleanup_complete": True,
-            "provenance": {
-                "build_mode": "immutable-candidate",
-                "image_ids": f"web={IMAGE_ID},maintenance={IMAGE_ID}",
-            },
-        },
-    }
-    for name, value in files.items():
-        (directory / name).write_text(json.dumps(value))
+        }
+        selection["selected"][kind] = reference
+        selection["history"].append(reference)
+    (directory / "proof-selection.json").write_text(json.dumps(selection, indent=2, sort_keys=True))
     return record
 
 
-def test_evidence_requires_same_digest_and_actual_runtime(tmp_path: Path) -> None:
-    evidence(tmp_path)
+def test_evidence_requires_same_digest_and_actual_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
     result = candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
     assert result["status"] == "validated"
-    assert len(result["evidence"]) == 4
-    wrong = tmp_path / "validated-image.json"
+    assert len(result["proofs"]) == 3
+    wrong = tmp_path / "proofs/security/1/security/scan/validated-image.json"
     wrong.write_text(json.dumps({"status": "passed", "image": IMAGE.replace("a", "d")}))
-    with pytest.raises(ValueError, match="candidate digest"):
+    with pytest.raises(ValueError, match="checksums"):
         candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
 
 
 @pytest.mark.parametrize("kind", ["source", "missing", "diagnostic", "load-image", "cleanup"])
-def test_rejects_incomplete_or_unrelated_evidence(tmp_path: Path, kind: str) -> None:
-    evidence(tmp_path)
+def test_rejects_incomplete_or_unrelated_evidence(
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
     commit = COMMIT
     if kind == "source":
         commit = "d" * 40
     elif kind == "missing":
-        (tmp_path / "validated-image.json").unlink()
+        (tmp_path / "proofs/security/1/proof-security.json").unlink()
     elif kind == "diagnostic":
-        path = tmp_path / "system-proof-fixture.json"
+        path = tmp_path / "proofs/system/1/system-proof-fixture.json"
         report = json.loads(path.read_text())
         report["build_mode"] = "reused-current-images"
         path.write_text(json.dumps(report))
     else:
-        path = tmp_path / "load-profile-fixture.json"
+        path = tmp_path / "proofs/load/1/load-workload.json"
         report = json.loads(path.read_text())
         if kind == "cleanup":
             report["fixture_cleanup_complete"] = False
@@ -133,15 +208,70 @@ def test_rejects_incomplete_or_unrelated_evidence(tmp_path: Path, kind: str) -> 
         candidate.verify_evidence(tmp_path, commit=commit, version="v0.1.0")
 
 
-def test_retained_evidence_hashes_are_checked(tmp_path: Path) -> None:
-    evidence(tmp_path)
+def test_retained_evidence_hashes_are_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
     validated = candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
     (tmp_path / "release-candidate.json").write_text(json.dumps(validated))
     assert candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0") == validated
-    path = tmp_path / "validated-image.json"
+    path = tmp_path / "proofs/security/1/security/scan/validated-image.json"
     path.write_text(path.read_text() + "\n")
     with pytest.raises(ValueError, match="checksums"):
         candidate.verify_evidence(tmp_path, commit=COMMIT, version="v0.1.0")
+
+
+def test_collect_selects_passed_second_attempt_and_retains_first_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    evidence(source, monkeypatch)
+    artifacts = [artifact(name="candidate-image-42-1", artifact_id=1)]
+    sources: dict[str, Path] = {"candidate-image-42-1": source}
+    next_id = 10
+    for kind in proof_evidence.KINDS:
+        first = source / "proofs" / kind / "1" / f"proof-{kind}.json"
+        first_record = json.loads(first.read_text())
+        first_record["status"] = "failed"
+        first.write_text(json.dumps(first_record))
+        second_dir = source / "attempt-2" / kind
+        shutil.copytree(first.parent, second_dir)
+        second = second_dir / f"proof-{kind}.json"
+        second_record = json.loads(second.read_text())
+        second_record.update(attempt=2, status="passed")
+        second.write_text(json.dumps(second_record))
+        for attempt, proof_dir in ((1, first.parent), (2, second_dir)):
+            name = f"proof-{kind}-42-{attempt}"
+            artifacts.append(artifact(name=name, artifact_id=next_id))
+            next_id += 1
+            sources[name] = proof_dir
+
+    monkeypatch.setattr(candidate, "github_api", lambda *args, **kwargs: [{"artifacts": artifacts}])
+
+    def download(
+        _repository: str, _run_id: int, selected: dict[str, Any], destination: Path
+    ) -> None:
+        source_path = sources[selected["name"]]
+        destination.mkdir(parents=True, exist_ok=True)
+        if selected["name"].startswith("candidate-image-"):
+            shutil.copy(source_path / "candidate-image.json", destination / "candidate-image.json")
+        else:
+            shutil.copytree(source_path, destination, dirs_exist_ok=True)
+
+    monkeypatch.setattr(candidate, "_download", download)
+    retained = tmp_path / "retained"
+    candidate.collect_evidence("owner/repository", 42, retained)
+    result = candidate.verify_evidence(retained, commit=COMMIT, version="v0.1.0")
+
+    assert [entry["status"] for entry in result["attempts"] if entry["kind"] == "security"] == [
+        "failed",
+        "passed",
+    ]
+    assert all(reference["attempt"] == 2 for reference in result["proofs"].values())
+    assert set(result["evidence"]) >= {
+        "proof-selection.json",
+        *[reference["manifest"] for reference in result["proofs"].values()],
+    }
 
 
 def run_record(
@@ -158,9 +288,13 @@ def run_record(
     }
 
 
-def artifact(*, expired: bool = False) -> dict[str, Any]:
+def artifact(
+    *, expired: bool = False, name: str | None = None, artifact_id: int = 77
+) -> dict[str, Any]:
     return {
-        "name": "release-candidate",
+        "id": artifact_id,
+        "name": name or "release-candidate-42-1",
+        "digest": "sha256:" + "e" * 64,
         "expired": expired,
         "workflow_run": {"id": 42, "head_sha": COMMIT, "head_branch": "main"},
     }
@@ -201,19 +335,28 @@ def test_promotion_finds_retained_candidate_across_artifact_pages(
 
     def github(command: list[str], **kwargs: Any) -> str:
         calls.append(command)
-        if "actions/artifacts?" in command[2]:
+        if command[2] == "repos/owner/repository/actions/artifacts?per_page=100":
             assert command[-2:] == ["--paginate", "--slurp"]
-            wrong = {**artifact(), "workflow_run": {"head_sha": "other"}}
+            wrong = {
+                **artifact(name="release-candidate-42-1"),
+                "workflow_run": {"head_sha": "other"},
+            }
             return json.dumps(
-                [{"artifacts": [artifact(expired=True), wrong]}, {"artifacts": [artifact()]}]
+                [
+                    {"artifacts": [artifact(name="release-candidate-42-1", expired=True), wrong]},
+                    {"artifacts": [artifact(name="release-candidate-42-1")]},
+                ]
             )
-        assert command[2] == "repos/owner/repository/actions/runs/42"
-        return json.dumps(run_record())
+        if command[2] == "repos/owner/repository/actions/runs/42":
+            return json.dumps(run_record())
+        if command[2] == "repos/owner/repository/actions/runs/42/artifacts?per_page=100":
+            return json.dumps([{"artifacts": [artifact(name="release-candidate-42-1")]}])
+        raise AssertionError(command)
 
     monkeypatch.setattr("scripts.release_candidate.subprocess.check_output", github)
     assert candidate.main() == 0
-    assert output.read_text() == "run_id=42\n"
-    assert len(calls) == 2
+    assert output.read_text() == "run_id=42\nartifact_name=release-candidate-42-1\n"
+    assert len(calls) == 3
 
 
 @pytest.mark.parametrize(
@@ -300,14 +443,19 @@ def test_candidate_reuse_verifies_downloaded_evidence_before_skipping_work(
     def download(command: list[str], **kwargs: Any) -> None:
         assert command[:6] == ["gh", "run", "download", "42", "--repo", "owner/repository"]
         directory = Path(command[-1])
-        evidence(directory)
+        evidence(directory, monkeypatch)
         retained = candidate.verify_evidence(directory, commit=COMMIT, version="v0.1.0")
         (directory / "release-candidate.json").write_text(json.dumps(retained))
         if tampered:
-            path = directory / "validated-image.json"
+            path = directory / "proofs/security/1/security/scan/validated-image.json"
             path.write_text(path.read_text() + "\n")
 
     monkeypatch.setattr("scripts.release_candidate.subprocess.run", download)
+    monkeypatch.setattr(
+        candidate,
+        "github_api",
+        lambda *args, **kwargs: [{"artifacts": [artifact(name="release-candidate-42-1")]}],
+    )
     if tampered:
         with pytest.raises(ValueError, match="checksums"):
             candidate.prepare("owner/repository", COMMIT, "v0.1.0")

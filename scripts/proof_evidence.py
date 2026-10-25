@@ -1,0 +1,268 @@
+"""Bind safe proof reports to exact source, inputs, and immutable artifacts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+KINDS = ("security", "system", "load")
+LOAD_CONFIGURATION = {
+    "duration_seconds": 300,
+    "drain_seconds": 30,
+    "sends_per_second": 50,
+    "concurrent_activity_readers": 100,
+    "max_in_flight_sends": 256,
+    "web_workers": "4",
+    "web_database_pool_max_size": "18",
+    "credential_count": 500,
+    "tunnel_count": 10,
+}
+
+
+def read_object(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("Evidence must contain a JSON object.")
+    return value
+
+
+def checksum(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def referenced_file(directory: Path, name: str) -> Path:
+    path = Path(name)
+    if path.is_absolute() or ".." in path.parts or not path.parts:
+        raise ValueError("Evidence paths must stay inside their artifact.")
+    result = directory / path
+    if (
+        result.is_symlink()
+        or not result.is_file()
+        or not result.resolve().is_relative_to(directory.resolve())
+    ):
+        raise ValueError("Evidence file is missing or outside its artifact.")
+    return result
+
+
+def proof_inputs(kind: str, commit: str) -> dict[str, Any]:
+    if kind not in KINDS:
+        raise ValueError("Unknown proof kind.")
+    # Hash tracked proof inputs as well as the commit. This also rejects local
+    # edits to proof code when someone supplies a candidate built from HEAD.
+    files = (
+        subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--",
+                "Dockerfile",
+                "compose*.yaml",
+                "pyproject.toml",
+                "pdm.lock",
+                "scripts",
+                "tests",
+                "src",
+                "docker",
+                ".github",
+            ],
+            cwd=ROOT,
+        )
+        .decode()
+        .split("\0")
+    )
+    inputs: dict[str, Any] = {
+        "source_commit": commit,
+        "platform": "linux/amd64",
+        "files": {name: checksum(ROOT / name) for name in files if name},
+        "profiles": {
+            "security": [],
+            "system": ["examples", "agents", "proxy-proof"],
+            "load": ["load"],
+        }[kind],
+    }
+    if kind == "load":
+        inputs["configuration"] = LOAD_CONFIGURATION
+        inputs["drain_seconds"] = 30
+        inputs["active_credential_limit"] = 500
+    return inputs
+
+
+def fingerprint(inputs: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _one(directory: Path, pattern: str) -> Path:
+    paths = list(directory.glob(pattern))
+    if len(paths) != 1:
+        raise ValueError(f"Expected one {pattern} report in this proof attempt.")
+    return paths[0]
+
+
+def record_proof(
+    kind: str, directory: Path, *, commit: str, image: str, status: str
+) -> dict[str, Any]:
+    """Write one attempt manifest, including failed and incomplete attempts."""
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    inputs = proof_inputs(kind, commit)
+    record: dict[str, Any] = {
+        "kind": kind,
+        "source_commit": commit,
+        "candidate_image": image,
+        "platform": "linux/amd64",
+        "run_id": int(os.environ["GITHUB_RUN_ID"]),
+        "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+        "status": "passed" if status == "success" else "failed",
+        "inputs": inputs,
+        "input_fingerprint": fingerprint(inputs),
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "files": {},
+        "reports": {},
+    }
+    try:
+        reports: dict[str, Path] = {}
+        if kind == "security":
+            reports["validation"] = _one(directory, "security/*/validated-image.json")
+            files = [path for path in reports["validation"].parent.iterdir() if path.is_file()]
+        elif kind == "system":
+            reports["system"] = _one(directory, "system-proof-*.json")
+            files = [reports["system"], *directory.glob("proof-build-*.json")]
+        else:
+            reports["execution"] = _one(directory, "load-run-*.json")
+            execution = read_object(reports["execution"])
+            reports["workload"] = referenced_file(directory, execution["workload_report"])
+            reports["observations"] = referenced_file(directory, execution["observations_file"])
+            reports["driver_observations"] = referenced_file(
+                directory, execution["driver_observations_file"]
+            )
+            files = [*reports.values(), *directory.glob("proof-build-*.json")]
+        record["reports"] = {
+            name: str(path.relative_to(directory)) for name, path in reports.items()
+        }
+        record["files"] = {str(path.relative_to(directory)): checksum(path) for path in files}
+        if record["status"] == "passed":
+            validate_proof(record, directory, kind=kind, commit=commit, image=image)
+    except ValueError, KeyError, OSError, TypeError:
+        record["status"] = "failed"
+        record["incomplete"] = True
+        # Retain all safe reports that were produced before a failed phase.
+        patterns = {
+            "security": ("security/**/*.json", "security/**/*.sarif"),
+            "system": ("system-proof-*.json", "proof-build-*.json"),
+            "load": (
+                "load-run-*.json",
+                "load-profile-*.json",
+                "load-observations-*.jsonl",
+                "load-profile-*.driver.jsonl",
+                "proof-build-*.json",
+            ),
+        }[kind]
+        record["files"] = {
+            str(path.relative_to(directory)): checksum(path)
+            for pattern in patterns
+            for path in directory.glob(pattern)
+            if path.is_file() and not path.is_symlink()
+        }
+    (directory / f"proof-{kind}.json").write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n"
+    )
+    return record
+
+
+def validate_proof(
+    record: dict[str, Any], directory: Path, *, kind: str, commit: str, image: str
+) -> None:
+    """Check one selected successful attempt without searching its history."""
+    inputs = proof_inputs(kind, commit)
+    if any(
+        record.get(key) != value
+        for key, value in {
+            "kind": kind,
+            "source_commit": commit,
+            "candidate_image": image,
+            "platform": "linux/amd64",
+            "status": "passed",
+            "inputs": inputs,
+            "input_fingerprint": fingerprint(inputs),
+        }.items()
+    ):
+        raise ValueError("Proof source, image, platform, inputs, or status do not match.")
+    if (
+        type(record.get("run_id")) is not int
+        or type(record.get("attempt")) is not int
+        or not 1 <= record["attempt"] <= 2
+    ):
+        raise ValueError("Proof must identify a bounded workflow attempt.")
+    files = record.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError("Proof has no retained files.")
+    for name, expected in files.items():
+        if (
+            not isinstance(expected, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected)
+            or checksum(referenced_file(directory, name)) != expected
+        ):
+            raise ValueError("Proof evidence checksums do not match.")
+    reports = record["reports"]
+    for name in reports.values():
+        if name not in files:
+            raise ValueError("Selected report is not checksum protected.")
+    if kind == "security":
+        report = read_object(referenced_file(directory, reports["validation"]))
+        if report.get("status") != "passed" or report.get("image") != image:
+            raise ValueError("Security proof does not validate the candidate.")
+        return
+    build_paths = [name for name in files if Path(name).name.startswith("proof-build-")]
+    if not build_paths:
+        raise ValueError("Proof helper build provenance is missing.")
+    for name in build_paths:
+        build = read_object(referenced_file(directory, name))
+        if build.get("source_revision") != commit or build.get("platform") != "linux/amd64":
+            raise ValueError("Proof helper source or platform differs.")
+        if build.get("hashes") != {
+            name: checksum(ROOT / name) for name in ("Dockerfile", "pyproject.toml", "pdm.lock")
+        }:
+            raise ValueError("Proof helper dependency inputs differ.")
+    if kind == "system":
+        report = read_object(referenced_file(directory, reports["system"]))
+        if (
+            report.get("status") != "passed"
+            or report.get("build_mode") != "immutable-candidate"
+            or report.get("candidate_image") != image
+            or report.get("release_evidence_eligible") is not True
+            or report.get("disposable_volumes_removed") is not True
+        ):
+            raise ValueError("System proof must pass and remove disposable volumes.")
+        for service in ("web", "migrate", "maintenance", "proxy-web"):
+            if not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", report.get("image_ids", {}).get(service, "")
+            ):
+                raise ValueError("System proof is missing required runtime identities.")
+        return
+    report = read_object(referenced_file(directory, reports["execution"]))
+    workload = read_object(referenced_file(directory, reports["workload"]))
+    if (
+        report.get("status") != "passed"
+        or report.get("candidate_image") != image
+        or report.get("source_commit") != commit
+        or report.get("platform") != "linux/amd64"
+        or report.get("release_evidence_eligible") is not True
+        or report.get("disposable_volumes_removed") is not True
+    ):
+        raise ValueError("Load execution must pass with exact identity and stack cleanup.")
+    if workload.get("passed") is not True or workload.get("fixture_cleanup_complete") is not True:
+        raise ValueError("Load workload and fixture cleanup must pass.")
+    config = workload.get("configuration", {})
+    if any(config.get(key) != value for key, value in LOAD_CONFIGURATION.items()):
+        raise ValueError("Load configuration differs from the fixed release workload.")
+    if workload.get("provenance", {}).get("build_mode") != "immutable-candidate":
+        raise ValueError("Load workload did not use an immutable candidate.")
