@@ -78,7 +78,7 @@ jobs:
         if: inputs.candidate_image != ''
         env:
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
-        run: docker pull "$CANDIDATE_IMAGE"
+        run: docker pull --platform linux/amd64 "$CANDIDATE_IMAGE"
       - name: Run the fail-closed security lane
         env:
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
@@ -137,6 +137,14 @@ jobs:
           fi
           python3 scripts/run_isolated_test_lane.py system "${args[@]}" \
             --project-name strelease-system-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prove production installation with the exact image
+        if: inputs.candidate_image != ''
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: >-
+          python3 scripts/prove_production_release.py
+          --candidate-image "$CANDIDATE_IMAGE"
+          --project-name stproof-production-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Record the system proof attempt
         if: always()
         env:
@@ -152,6 +160,7 @@ jobs:
           name: proof-system-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/system-proof-*.json
+            artifacts/production-release-proof-*.json
             artifacts/proof-system.json
             artifacts/proof-build-*.json
             artifacts/proof-build-failure-*.log

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
+import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -21,11 +24,11 @@ import pytest
 import yaml
 from examples.python.startunnel_client import StarTunnelError
 from scripts import compose_isolation as isolation
+from scripts import proof_runtime, system_proof
 from scripts import prove_activity_restart as activity_worker
 from scripts import run_full_load_profile as load_runner
 from scripts import run_isolated_test_lane as lane_runner
 from scripts import run_resource_measurement as resource_runner
-from scripts import system_proof
 from scripts.json_data import JsonObject, json_array, json_object, json_string
 from tests.structure.workflows import load_workflow
 
@@ -103,19 +106,25 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
                 self.proof_services_created = True
             if args[0] == "up" and "--wait" in args:
                 self.running = True
-            if args[-1] == "runtime-contents-proof":
+            if args[-1] == "contents":
                 assert self.running
-                assert args[:5] == ("exec", "-T", "web", "/app/.venv/bin/python", "-c")
+                assert args[:5] == (
+                    "exec",
+                    "-T",
+                    "web",
+                    "/app/.venv/bin/python",
+                    proof_runtime.CONTAINER_PATH,
+                )
                 self.runtime_contents_checked = True
             if self.backup_finished and not self.database_loss_started:
-                if args[-1].startswith("health-proof-200"):
+                if args[-3:-1] == ("health", "200"):
                     self.availability_checked = True
                 elif args[0] != "stop":
                     assert args[0] not in {"up", "restart", "stop"}
             if args[0] == "stop" and args[-1] == "postgres":
                 assert self.availability_checked
                 self.database_loss_started = True
-            if args[-1].startswith("health-proof-"):
+            if args[-3] == "health":
                 assert self.running
 
         def capture(self, *args: str, **kwargs: object) -> str:
@@ -128,12 +137,6 @@ def test_system_outage_proof_checks_online_backup_availability_before_database_l
         value.backup_finished = True
 
     monkeypatch.setattr(system_proof, "_coordinated_restore_proof", online_backup)
-    monkeypatch.setattr(system_proof, "_runtime_contents_script", lambda: "runtime-contents-proof")
-    monkeypatch.setattr(
-        system_proof,
-        "_web_health_script",
-        lambda status, *, path="/health/ready": f"health-proof-{status}-{path}",
-    )
     monkeypatch.setattr(system_proof, "_assert_reusable_images", lambda value: None)
     monkeypatch.setattr(system_proof, "_run_activity_restart_proof", lambda value: None)
     monkeypatch.setattr(system_proof, "_system_host_profile", lambda value: {})
@@ -383,20 +386,196 @@ def test_production_compose_uses_operator_origin_or_https_default(
         assert services[name]["environment"]["STARTUNNEL_CSRF_TRUSTED_ORIGINS"] == expected_trusted
 
 
-def test_system_health_probe_outlasts_database_pool_acquisition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_system_health_probe_accepts_normal_response() -> None:
+    calls: list[tuple[str, float, str, str]] = []
+
+    class Response:
+        status = 200
+
+    def open_health(
+        request: urllib.request.Request, timeout: float
+    ) -> proof_runtime.HealthResponse:
+        calls.append(
+            (
+                request.full_url,
+                timeout,
+                request.get_header("Host") or "",
+                request.get_header("X-forwarded-proto") or "",
+            )
+        )
+        return Response()
+
+    proof_runtime.check_health(200, "/health/live", urlopen=open_health)
+    assert calls == [("http://127.0.0.1:8000/health/live", 10, "web", "https")]
+
+
+def test_system_health_probe_accepts_expected_http_error() -> None:
     calls: list[tuple[str, float]] = []
 
-    def unavailable(request: urllib.request.Request, timeout: float) -> object:
+    def unavailable(
+        request: urllib.request.Request, timeout: float
+    ) -> proof_runtime.HealthResponse:
         calls.append((request.full_url, timeout))
         raise urllib.error.HTTPError(request.full_url, 503, "Unavailable", HTTPMessage(), None)
 
-    monkeypatch.setattr(urllib.request, "urlopen", unavailable)
-    exec(system_proof._web_health_script(503), {})
+    proof_runtime.check_health(503, "/health/ready", urlopen=unavailable)
     assert calls == [("http://127.0.0.1:8000/health/ready", 10)]
     with pytest.raises(AssertionError):
-        exec(system_proof._web_health_script(200), {})
+        proof_runtime.check_health(200, "/health/ready", urlopen=unavailable)
+
+
+def test_runtime_probe_reads_only_metrics_file_inodes(tmp_path: Path) -> None:
+    metric = tmp_path / "gauge_livesum_42.db"
+    metric.write_bytes(b"private metric contents")
+    (tmp_path / "unrelated.key").write_text("private input")
+    assert proof_runtime.metrics_file_inodes(tmp_path) == {metric.name: metric.stat().st_ino}
+
+
+def test_runtime_settings_probe_prints_only_the_settings_module(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "startunnel.settings.production")
+    monkeypatch.setenv("STARTUNNEL_SECRET_KEY", "private-input-not-for-output")
+    assert proof_runtime.main(["settings"]) == 0
+    output = capsys.readouterr()
+    assert output.out == "startunnel.settings.production\n"
+    assert output.err == ""
+
+
+def _runtime_contents_inputs() -> dict[str, object]:
+    client_bytes = b"checked client"
+    return {
+        "build": {"version": "0.4.1", "source_revision": "a" * 40},
+        "client_bytes": client_bytes,
+        "client_output": json.dumps(
+            {
+                "version": "0.4.1",
+                "source_revision": "a" * 40,
+                "sha256": hashlib.sha256(client_bytes).hexdigest(),
+            }
+        ),
+        "ca_certificate_count": 1,
+        "static_sources": {name: True for name in proof_runtime.STATIC_ASSETS},
+        "collected_assets": {name: True for name in proof_runtime.STATIC_ASSETS},
+        "available_tools": {name: False for name in proof_runtime.RUNTIME_TOOLS},
+    }
+
+
+def test_runtime_contents_probe_checks_assets_ca_build_identity_and_tools() -> None:
+    proof_runtime.validate_runtime_contents(**_runtime_contents_inputs())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("ca_certificate_count", 0, "Missing CA certificates"),
+        (
+            "client_output",
+            json.dumps(
+                {
+                    "version": "0.4.0",
+                    "source_revision": "a" * 40,
+                    "sha256": hashlib.sha256(b"checked client").hexdigest(),
+                }
+            ),
+            "Server and client versions differ",
+        ),
+        (
+            "client_output",
+            json.dumps(
+                {
+                    "version": "0.4.1",
+                    "source_revision": "b" * 40,
+                    "sha256": hashlib.sha256(b"checked client").hexdigest(),
+                }
+            ),
+            "Server and client sources differ",
+        ),
+    ],
+)
+def test_runtime_contents_probe_rejects_ca_or_client_identity_failures(
+    field: str, value: object, message: str
+) -> None:
+    values = _runtime_contents_inputs()
+    values[field] = value
+    with pytest.raises(AssertionError, match=message):
+        proof_runtime.validate_runtime_contents(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("field", "key", "message"),
+    [
+        ("static_sources", "css/site.css", "Missing static source"),
+        ("collected_assets", "js/site.js", "Empty collected asset"),
+        ("available_tools", "pip", "Unexpected runtime tool"),
+    ],
+)
+def test_runtime_contents_probe_rejects_missing_or_extra_runtime_contents(
+    field: str, key: str, message: str
+) -> None:
+    values = _runtime_contents_inputs()
+    contents = values[field]
+    assert isinstance(contents, dict)
+    contents[key] = field == "available_tools"
+    with pytest.raises(AssertionError, match=message):
+        proof_runtime.validate_runtime_contents(**values)  # type: ignore[arg-type]
+
+
+def test_runtime_pip_probe_rejects_broken_installed_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pip_package = tmp_path / "pip"
+    pip_package.mkdir()
+    (pip_package / "__init__.py").write_text("# installed package without __main__\n")
+    monkeypatch.setattr(sys, "path", [str(tmp_path)])
+    monkeypatch.delitem(sys.modules, "pip", raising=False)
+    assert importlib.util.find_spec("pip") is not None
+    with pytest.raises(AssertionError, match="pip is installed"):
+        proof_runtime.check_no_pip()
+
+
+def test_runtime_pip_probe_accepts_package_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "path", [])
+    monkeypatch.delitem(sys.modules, "pip", raising=False)
+    assert importlib.util.find_spec("pip") is None
+    proof_runtime.check_no_pip()
+
+
+def test_system_proof_mounts_the_typed_runtime_probe_read_only() -> None:
+    source = (ROOT / "compose.test.yaml").read_text()
+    compose = yaml.safe_load(re.sub(r"!(?:reset|override)\b", "", source))
+    volume = compose["services"]["web"]["volumes"][0]
+    assert volume == {
+        "type": "bind",
+        "source": "./scripts/proof_runtime.py",
+        "target": proof_runtime.CONTAINER_PATH,
+        "read_only": True,
+    }
+
+
+def test_runtime_probe_command_routes_arguments_to_typed_functions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    health_calls: list[tuple[int, str]] = []
+    contents_calls: list[bool] = []
+    monkeypatch.setattr(
+        proof_runtime,
+        "check_health",
+        lambda status, path: health_calls.append((status, path)),
+    )
+    monkeypatch.setattr(
+        proof_runtime,
+        "check_runtime_contents",
+        lambda: contents_calls.append(True),
+    )
+    monkeypatch.setattr(proof_runtime, "check_no_pip", lambda: contents_calls.append(False))
+    assert proof_runtime.main(["health", "503", "/health/ready"]) == 0
+    assert proof_runtime.main(["contents"]) == 0
+    assert proof_runtime.main(["pip-absence"]) == 0
+    assert health_calls == [(503, "/health/ready")]
+    assert contents_calls == [True, False]
 
 
 @pytest.mark.parametrize(

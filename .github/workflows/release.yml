@@ -58,16 +58,7 @@ jobs:
         id: candidate
         env:
           VALIDATION_RUN_ID: ${{ steps.ci.outputs.run_id }}
-        run: |
-          python3 scripts/release_candidate.py --verify artifacts/promotion
-          python3 - <<'PY'
-          import json, os, pathlib, subprocess
-          candidate = json.loads(pathlib.Path('artifacts/promotion/release-candidate.json').read_text())
-          image = candidate['image']
-          subprocess.run(['python3', 'scripts/release_record.py', '--write', os.environ['RELEASE_TAG'], image, '--validation-run', os.environ['VALIDATION_RUN_ID']], check=True)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'image={image}\n')
-          PY
+        run: python3 scripts/release_workflow.py record --evidence artifacts/promotion --validation-run "$VALIDATION_RUN_ID"
       - name: Check draft recovery is permitted
         run: python3 scripts/release_draft.py "$RELEASE_TAG" --check
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -99,17 +90,7 @@ jobs:
         env:
           GENERATED_NOTES: ${{ steps.notes.outcome == 'success' && steps.notes.outputs.release_notes || '' }}
           VALIDATION_RUN_ID: ${{ steps.ci.outputs.run_id }}
-        run: |
-          python3 - <<'PY'
-          import os, pathlib
-          notes = pathlib.Path('release-notes.md')
-          reviewed = notes.read_text().rstrip()
-          summary = os.environ['GENERATED_NOTES'].strip()
-          run_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['VALIDATION_RUN_ID']}"
-          if summary:
-              reviewed = summary + '\n\n' + reviewed
-          notes.write_text(reviewed + '\n\nValidation: ' + run_url + '\n')
-          PY
+        run: python3 scripts/release_workflow.py notes --validation-run "$VALIDATION_RUN_ID"
       - name: Create or recover the draft release
         run: python3 scripts/release_draft.py "$RELEASE_TAG"
       - name: Report promotion time

@@ -80,6 +80,45 @@ def candidate_version() -> str:
     return version
 
 
+def write_record(
+    version: str,
+    image: str,
+    *,
+    validation_run_id: int | None = None,
+    platform: str = "linux/amd64",
+    output_directory: Path = Path("."),
+) -> ReleaseRecord:
+    """Write the release record and reviewed notes for a validated image."""
+    data = specification(version)
+    if version != candidate_version():
+        raise ValueError("Release tag must match VERSION.")
+    validate_image_reference(image)
+    if not PLATFORM.fullmatch(platform):
+        raise ValueError("Platform must be a Linux image platform.")
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    record: ReleaseRecord = {
+        "version": data["version"],
+        "supported_from": data["supported_from"],
+        "configuration_changes": data["configuration_changes"],
+        "database": data["database"],
+        "rollback": data["rollback"],
+        "schema": 1,
+        "source_commit": commit,
+        "image": image,
+        "platform": platform,
+    }
+    if validation_run_id is not None:
+        if validation_run_id <= 0:
+            raise ValueError("Validation run ID must be positive.")
+        record["validation_run_id"] = validation_run_id
+    output_directory.mkdir(parents=True, exist_ok=True)
+    (output_directory / "release.json").write_text(json.dumps(record, indent=2) + "\n")
+    notes = (ROOT / "releases" / f"{version}.md").read_text()
+    notes += f"\n## Deployment record\n\nSource commit: `{commit}`\n\nImage: `{image}`\n"
+    (output_directory / "release-notes.md").write_text(notes)
+    return record
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
@@ -92,36 +131,17 @@ def main() -> int:
     args = parser.parse_args()
     try:
         version = args.check or args.write[0]
-        data = specification(version)
-        if version != candidate_version():
-            raise ValueError("Release tag must match VERSION.")
         if args.write:
-            image = args.write[1]
-            validate_image_reference(image)
-            if not PLATFORM.fullmatch(args.platform):
-                raise ValueError("Platform must be a Linux image platform.")
-            commit = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-            ).strip()
-            record: ReleaseRecord = {
-                "version": data["version"],
-                "supported_from": data["supported_from"],
-                "configuration_changes": data["configuration_changes"],
-                "database": data["database"],
-                "rollback": data["rollback"],
-                "schema": 1,
-                "source_commit": commit,
-                "image": image,
-                "platform": args.platform,
-            }
-            if args.validation_run is not None:
-                if args.validation_run <= 0:
-                    raise ValueError("Validation run ID must be positive.")
-                record["validation_run_id"] = args.validation_run
-            Path("release.json").write_text(json.dumps(record, indent=2) + "\n")
-            notes = (ROOT / "releases" / f"{version}.md").read_text()
-            notes += f"\n## Deployment record\n\nSource commit: `{commit}`\n\nImage: `{image}`\n"
-            Path("release-notes.md").write_text(notes)
+            write_record(
+                version,
+                args.write[1],
+                validation_run_id=args.validation_run,
+                platform=args.platform,
+            )
+        else:
+            if version != candidate_version():
+                raise ValueError("Release tag must match VERSION.")
+            specification(version)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"Release record failed: {error}")
         return 2

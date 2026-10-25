@@ -7,11 +7,13 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 from scripts import compose_isolation as isolation
 from scripts import proof_evidence
+from scripts import prove_production_release as production_proof
 from scripts import release_candidate as candidate
 from scripts import release_draft as draft
 from scripts.json_data import JsonObject, json_string
@@ -24,6 +26,32 @@ IMAGE_ID = "sha256:" + "c" * 64
 HELPER_IMAGE_ID = "sha256:" + "f" * 64
 
 
+def test_candidate_pull_selects_the_proof_platform_independently_of_the_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(command: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(command))
+        return subprocess.CompletedProcess(command, 0, "pulled", "")
+
+    values = {
+        "the candidate source revision": COMMIT,
+        "the current source commit": COMMIT,
+        "the candidate version": "v" + (isolation.ROOT / "VERSION").read_text().strip(),
+        "the candidate platform": "linux/amd64",
+    }
+    monkeypatch.setattr(isolation, "_run_process", run)
+    monkeypatch.setattr(
+        isolation, "required_output", lambda command, **kwargs: values[kwargs["label"]]
+    )
+    stack = isolation.IsolatedComposeProject(
+        "stproof-candidate-platform", candidate_image=IMAGE, source_environment={}
+    )
+    stack.pull_candidate()
+    assert calls == [["docker", "pull", "--platform", "linux/amd64", IMAGE]]
+
+
 def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None:
     validation = load_workflow("release-validation.yml")["jobs"]
     for name in ("security", "system", "full-load"):
@@ -34,6 +62,22 @@ def test_image_checks_run_independently_and_all_gate_retained_evidence() -> None
     assert workflow["validation"]["needs"] == "build"
     assert workflow["validation"]["uses"] == "./.github/workflows/release-validation.yml"
     assert set(workflow["evidence"]["needs"]) == {"build", "validation"}
+
+
+def test_production_installation_is_recorded_in_the_system_attempt() -> None:
+    steps = load_workflow("release-validation.yml")["jobs"]["system"]["steps"]
+    production = next(
+        step for step in steps if "scripts/prove_production_release.py" in step.get("run", "")
+    )
+    record = next(step for step in steps if "--proof system" in step.get("run", ""))
+    assert production["if"] == "inputs.candidate_image != ''"
+    assert '--candidate-image "$CANDIDATE_IMAGE"' in production["run"]
+    assert steps.index(production) < steps.index(record)
+    assert record["if"] == "always()"
+    upload = next(
+        step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert "artifacts/production-release-proof-*.json" in upload["with"]["path"]
 
 
 def test_candidate_writer_keeps_the_reused_source_run(
@@ -66,6 +110,7 @@ def test_failed_artifact_lookup_does_not_trigger_new_build_work(
 
 
 def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> candidate.CandidateData:
+    monkeypatch.setattr(proof_evidence, "candidate_version", lambda: "v0.1.0")
     monkeypatch.setattr(
         proof_evidence,
         "proof_inputs",
@@ -91,6 +136,18 @@ def evidence(directory: Path, monkeypatch: pytest.MonkeyPatch) -> candidate.Cand
             report.parent.mkdir(parents=True)
             report.write_text(json.dumps({"status": "passed", "image": IMAGE}))
         elif kind == "system":
+            production = production_proof.new_report(COMMIT, "v0.1.0", IMAGE)
+            production["status"] = "passed"
+            production["image_ids"] = {
+                service: IMAGE_ID for service in production_proof.APP_SERVICES
+            }
+            production["checks"] = {name: True for name in production_proof.CHECK_NAMES}
+            production["disposable_volumes_removed"] = True
+            production["private_files_removed"] = True
+            production["release_evidence_eligible"] = True
+            (attempt_dir / "production-release-proof-fixture.json").write_text(
+                json.dumps(production)
+            )
             (attempt_dir / "system-proof-fixture.json").write_text(
                 json.dumps(
                     {

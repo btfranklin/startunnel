@@ -19,6 +19,8 @@ if TYPE_CHECKING or __package__:
         json_object,
         json_string,
     )
+    from .prove_production_release import validate_report as validate_production_report
+    from .release_record import candidate_version
 else:
     from json_data import (
         JsonObject,
@@ -26,6 +28,8 @@ else:
         json_object,
         json_string,
     )
+    from prove_production_release import validate_report as validate_production_report
+    from release_record import candidate_version
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -184,7 +188,9 @@ def record_proof(
             files = [path for path in reports["validation"].parent.iterdir() if path.is_file()]
         elif kind == "system":
             reports["system"] = _one(directory, "system-proof-*.json")
-            files = [reports["system"], *directory.glob("proof-build-*.json")]
+            if image:
+                reports["production"] = _one(directory, "production-release-proof-*.json")
+            files = [*reports.values(), *directory.glob("proof-build-*.json")]
         else:
             reports["execution"] = _one(directory, "load-run-*.json")
             execution = read_object(reports["execution"])
@@ -210,7 +216,11 @@ def record_proof(
         # Retain all safe reports that were produced before a failed phase.
         patterns = {
             "security": ("security/**/*.json", "security/**/*.sarif"),
-            "system": ("system-proof-*.json", "proof-build-*.json"),
+            "system": (
+                "system-proof-*.json",
+                "production-release-proof-*.json",
+                "proof-build-*.json",
+            ),
             "load": (
                 "load-run-*.json",
                 "load-profile-*.json",
@@ -307,6 +317,20 @@ def validate_proof(
                 json_string(json_object(report.get("image_ids", {})).get(service, "")),
             ):
                 raise ValueError("System proof is missing required runtime identities.")
+        production_name = reports.get("production")
+        if not production_name:
+            raise ValueError("System proof is missing production installation evidence.")
+        production = read_object(referenced_file(directory, production_name))
+        validate_production_report(
+            production, commit=commit, image=image, version=candidate_version()
+        )
+        system_ids = json_object(report["image_ids"])
+        production_ids = json_object(production["image_ids"])
+        if any(
+            production_ids.get(service) != system_ids.get(service)
+            for service in ("web", "migrate", "maintenance")
+        ):
+            raise ValueError("Production and system proofs ran different runtime images.")
         return
     report = read_object(referenced_file(directory, reports["execution"]))
     workload = read_object(referenced_file(directory, reports["workload"]))

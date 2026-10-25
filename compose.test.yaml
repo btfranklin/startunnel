@@ -65,6 +65,11 @@ services:
     build:
       labels: *test-build-labels
       target: test-runtime
+    volumes:
+      - type: bind
+        source: ./scripts/proof_runtime.py
+        target: /proof/runtime.py
+        read_only: true
     environment:
       DJANGO_SETTINGS_MODULE: tests.browser_settings
       STARTUNNEL_ALLOWED_HOSTS: localhost,127.0.0.1,web

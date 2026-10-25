@@ -415,6 +415,21 @@ wakeups, energy use, or watts from CPU or probe counts.
 
 ## Candidate image evidence
 
+The [release tooling map](release-tooling.md) lists the maintained proof modules,
+their callers, automated tests, and type-check boundaries. The production
+installation check uses the same repository command locally and in the candidate
+system job:
+
+```shell
+pdm run python scripts/prove_production_release.py --candidate-image IMAGE_DIGEST
+```
+
+Run its orchestration, contract, failure, secret, and cleanup tests before a real
+stack check. The command uses production Compose files, private secrets, and an
+explicit Linux amd64 image. It verifies the downloaded CLI, administrator access,
+an operation receipt and audit event, a two-agent exchange, and live worker
+metrics preservation. Its report is part of the selected system evidence.
+
 Normal pushes run source and service checks, including browser and example
 suites. After CI passes, `release-candidate.yml` on `main` reuses that completed
 run and prepares the image. A repeated request reuses retained, verified

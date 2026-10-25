@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts import release_record
+from scripts import release_candidate, release_record, release_workflow
 from scripts import upgrade_production as upgrade
 from tests.structure.workflows import load_workflow
 
@@ -176,14 +176,17 @@ def test_release_notes_merge_keeps_reviewed_notes_and_validation_link(
         "Source commit: `abc123`\n\nImage: `example/image@sha256:abc`"
     )
     notes.write_text(reviewed)
-    environment = {
-        **os.environ,
-        "GENERATED_NOTES": summary,
-        "GITHUB_REPOSITORY": "owner/repository",
-        "VALIDATION_RUN_ID": "12345",
-    }
-    subprocess.run(
-        ["sh", "-eu", "-c", merge_step["run"]], cwd=tmp_path, env=environment, check=True
+    assert merge_step["run"] == (
+        'python3 scripts/release_workflow.py notes --validation-run "$VALIDATION_RUN_ID"'
+    )
+    assert merge_step["env"]["GENERATED_NOTES"] == (
+        "${{ steps.notes.outcome == 'success' && steps.notes.outputs.release_notes || '' }}"
+    )
+    release_workflow.merge_release_notes(
+        summary,
+        "owner/repository",
+        12345,
+        notes_path=notes,
     )
 
     merged = notes.read_text()
@@ -213,6 +216,41 @@ def test_release_summary_step_is_optional_and_uses_only_successful_output() -> N
         "${{ steps.notes.outcome == 'success' && steps.notes.outputs.release_notes || '' }}"
     )
     assert all("OPENAI_API_KEY" not in step.get("env", {}) for step in draft["steps"])
+
+
+def test_release_record_workflow_verifies_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "evidence"
+    output = tmp_path / "github-output"
+
+    def reject(*args: object, **kwargs: object) -> release_candidate.CandidateData:
+        raise ValueError("invalid candidate evidence")
+
+    monkeypatch.setattr(release_candidate, "verify_evidence", reject)
+    with pytest.raises(ValueError, match="invalid candidate evidence"):
+        release_workflow.record_candidate(
+            evidence,
+            12345,
+            output_directory=tmp_path,
+            github_output=output,
+        )
+    assert not (tmp_path / "release.json").exists()
+    assert not (tmp_path / "release-notes.md").exists()
+    assert not output.exists()
+
+
+def test_release_workflow_record_command_uses_verified_evidence() -> None:
+    step = next(
+        step
+        for step in load_workflow("release.yml")["jobs"]["draft"]["steps"]
+        if step.get("id") == "candidate"
+    )
+    assert step["run"] == (
+        "python3 scripts/release_workflow.py record --evidence artifacts/promotion "
+        '--validation-run "$VALIDATION_RUN_ID"'
+    )
+    assert "release_candidate.py --verify" not in step["run"]
 
 
 def test_nonancestor_blocks_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:

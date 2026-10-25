@@ -5,6 +5,12 @@ StarTunnel ships versioned GitHub releases and official container images.
 Operators explicitly select a published version and deploy its immutable digest.
 Automatic updates are not enabled.
 
+Use the [release tooling map](release-tooling.md) for command owners, callers,
+tests, and type-check boundaries. The
+[repo-local release skill](../.agents/skills/release-startunnel/SKILL.md) guides
+agents through the maintained commands. Reusable release logic belongs in
+tested repository modules.
+
 The current release specification is v0.4.1. Use the published release's
 `release.json` and tagged guides for installation or upgrades. v0.1.0 keeps its
 own [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
@@ -81,6 +87,9 @@ commands do not check for updates. There is no package-manager release.
    Image scanning, the system proof, and fixed-load testing then run in parallel
    against that digest. All must pass. Browser and example suites stay in source
    CI; the system proof checks runtime contents, restart behavior, and recovery.
+   The same job then runs the production installation proof. It checks the
+   production Compose model, mounted secrets, exact runtime images, downloaded
+   CLI, administrator receipt and audit event, two-agent exchange, and cleanup.
 5. The candidate workflow retains `release-candidate-RUN-ATTEMPT` for 90 days.
    It records the digest, exact commit, version, source CI run, selected proof
    artifacts, earlier attempts, helper inputs, cleanup, and evidence checksums. Only a successful manual candidate run on `main` with retained
@@ -187,6 +196,20 @@ Review the draft notes, candidate evidence, image labels, and deployment record.
 Perform an installation/upgrade smoke check using the exact digest. Publish the
 draft after those checks pass, then verify pulling the public image and repeat
 external deployment verification. Record the version, source, digest, and results.
+
+Use the same maintained production proof command for a disposable installation:
+
+```shell
+pdm run python scripts/prove_production_release.py --candidate-image IMAGE_DIGEST
+```
+
+The command reads the expected source and version from the checkout. It selects
+the official Linux amd64 platform explicitly, including on an ARM host. Its
+private settings bind HTTP only to host loopback. The candidate system job
+also checks Caddy HTTPS; neither check establishes a particular public server's
+DNS or certificate state. Follow the selected instance's external setup checks.
+Each production proof writes a new project-scoped report and removes its stack,
+volumes, and private files. An existing report is never overwritten.
 
 The first GHCR package must be made **public** in package settings. Verify an
 anonymous digest pull before publishing the first release. GitHub creates

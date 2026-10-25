@@ -387,7 +387,10 @@ class IsolatedComposeProject:
             for service in services:
                 overlay += f"  {service}:\n"
                 if self.candidate_image:
-                    overlay += f"    build: !reset null\n    image: {self.candidate_image}\n"
+                    overlay += (
+                        f"    build: !reset null\n    image: {self.candidate_image}\n"
+                        "    platform: linux/amd64\n"
+                    )
                 if service == "web":
                     overlay += "    environment:\n"
                     if self.candidate_image:
@@ -510,7 +513,7 @@ class IsolatedComposeProject:
             raise IsolationError("No candidate image was selected.")
         try:
             pulled = _run_process(
-                ["docker", "pull", self.candidate_image],
+                ["docker", "pull", "--platform", "linux/amd64", self.candidate_image],
                 environment=self.environment,
                 timeout_seconds=600,
                 capture_output=True,

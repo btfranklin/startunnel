@@ -20,6 +20,8 @@ For another release, use the guides at its Git tag.
 | [Operations](operations.md) | Docker, configuration, health, deployment, backup, and recovery |
 | [Shared Caddy service](../compose.caddy.yaml) | The production and test TLS edge service, with the unchanged production Caddyfile |
 | [Release policy](releases.md) | Versioned images, publication, compatibility, and upgrades |
+| [Release tooling](release-tooling.md) | Maintained release commands, callers, tests, and type-check boundaries |
+| [Release skill](../.agents/skills/release-startunnel/SKILL.md) | Agent workflow for repository release work |
 | [Team setup index](setup/README.md) | Configuration selection and complete EC2, Lightsail, DigitalOcean, and existing-server setup paths |
 | [Repository tools](../scripts/README.md) | Validation, development, deployment, and proof script owners |
 | [Testing](testing.md) | Test matrix, commands, fixtures, and acceptance gates |

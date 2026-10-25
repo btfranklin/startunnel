@@ -21,6 +21,7 @@ Keep the implementation direct, typed, and easy to inspect.
 | UI or landing page | `docs/design.md` |
 | Tutorial or example | `docs/user/` and `examples/` |
 | Validation failure | `docs/testing.md` |
+| Release or release tooling | `docs/releases.md`, `docs/release-tooling.md`, and `.agents/skills/release-startunnel/SKILL.md` |
 | Current delivery status | `docs/implementation-plan.md` |
 
 The full ownership map is in `docs/README.md`.

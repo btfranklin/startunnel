@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
 if TYPE_CHECKING or __package__:
+    from . import proof_runtime
+else:
+    import proof_runtime
+
+if TYPE_CHECKING or __package__:
     pass
 else:
     pass
@@ -64,71 +69,6 @@ SYSTEM_SERVICES = (
     "proxy-caddy",
     "proxy-tests",
 )
-
-
-def _web_health_script(expected_status: int, *, path: str = "/health/ready") -> str:
-    if path not in {"/health/live", "/health/ready"}:
-        raise ValueError("The health proof path is not allowed.")
-    return (
-        "import urllib.error, urllib.request; "
-        f"request=urllib.request.Request('http://127.0.0.1:8000{path}', "
-        "headers={'Host':'web','X-Forwarded-Proto':'https'}); "
-        "status=None; "
-        "\ntry:\n response=urllib.request.urlopen(request,timeout=10); status=response.status"
-        "\nexcept urllib.error.HTTPError as error:\n status=error.code"
-        f"\nassert status == {expected_status}, status"
-    )
-
-
-def _runtime_contents_script() -> str:
-    return """
-import hashlib
-import json
-import shutil
-import ssl
-import subprocess
-import sys
-from pathlib import Path
-
-import django
-django.setup()
-from django.contrib.staticfiles import finders
-from django.contrib.staticfiles.storage import ManifestStaticFilesStorage
-from core.build import BUILD
-
-collected = ManifestStaticFilesStorage()
-for name in (
-    'css/site.css',
-    'js/site.js',
-    'vendor/htmx/htmx.min.js',
-    'vendor/fonts/inter-latin-400-normal.woff2',
-):
-    source = finders.find(name)
-    assert source and Path(source).is_file(), f'Missing static source: {name}'
-    with collected.open(collected.stored_name(name)) as asset:
-        assert asset.read(1), f'Empty collected asset: {name}'
-
-assert ssl.create_default_context().get_ca_certs(), 'Missing CA certificates'
-client = Path('/app/cli/star_tunnel.py')
-result = subprocess.run(
-    [sys.executable, str(client), 'version'],
-    check=True, capture_output=True, text=True,
-)
-build = json.loads(result.stdout)
-assert build['version'], 'Missing client version'
-assert 'source_revision' in build, 'Missing client source metadata'
-assert build['version'] == BUILD['version'], 'Server and client versions differ'
-assert build['source_revision'] == BUILD['source_revision'], 'Server and client sources differ'
-assert build['sha256'] == hashlib.sha256(client.read_bytes()).hexdigest()
-for command in ('pip', 'pip3', 'perfect-doc', 'cargo'):
-    assert shutil.which(command) is None, f'Unexpected runtime tool: {command}'
-for interpreter in {sys.executable, str(Path(sys.base_prefix) / 'bin' / 'python3')}:
-    subprocess.run([
-        interpreter, '-c',
-        "import importlib.util; assert importlib.util.find_spec('pip') is None, 'pip is installed'",
-    ], check=True)
-print('Runtime image contents passed.')
-""".strip()
 
 
 def _coordinated_restore_proof(stack: IsolatedComposeProject) -> None:
@@ -557,8 +497,10 @@ def run_system_proof(
                 "-T",
                 "web",
                 "/app/.venv/bin/python",
-                "-c",
-                _web_health_script(200, path=path),
+                proof_runtime.CONTAINER_PATH,
+                "health",
+                "200",
+                path,
                 timeout_seconds=60,
             )
 
@@ -577,8 +519,10 @@ def run_system_proof(
             "-T",
             "web",
             "/app/.venv/bin/python",
-            "-c",
-            _web_health_script(503),
+            proof_runtime.CONTAINER_PATH,
+            "health",
+            "503",
+            "/health/ready",
             timeout_seconds=60,
         )
 
@@ -708,8 +652,8 @@ def run_system_proof(
             "-T",
             "web",
             "/app/.venv/bin/python",
-            "-c",
-            _runtime_contents_script(),
+            proof_runtime.CONTAINER_PATH,
+            "contents",
             timeout_seconds=60,
         ),
     )

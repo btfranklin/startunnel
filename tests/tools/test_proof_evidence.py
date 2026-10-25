@@ -31,6 +31,48 @@ def test_recorded_proof_manifests_validate(
     proof_evidence.validate_proof(record, manifest.parent, kind=kind, commit=COMMIT, image=IMAGE)
 
 
+@pytest.mark.parametrize("failure", ["missing", "wrong-image", "failed-check", "cleanup"])
+def test_system_manifest_requires_the_matching_complete_production_proof(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    directory = tmp_path / "proofs/system/1"
+    record = proof_evidence.read_object(directory / "proof-system.json")
+    production = directory / "production-release-proof-fixture.json"
+    if failure == "missing":
+        json_members(record["reports"]).pop("production")
+    else:
+        report = json.loads(production.read_text())
+        if failure == "wrong-image":
+            report["image_ids"] = {
+                service: "sha256:" + "d" * 64 for service in ("web", "migrate", "maintenance")
+            }
+        elif failure == "failed-check":
+            report["checks"]["admin_receipt_audit"] = False
+        else:
+            report["private_files_removed"] = False
+        production.write_text(json.dumps(report))
+        json_members(record["files"])[production.name] = proof_evidence.checksum(production)
+    with pytest.raises(ValueError, match=r"[Pp]roduction"):
+        proof_evidence.validate_proof(record, directory, kind="system", commit=COMMIT, image=IMAGE)
+
+
+def test_failed_production_installation_report_is_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    directory = tmp_path / "proofs/system/1"
+    production = directory / "production-release-proof-fixture.json"
+    report = json.loads(production.read_text())
+    report["status"] = "failed"
+    production.write_text(json.dumps(report))
+    record = proof_evidence.record_proof(
+        "system", directory, commit=COMMIT, image=IMAGE, status="failure"
+    )
+    assert record["status"] == "failed"
+    assert record["files"][production.name] == proof_evidence.checksum(production)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

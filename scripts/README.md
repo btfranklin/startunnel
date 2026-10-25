@@ -61,6 +61,8 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | [validate_load_diagnostic.py](validate_load_diagnostic.py) | Verify the expected lock failure and cleanup |
 | [benchmark_proof_helpers.py](benchmark_proof_helpers.py) | Compare cold and warm helper cost on one host |
 | [system_proof.py](system_proof.py) | Coordinate clean-stack exchange, restart, backup, and restore checks |
+| [proof_runtime.py](proof_runtime.py) | Run typed health and image-content probes inside the selected runtime |
+| [prove_production_release.py](prove_production_release.py) | Prove production secrets, runtime identity, downloaded CLI, admin and agent access, and cleanup |
 | [prove_admin_upgrade.py](prove_admin_upgrade.py) | Verify forward migrations and published-image backup recovery |
 | [prove_published_upgrade.py](prove_published_upgrade.py) | Verify restored published data, forward upgrade, and admin recovery |
 | [prove_activity_restart.py](prove_activity_restart.py) | Verify reader recovery across a web restart |
@@ -76,8 +78,11 @@ Use the [setup guides](../docs/setup/README.md) for required inputs and order.
 | [proof_evidence.py](proof_evidence.py) | Bind proof attempts to current inputs and file checksums |
 | [release_status.py](release_status.py) | Show measured workflow time and retained attempts |
 | [release_record.py](release_record.py) | Validate specifications and write deployment records |
+| [release_workflow.py](release_workflow.py) | Run typed workflow steps for the verified record and reviewed notes |
 | [release_draft.py](release_draft.py) | Verify draft-release identity and recovery |
 | [run_security_release.py](run_security_release.py) | Run separate source and image security checks |
 
 Follow the [release policy](../docs/releases.md). These tools do not make
 normal source pushes into releases.
+Use the [release tooling map](../docs/release-tooling.md) for callers, tests, and
+type-check boundaries.
