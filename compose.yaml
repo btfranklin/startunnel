@@ -24,7 +24,7 @@ x-app-build: &app-build
   target: runtime
   args:
     PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.15.1-alpine3.23@sha256:cb295b554dbbea09b2c0e6e6d9ce55f051347c902fbb611e618c071addfb30a3}
-    PDM_VERSION: ${PDM_VERSION:-2.29.3}
+    PDM_REQUIREMENT: ${PDM_REQUIREMENT:-pdm>=2.29.4,<3}
     APP_UID: ${STARTUNNEL_CONTAINER_UID:-10001}
     APP_GID: ${STARTUNNEL_CONTAINER_GID:-10001}
 

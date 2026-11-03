@@ -50,6 +50,47 @@ and has no unauthenticated remote endpoint. Keep the new file private and verify
 its identity, health, and audit event. See
 [access recovery](setup/maintain.md#recover-administrator-access).
 
+## Dependency and build inputs
+
+Use major-version ranges for authored Python and npm package requirements.
+For example, `Django>=6,<7` and `htmx.org` with `>=2 <3` permit updates within
+one major version. The Dockerfile frontend uses `docker/dockerfile:1` to
+receive stable version 1 updates. Use a more precise minimum only when a known compatibility
+or security need requires it. Python requires 3.15 because host tools use its
+syntax and standard-library APIs. The Alpine `zlib>=1.3.2-r1` minimum retains
+the patched runtime baseline.
+
+The Docker build argument `PDM_REQUIREMENT` defaults to `pdm>=2.29.4,<3`.
+Both Docker install stages, Compose, and host CI use this range. PDM 2.29.4 is
+the minimum because it uses the HTTP client required by Unearth 0.19.
+PDM 2.29.3 can install with Unearth 0.19, then fail when PDM installs application
+dependencies. A fresh build selects the latest stable PDM 2.x that satisfies
+this minimum. The bootstrap installs the normal PDM package without its
+locked extra.
+
+Keep `pdm.lock` and `package-lock.json` exact. They record the application and
+asset versions and hashes used for validation. Update these files with PDM
+and npm. A range change does not require unrelated package upgrades. Normal
+installs and release builds continue to use the lockfiles. Major-version
+ranges do not prove compatibility between all transitive packages. This also
+applies to packages with major version zero. The lockfiles define the tested
+package sets; a range does not certify every older release within that range.
+
+Keep container image digests and Git source references exact. They identify
+reviewed inputs and permit release verification and recovery. GitHub Actions
+use commit references because those actions can access CI permissions. The
+Perfect Doc source reference matches the verified tool release on architectures
+that have no published executable. Downloaded CI tools retain their exact
+release and checksum pair so that the downloaded bytes can be verified.
+
+The existing PostgreSQL CI job runs fresh PDM and application dependency
+installs for the Alpine production stage and the Debian test stage. It disables
+BuildKit caching for both bootstrap stages. `pip --no-cache-dir` also prevents
+reuse of pip download caches. Later proof builds can reuse the resulting
+layers. A successful cached layer alone does not prove that a new bootstrap
+install still works. This check detects a failure when CI runs; it cannot
+prevent every later upstream dependency change.
+
 ## Services
 
 | Service | Purpose |

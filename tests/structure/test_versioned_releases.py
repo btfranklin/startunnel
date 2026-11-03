@@ -227,6 +227,7 @@ def test_release_record_workflow_verifies_before_writing(
     def reject(*args: object, **kwargs: object) -> release_candidate.CandidateData:
         raise ValueError("invalid candidate evidence")
 
+    monkeypatch.setattr(release_candidate, "git_commit", lambda: "a" * 40)
     monkeypatch.setattr(release_candidate, "verify_evidence", reject)
     with pytest.raises(ValueError, match="invalid candidate evidence"):
         release_workflow.record_candidate(

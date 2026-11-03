@@ -29,6 +29,10 @@ The full ownership map is in `docs/README.md`.
 ## Critical rules
 
 - Work and commit on `main`. Create a branch or pull request only if the owner asks.
+- Use major-version ranges for authored package requirements where practical.
+  Keep a more precise minimum only for a known compatibility or security need.
+  Keep generated lockfile resolutions, image digests, and verified tool source
+  references exact. See the dependency policy in `docs/operations.md`.
 - Every tunnel and agent credential belongs to the instance.
 - PostgreSQL controls tree order, lifecycle correctness, rate limits, and
   database notifications.

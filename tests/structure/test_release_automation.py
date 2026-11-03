@@ -1717,6 +1717,25 @@ def test_source_workflow_checks_service_lanes_and_cli_platforms() -> None:
             assert {"OPENAI_API_KEY", "OPENAI_MODEL"}.isdisjoint(environment)
 
 
+def test_ci_checks_both_fresh_docker_bootstrap_paths_before_service_proofs() -> None:
+    steps = load_workflow("ci.yml")["jobs"]["postgres"]["steps"]
+    installs = next(step for step in steps if "--no-cache" in step.get("run", ""))
+    commands = [line.split() for line in installs["run"].splitlines()]
+    assert len(commands) == 2
+    assert {command[command.index("--target") + 1] for command in commands} == {
+        "production-dependencies",
+        "development-dependencies",
+    }
+    assert all("--no-cache" in command for command in commands)
+    assert all(command[:3] == ["docker", "buildx", "build"] for command in commands)
+    assert all(command[-1] == "." for command in commands)
+    assert not installs.get("continue-on-error") and not installs.get("if")
+    proof = next(
+        step for step in steps if "run_isolated_test_lane.py postgres" in step.get("run", "")
+    )
+    assert steps.index(installs) < steps.index(proof)
+
+
 def test_source_scan_failure_blocks_service_builds() -> None:
     jobs = load_workflow("ci.yml")["jobs"]
     steps = jobs["canonical"]["steps"]

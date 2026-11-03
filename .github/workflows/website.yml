@@ -42,7 +42,7 @@ jobs:
           python-version: "3.15"
       - name: Install locked build dependencies
         run: |
-          python -m pip install --disable-pip-version-check "pdm==2.29.3"
+          python -m pip install --no-cache-dir --disable-pip-version-check "pdm>=2.29.4,<3"
           pdm install --prod --frozen-lockfile --no-self
       - name: Read Pages configuration
         if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'

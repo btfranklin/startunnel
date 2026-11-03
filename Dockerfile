@@ -1,7 +1,8 @@
-# syntax=docker/dockerfile:1.12
+# syntax=docker/dockerfile:1
 
 ARG PYTHON_BASE_IMAGE="python:3.15.1-alpine3.23@sha256:cb295b554dbbea09b2c0e6e6d9ce55f051347c902fbb611e618c071addfb30a3"
 ARG PYTHON_TEST_BASE_IMAGE="python:3.15.1-slim-trixie@sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51"
+ARG PDM_REQUIREMENT="pdm>=2.29.4,<3"
 ARG RUST_BUILD_IMAGE="rust:1.99-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d"
 
 # Build the existing Perfect Doc release for the test image's architecture.
@@ -33,9 +34,9 @@ RUN apk upgrade --no-cache \
 
 FROM python-base AS dependency-builder
 
-ARG PDM_VERSION="2.29.3"
+ARG PDM_REQUIREMENT
 
-RUN python -m pip install --no-cache-dir "pdm==${PDM_VERSION}"
+RUN python -m pip install --no-cache-dir "${PDM_REQUIREMENT}"
 
 COPY pyproject.toml pdm.lock ./
 
@@ -58,11 +59,11 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:${PATH}"
 
 WORKDIR /app
-ARG PDM_VERSION="2.29.3"
+ARG PDM_REQUIREMENT
 RUN apt-get update \
     && apt-get install --no-install-recommends --only-upgrade --yes openssl libssl3t64 \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --no-cache-dir "pdm==${PDM_VERSION}"
+    && python -m pip install --no-cache-dir "${PDM_REQUIREMENT}"
 COPY pyproject.toml pdm.lock ./
 
 FROM test-dependency-builder AS development-dependencies
@@ -191,6 +192,8 @@ FROM runtime AS test-runtime
 
 # The production runtime contains no test identity provider or adapter.
 COPY tests/__init__.py tests/browser_settings.py /app/tests/
+# Probes run from /proof and must import the copied test settings.
+ENV PYTHONPATH=/app:/app/src
 
 FROM development-dependencies AS development-runtime
 

@@ -41,7 +41,9 @@ Release and release-tooling changes also require `pdm run security-release sourc
 before a push. This separate lane checks locked inputs, source secrets, Bandit,
 and npm dependencies before CI starts service builds. It requires Gitleaks,
 Node.js/npm, and the locked PDM tools. The [CI tool setup](../.github/workflows/ci.yml)
-owns their pinned installation commands.
+owns their installation commands. See the
+[dependency and build input policy](operations.md#dependency-and-build-inputs)
+for package ranges and exact verified tool inputs.
 `pdm run check` runs the offline Perfect Doc structure gate and checks local Markdown files and heading anchors with `linkbust`.
 External web links are not fetched. Run `pdm run docs-links` for a
 focused link check. Both source scans omit ignored reports and build output.
