@@ -84,8 +84,9 @@ as the secret scan. Build output, private artifacts, and installed packages
 are outside this scope.
 
 Host scripts and workflow jobs require Python 3.15.2 or later. Each job that runs host
-Python code selects Python 3.15 before that code runs. Ruff and mypy use the
-same Python 3.15 target for these scripts. The standalone CLI compatibility
+Python code selects the project minimum (`>=3.15.2`) and sets `check-latest`
+before that code runs. This prevents a cached older patch from taking priority.
+Ruff and mypy use the Python 3.15 syntax target for these scripts. The standalone CLI compatibility
 jobs also test Python 3.10.
 
 The gate uses strict mypy settings and rejects explicit `Any`, types lost

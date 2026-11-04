@@ -71,17 +71,26 @@ def test_host_scripts_use_the_required_python_target() -> None:
 
 def test_workflows_select_python_before_running_host_code() -> None:
     root = Path(__file__).resolve().parents[2]
+    document: object = tomllib.loads((root / "pyproject.toml").read_text())
+    required = json_at(document, "project", "requires-python")
+    assert isinstance(required, str)
     for path in sorted((root / ".github/workflows").glob("*.yml")):
         for name, job in load_workflow(path.name)["jobs"].items():
             configured = False
             for step in job.get("steps", []):
                 if step.get("uses", "").startswith("actions/setup-python@"):
-                    configured = step.get("with", {}).get("python-version") == "3.15"
+                    settings = step.get("with", {})
+                    configured = (
+                        settings.get("python-version") == required
+                        and settings.get("check-latest") == "true"
+                    )
                 command = step.get("run", "")
                 if command.strip() == "python tests/cli_standalone.py":
                     continue
                 if "python" in command or "pdm " in command:
-                    assert configured, f"{path.name}: {name}: Python 3.15 must be selected first."
+                    assert configured, (
+                        f"{path.name}: {name}: Select Python {required} with check-latest first."
+                    )
 
 
 def test_strict_gate_rejects_unchecked_values_and_factory_arguments(tmp_path: Path) -> None:

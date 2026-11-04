@@ -49,7 +49,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -109,7 +110,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: ./.github/actions/proof-build
       - name: Check fresh Docker dependency installs
         run: |
@@ -195,7 +197,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: ./.github/actions/proof-build
       - name: Run the isolated proof
         run: >-
@@ -225,7 +228,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: ./.github/actions/proof-build
       - name: Run the isolated browser lane
         run: >-
@@ -257,7 +261,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Report observed source CI time
         env:
           GH_TOKEN: ${{ github.token }}

@@ -43,7 +43,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Install release scanners
         run: |
           tool_dir="$RUNNER_TEMP/gitleaks"
@@ -120,7 +121,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -156,7 +158,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: inputs.candidate_image != ''
         with:
@@ -254,7 +257,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: inputs.candidate_image != ''
         with:
@@ -312,7 +316,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Run the isolated opt-in proof
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

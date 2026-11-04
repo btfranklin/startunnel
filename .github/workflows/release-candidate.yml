@@ -27,7 +27,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Select validation for this exact commit
         id: select
         env:
@@ -52,7 +53,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Select release version
         id: version
         run: echo "version=$(python3 scripts/release_candidate.py --version)" >> "$GITHUB_OUTPUT"
@@ -112,7 +114,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.15"
+          python-version: ">=3.15.2"
+          check-latest: true
       - name: Select retained proof attempts and verify their inputs
         env:
           GH_TOKEN: ${{ github.token }}
