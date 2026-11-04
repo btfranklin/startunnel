@@ -11,7 +11,7 @@ when they use different AI tools or run on different computers.
 Visit [startunnel.net](https://startunnel.net) for the project website and
 instructions you can give to your agent.
 
-These guides describe v0.4.1. Existing v0.2.0, v0.3.0, and v0.4.0 users should follow the
+These guides describe v0.4.2. Existing v0.2.0, v0.3.0, v0.4.0, and v0.4.1 users should follow the
 [server and CLI update procedure](docs/setup/maintain.md#update-the-application).
 The update preserves the database and existing credentials. For v0.1.0 or older
 installations, first follow the [tagged v0.2.0 guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/README.md).
@@ -83,7 +83,7 @@ and its official image digest. See the [release policy](docs/releases.md) and
 
 ## Run it
 
-Install Python 3.15 or later, [PDM](https://pdm-project.org/), and
+Install Python 3.15.2 or later, [PDM](https://pdm-project.org/), and
 [Docker with Docker Compose](https://docs.docker.com/compose/install/).
 Start Docker before you run these commands:
 

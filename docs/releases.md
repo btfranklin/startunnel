@@ -11,7 +11,7 @@ tests, and type-check boundaries. The
 agents through the maintained commands. Reusable release logic belongs in
 tested repository modules.
 
-The current release specification is v0.4.1. Use the published release's
+The current release specification is v0.4.2. Use the published release's
 `release.json` and tagged guides for installation or upgrades. v0.1.0 keeps its
 own [tagged guides](https://github.com/btfranklin/startunnel/blob/v0.1.0/README.md)
 and deployment record. Never use another version's record to deploy a change.
@@ -29,7 +29,7 @@ is an explicit exception to compatible minor releases. It requires a separate
 client update after the server update.
 
 The first published baseline is `v0.1.0`. The standard released path to
-`v0.4.1` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
+`v0.4.2` passes through `v0.2.0`. For a v0.1.0 or unversioned installation,
 start with the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
 That guide's baseline requirements still apply. This route does not make every
 unversioned migration graph supported.
@@ -70,7 +70,7 @@ commands do not check for updates. There is no package-manager release.
    and npm dependencies before service builds. It also checks documentation
    structure, PostgreSQL, agents, examples, browsers, and the standalone CLI on
    Linux, macOS, and Windows with Python 3.10 and 3.15. Main CI checks restored
-   databases from the synthetic baseline and the published v0.1.0, v0.2.0, v0.3.0, and v0.4.0 images.
+   databases from the synthetic baseline and the published v0.1.0, v0.2.0, v0.3.0, v0.4.0, and v0.4.1 images.
    The aggregate gate includes `pdm run release-references`. It checks the
    designated current-version statements, tagged links, and supported
    predecessors against `VERSION` and the release specification. Older upgrade
@@ -97,6 +97,11 @@ commands do not check for updates. There is no package-manager release.
    The same job then runs the production installation proof. It checks the
    production Compose model, mounted secrets, exact runtime images, downloaded
    CLI, administrator receipt and audit event, two-agent exchange, and cleanup.
+   Candidate validation also restores each supported published predecessor and
+   checks upgrade and recovery with that same immutable image. These checks
+   cover existing login, agent and administrator authentication, retained
+   messages, new writes, maintenance, and recovery. A failed predecessor check
+   blocks the system proof and promotion.
 5. The candidate workflow retains `release-candidate-RUN-ATTEMPT` for 90 days.
    It records the digest, exact commit, version, source CI run, selected proof
    artifacts, earlier attempts, helper inputs, cleanup, and evidence checksums. Only a successful manual candidate run on `main` with retained

@@ -12,7 +12,7 @@ import psycopg
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import OperationalError
+from django.db import OperationalError, connections
 from django.test import override_settings
 from pytest_django.fixtures import Settings
 from tests.factories import CredentialFactory
@@ -59,8 +59,10 @@ def test_runtime_inspection_redacts_secrets(settings: Settings) -> None:
 def test_runtime_inspection_handles_database_and_status_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    connection = connections["default"]
     monkeypatch.setattr(
-        "core.management.commands.inspect_runtime.connection.cursor",
+        connection,
+        "cursor",
         lambda: (_ for _ in ()).throw(RuntimeError("database down")),
     )
     monkeypatch.setattr(

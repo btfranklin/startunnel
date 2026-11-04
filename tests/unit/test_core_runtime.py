@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from django.db import connections
 from django.test import Client
 from pytest_django.fixtures import Settings
 
@@ -21,11 +22,13 @@ pytestmark = pytest.mark.django_db
 def test_health_endpoints_report_database_state(
     client: Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    connection = connections["default"]
     assert client.get("/health/live").json() == {"status": "live"}
     ready = client.get("/health/ready")
     assert ready.status_code == 200 and ready.json()["checks"]["postgres"] == "ready"
     monkeypatch.setattr(
-        "core.views.connection.cursor",
+        connection,
+        "cursor",
         lambda: (_ for _ in ()).throw(RuntimeError("down")),
     )
     unavailable = client.get("/health/ready")
@@ -59,6 +62,9 @@ def test_metrics_require_token_and_publish_maintenance_status(
 
 
 def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = connections["default"]
+    original_vendor = connection.vendor
+    original_in_atomic_block = connection.in_atomic_block
     executed: list[tuple[str, list[str]]] = []
 
     class Cursor:
@@ -71,11 +77,11 @@ def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> Non
         def execute(self, sql: str, parameters: list[str]) -> None:
             executed.append((sql, parameters))
 
-    monkeypatch.setattr("core.notifications.connection.vendor", "sqlite")
+    monkeypatch.setattr(connection, "vendor", "sqlite")
     notify("channel", "payload")
     assert executed == []
-    monkeypatch.setattr("core.notifications.connection.vendor", "postgresql")
-    monkeypatch.setattr("core.notifications.connection.cursor", Cursor)
+    monkeypatch.setattr(connection, "vendor", "postgresql")
+    monkeypatch.setattr(connection, "cursor", Cursor)
     notify("channel", "payload")
     notify(BOARD_CHANNEL)
     notify_maintenance()
@@ -84,6 +90,9 @@ def test_notifications_are_postgres_only(monkeypatch: pytest.MonkeyPatch) -> Non
         ("SELECT pg_notify(%s, %s)", [BOARD_CHANNEL, "1"]),
         ("SELECT pg_notify(%s, %s)", ["startunnel_maintenance", "1"]),
     ]
+    monkeypatch.undo()
+    assert connection.vendor == original_vendor
+    assert connection.in_atomic_block == original_in_atomic_block
 
 
 def test_listener_connection_settings_are_redacted_shape(

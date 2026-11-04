@@ -55,7 +55,7 @@ module type checks. Keep new Python logic in `scripts/`.
 | `scripts/proof_runtime.py` | Typed health and image-content probes executed inside the exact runtime | `tests/structure/test_release_automation.py` |
 | `scripts/prove_production_release.py` | Production installation proof; production secrets, platform, CLI, admin receipt and audit, two-agent exchange, and cleanup | `tests/tools/test_production_release_proof.py` |
 | `scripts/prove_admin_upgrade.py` | Source CI; synthetic initial baseline and published v0.1.0 migration and recovery | `tests/tools/test_published_upgrade_proof.py`, `tests/structure/test_release_automation.py` |
-| `scripts/prove_published_upgrade.py` | Source CI and exact-image upgrade checks for supported published predecessors | `tests/tools/test_published_runtime_upgrade_proof.py`, `tests/structure/test_release_automation.py` |
+| `scripts/prove_published_upgrade.py` | Source CI and candidate system jobs; restored-data upgrade and recovery for supported published predecessors | `tests/tools/test_published_runtime_upgrade_proof.py`, `tests/structure/test_release_automation.py` |
 | `scripts/prove_activity_restart.py` | System proof; an active reader survives a web restart | `tests/structure/test_release_automation.py` |
 | `scripts/run_full_load_profile.py` | Candidate load job; fixed workload, observations, identity, and cleanup | `tests/tools/test_load_observations.py`, `tests/structure/test_release_automation.py` |
 | `tests/load/profile.py` and `tests/load/run_profile.py` | Load helper; fixture setup, traffic, drain, and cleanup | `tests/tools/test_load_profile.py`, load observation and diagnostic tests; hosted full proof |
@@ -108,7 +108,7 @@ checks. They must not be described as strictly typed Python.
 |---|---|---|
 | `.github/workflows/ci.yml` | Aggregate source gate; CLI matrix; PostgreSQL and upgrade/recovery; agents; examples; browsers | `actionlint`, release automation and type-gate tests; actual source CI |
 | `.github/workflows/release-candidate.yml` | Exact source selection, one runtime build, required proofs, and retained candidate record | `actionlint`, candidate promotion, evidence, and versioned-release tests |
-| `.github/workflows/release-validation.yml` | Security, system and production installation, fixed load; optional paid live-agent proof | `actionlint`, release automation and evidence tests; actual image proofs |
+| `.github/workflows/release-validation.yml` | Security, system and production installation, published-predecessor upgrades, fixed load; optional paid live-agent proof | `actionlint`, release automation and evidence tests; actual image proofs |
 | `.github/workflows/release.yml` | Exact tagged evidence, digest promotion, optional Scribe summary, and draft | `actionlint`, candidate promotion and versioned-release tests |
 | `.github/workflows/release-diagnostics.yml` | Helper build comparison and controlled lock run | `actionlint`, helper benchmark and lock diagnostic tests |
 | `.github/workflows/capacity-diagnostic.yml` | Short fixed-budget capacity observation | `actionlint`, capacity diagnostic tests |

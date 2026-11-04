@@ -52,29 +52,27 @@ its identity, health, and audit event. See
 
 ## Dependency and build inputs
 
-Use major-version ranges for authored Python and npm package requirements.
-For example, `Django>=6,<7` and `htmx.org` with `>=2 <3` permit updates within
-one major version. The Dockerfile frontend uses `docker/dockerfile:1` to
-receive stable version 1 updates. Use a more precise minimum only when a known compatibility
-or security need requires it. Python requires 3.15 because host tools use its
-syntax and standard-library APIs. The Alpine `zlib>=1.3.2-r1` minimum retains
-the patched runtime baseline.
+Use minimum-version requirements for authored Python and npm packages.
+For example, `Django>=6.1.3` and `htmx.org` with `>=2.0.11` permit newer
+releases. Keep an upper bound only when a known compatibility limit requires
+it. The Dockerfile frontend uses `docker/dockerfile:1` to receive stable
+version 1 updates. Python requires 3.15.2 for its security fixes. Host tools
+also use Python 3.15 syntax and standard-library APIs. The Alpine `zlib>=1.3.2-r1` minimum retains the patched
+runtime baseline.
 
-The Docker build argument `PDM_REQUIREMENT` defaults to `pdm>=2.29.4,<3`.
-Both Docker install stages, Compose, and host CI use this range. PDM 2.29.4 is
-the minimum because it uses the HTTP client required by Unearth 0.19.
-PDM 2.29.3 can install with Unearth 0.19, then fail when PDM installs application
-dependencies. A fresh build selects the latest stable PDM 2.x that satisfies
-this minimum. The bootstrap installs the normal PDM package without its
-locked extra.
+The Docker build argument `PDM_REQUIREMENT` defaults to `pdm>=2.29.5`.
+Both Docker install stages, Compose, and host CI use this minimum. PDM 2.29.5
+includes the HTTP client change required by Unearth 0.19. PDM 2.29.3 can
+install with Unearth 0.19, then fail when PDM installs application dependencies.
+A fresh build selects the latest stable PDM that satisfies this minimum.
+The bootstrap installs the normal PDM package without its locked extra.
 
 Keep `pdm.lock` and `package-lock.json` exact. They record the application and
 asset versions and hashes used for validation. Update these files with PDM
-and npm. A range change does not require unrelated package upgrades. Normal
-installs and release builds continue to use the lockfiles. Major-version
-ranges do not prove compatibility between all transitive packages. This also
-applies to packages with major version zero. The lockfiles define the tested
-package sets; a range does not certify every older release within that range.
+and npm. Normal installs and release builds use the lockfiles. Minimum-version
+requirements do not prove compatibility between all transitive packages.
+The lockfiles define the tested package sets. A new resolution needs validation
+before it can become a release input.
 
 Keep container image digests and Git source references exact. They identify
 reviewed inputs and permit release verification and recovery. GitHub Actions

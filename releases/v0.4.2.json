@@ -1,0 +1,17 @@
+{
+  "version": "v0.4.2",
+  "supported_from": [
+    "v0.2.0",
+    "v0.3.0",
+    "v0.4.0",
+    "v0.4.1"
+  ],
+  "configuration_changes": [
+    "The application and test images now use Python 3.15.2. Host tools require Python 3.15.2 or later. PostgreSQL uses 18.6 and the included Caddy image uses 2.11.7. Keep each reviewed image tag and digest together. Existing explicit image overrides remain in effect; update them deliberately from docker/images.env.example when applying these image updates.",
+    "Custom source builds use PDM_REQUIREMENT instead of PDM_VERSION. The default is pdm>=2.29.5. Replace old PDM_VERSION build arguments or environment overrides with a complete PDM requirement. Published runtime images contain their installed application dependencies and do not need PDM on the host.",
+    "Authored Python and npm package requirements now use tested minimum versions without upper bounds. Release builds and normal installs still use exact lockfile resolutions. Existing application settings, credentials, API contracts, and the minimum official CLI version remain unchanged. Update clients explicitly from the upgraded instance to align their version and command definitions.",
+    "For upgrades from v0.2.0 or v0.3.0, also apply the v0.4.0 credential-cap and Caddy proxy instructions. Existing explicit trusted-proxy settings are preserved. Proof metrics remain disabled in normal application runs."
+  ],
+  "database": "There are no new migrations after v0.4.0. Existing accounts, credentials, messages, and tunnel addresses are preserved. PostgreSQL remains in major version 18. Upgrades from v0.2.0 or v0.3.0 also apply the v0.4.0 tunnels.0011 history and retry guards. That migration has no reverse operation. Restored-database upgrade and recovery checks cover each listed published predecessor. Older installations must first follow the tagged v0.2.0 upgrade and one-time reset instructions. After updating PostgreSQL, follow the PostgreSQL 18.6 GIN-index statistics check. StarTunnel has a GIN index on its message table. Refresh invalid row-count statistics with a manual ANALYZE.",
+  "rollback": "Keep the previous source, immutable application and service images, configuration, secrets, and a fresh verified database backup outside the server. If recovery is required, stop writers and restore those matching inputs together. Do not reverse tunnels.0011 or use a pre-v0.4.0 image against its migrated database. Restoring a backup discards writes made after that backup. Keep recovery inputs until external verification passes. Clients can explicitly run startunnel update from the restored instance."
+}

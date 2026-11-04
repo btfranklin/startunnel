@@ -1754,6 +1754,7 @@ def test_source_scan_failure_blocks_service_builds() -> None:
         ("v0.2.0", "prove_published_upgrade.py", "--release-record"),
         ("v0.3.0", "prove_published_upgrade.py", "--release-record"),
         ("v0.4.0", "prove_published_upgrade.py", "--release-record"),
+        ("v0.4.1", "prove_published_upgrade.py", "--release-record"),
     ],
 )
 def test_ci_checks_each_published_upgrade_with_its_own_record(
@@ -1780,6 +1781,27 @@ def test_ci_checks_each_published_upgrade_with_its_own_record(
         f"gh release download {version} --pattern release.json --dir {directory}",
         f"pdm run python scripts/{script} {option} {record}",
     ]
+
+
+@pytest.mark.parametrize("version", ["v0.2.0", "v0.3.0", "v0.4.0", "v0.4.1"])
+def test_candidate_checks_published_upgrades_with_the_exact_image(version: str) -> None:
+    job = load_workflow("release-validation.yml")["jobs"]["system"]
+    step = next(
+        step
+        for step in job["steps"]
+        if "prove_published_upgrade.py" in step.get("run", "")
+        and f"startunnel-{version}/" in step["run"]
+    )
+    assert step["if"] == "inputs.candidate_image != ''"
+    assert not step.get("continue-on-error")
+    assert step["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "CANDIDATE_IMAGE": "${{ inputs.candidate_image }}",
+    }
+    assert f"refs/tags/{version}:refs/tags/{version}" in step["run"]
+    assert f"gh release download {version} --pattern release.json" in step["run"]
+    assert f'--release-record "$RUNNER_TEMP/startunnel-{version}/release.json"' in step["run"]
+    assert '--candidate-image "$CANDIDATE_IMAGE"' in step["run"]
 
 
 def test_website_publication_is_separate_and_opt_in() -> None:

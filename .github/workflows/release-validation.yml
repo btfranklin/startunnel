@@ -182,6 +182,42 @@ jobs:
           python3 scripts/prove_production_release.py
           --candidate-image "$CANDIDATE_IMAGE"
           --project-name stproof-install-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Prove exact-image upgrade and recovery from v0.2.0
+        if: inputs.candidate_image != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          git fetch --depth=1 origin refs/tags/v0.2.0:refs/tags/v0.2.0
+          gh release download v0.2.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.2.0"
+          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.2.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
+      - name: Prove exact-image upgrade and recovery from v0.3.0
+        if: inputs.candidate_image != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          git fetch --depth=1 origin refs/tags/v0.3.0:refs/tags/v0.3.0
+          gh release download v0.3.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.3.0"
+          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.3.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
+      - name: Prove exact-image upgrade and recovery from v0.4.0
+        if: inputs.candidate_image != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          git fetch --depth=1 origin refs/tags/v0.4.0:refs/tags/v0.4.0
+          gh release download v0.4.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.4.0"
+          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.4.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
+      - name: Prove exact-image upgrade and recovery from v0.4.1
+        if: inputs.candidate_image != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+        run: |
+          git fetch --depth=1 origin refs/tags/v0.4.1:refs/tags/v0.4.1
+          gh release download v0.4.1 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.4.1"
+          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.4.1/release.json" --candidate-image "$CANDIDATE_IMAGE"
       - name: Record the system proof attempt
         if: always()
         env:

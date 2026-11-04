@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
-ARG PYTHON_BASE_IMAGE="python:3.15.1-alpine3.23@sha256:cb295b554dbbea09b2c0e6e6d9ce55f051347c902fbb611e618c071addfb30a3"
-ARG PYTHON_TEST_BASE_IMAGE="python:3.15.1-slim-trixie@sha256:533b0b2f9b5d46fd097091cf826f27902f1d6c3bca714b6dc74551356aa97a51"
-ARG PDM_REQUIREMENT="pdm>=2.29.4,<3"
+ARG PYTHON_BASE_IMAGE="python:3.15.2-alpine3.23@sha256:4b777652b7ca0a1fae98a847e83e538605d0fb8de3812f3403076aca74368e74"
+ARG PYTHON_TEST_BASE_IMAGE="python:3.15.2-slim-trixie@sha256:8c13a3f37a6a5b71498228e902c4b9f51c1f7900d49fabf71f9a650c6120e0d0"
+ARG PDM_REQUIREMENT="pdm>=2.29.5"
 ARG RUST_BUILD_IMAGE="rust:1.99-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d"
 
 # Build the existing Perfect Doc release for the test image's architecture.

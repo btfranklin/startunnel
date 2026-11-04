@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from django.db import connections
 from django.utils import timezone
 from pytest_django.fixtures import Settings
 from tests.factories import CredentialFactory, UserFactory
@@ -136,13 +137,14 @@ def test_revoke_is_idempotent(
 def test_only_activity_authentication_releases_postgres_connection(
     credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    connection = connections["default"]
     credential, _ = credential_factory()
     closed: list[bool] = []
     monkeypatch.setattr("api.auth.authenticate_key", lambda token: credential)
     monkeypatch.setattr("api.auth.consume_api_operation", lambda value, limits: None)
-    monkeypatch.setattr("api.auth.connection.vendor", "postgresql")
-    monkeypatch.setattr("api.auth.connection.in_atomic_block", False)
-    monkeypatch.setattr("api.auth.connection.close", lambda: closed.append(True))
+    monkeypatch.setattr(connection, "vendor", "postgresql")
+    monkeypatch.setattr(connection, "in_atomic_block", False)
+    monkeypatch.setattr(connection, "close", lambda: closed.append(True))
     assert agent_bearer.authenticate(object(), "key") == credential
     assert closed == []
     assert activity_bearer.authenticate(object(), "key") == credential
@@ -152,6 +154,7 @@ def test_only_activity_authentication_releases_postgres_connection(
 def test_api_authentication_maps_bad_key_and_preserves_outer_transaction(
     credential_factory: CredentialFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    connection = connections["default"]
     monkeypatch.setattr(
         "api.auth.authenticate_key", lambda token: (_ for _ in ()).throw(CredentialError())
     )
@@ -161,8 +164,8 @@ def test_api_authentication_maps_bad_key_and_preserves_outer_transaction(
     closed: list[bool] = []
     monkeypatch.setattr("api.auth.authenticate_key", lambda token: credential)
     monkeypatch.setattr("api.auth.consume_api_operation", lambda value, limits: None)
-    monkeypatch.setattr("api.auth.connection.vendor", "postgresql")
-    monkeypatch.setattr("api.auth.connection.in_atomic_block", True)
-    monkeypatch.setattr("api.auth.connection.close", lambda: closed.append(True))
+    monkeypatch.setattr(connection, "vendor", "postgresql")
+    monkeypatch.setattr(connection, "in_atomic_block", True)
+    monkeypatch.setattr(connection, "close", lambda: closed.append(True))
     assert activity_bearer.authenticate(object(), "key") == credential
     assert closed == []

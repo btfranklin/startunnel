@@ -38,7 +38,7 @@ apt-get update
 apt-get install --yes ca-certificates curl git dnsutils age
 ```
 
-Install Python 3.15 or later on the host before you run the setup scripts.
+Install Python 3.15.2 or later on the host before you run the setup scripts.
 The commands in this guide use the `python3.15` executable. Check it with:
 
 ```shell

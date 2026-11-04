@@ -24,6 +24,6 @@
       {% endfor %}
     </ul>
     {% if events.next_cursor %}<a class="button button--secondary"
-   href="?cursor={{ events.next_cursor|urlencode }}&amp;action={{ action_filter|urlencode }}">Older events</a>{% endif %}
+                                  href="?cursor={{ events.next_cursor|urlencode }}&amp;action={{ action_filter|urlencode }}">Older events</a>{% endif %}
   </section>
 {% endblock %}

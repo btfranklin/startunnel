@@ -50,28 +50,28 @@
                                value="{{ row.current_address.generation }}">
                         <label>
                           Cycle label<input type="text"
-       name="cycle_label"
-       maxlength="160"
-       autocomplete="off">
+                                            name="cycle_label"
+                                            maxlength="160"
+                                            autocomplete="off">
                         </label>
                         <label>
                           Root message<textarea name="root_text"
-          maxlength="65536"
-          rows="3"
-          autocomplete="off"
-          required></textarea>
+                                                maxlength="65536"
+                                                rows="3"
+                                                autocomplete="off"
+                                                required></textarea>
                         </label>
                         <label>
                           Session label (not verified)<input type="text"
-       name="root_session"
-       maxlength="32"
-       autocomplete="off">
+                                                             name="root_session"
+                                                             maxlength="32"
+                                                             autocomplete="off">
                         </label>
                         <label>
                           Lifetime in seconds<input type="number"
-       name="expires_in_seconds"
-       min="{{ cycle_form.expires_in_seconds.field.min_value }}"
-       max="{{ cycle_form.expires_in_seconds.field.max_value }}">
+                                                    name="expires_in_seconds"
+                                                    min="{{ cycle_form.expires_in_seconds.field.min_value }}"
+                                                    max="{{ cycle_form.expires_in_seconds.field.max_value }}">
                         </label>
                         <button class="button button--primary button--small"
                                 type="submit">Start next cycle</button>
@@ -93,28 +93,28 @@
                                value="{{ row.current_address.generation }}">
                         <label>
                           Cycle label<input type="text"
-       name="cycle_label"
-       maxlength="160"
-       autocomplete="off">
+                                            name="cycle_label"
+                                            maxlength="160"
+                                            autocomplete="off">
                         </label>
                         <label>
                           Root message<textarea name="root_text"
-          maxlength="65536"
-          rows="3"
-          autocomplete="off"
-          required></textarea>
+                                                maxlength="65536"
+                                                rows="3"
+                                                autocomplete="off"
+                                                required></textarea>
                         </label>
                         <label>
                           Session label (not verified)<input type="text"
-       name="root_session"
-       maxlength="32"
-       autocomplete="off">
+                                                             name="root_session"
+                                                             maxlength="32"
+                                                             autocomplete="off">
                         </label>
                         <label>
                           Lifetime in seconds<input type="number"
-       name="expires_in_seconds"
-       min="{{ cycle_form.expires_in_seconds.field.min_value }}"
-       max="{{ cycle_form.expires_in_seconds.field.max_value }}">
+                                                    name="expires_in_seconds"
+                                                    min="{{ cycle_form.expires_in_seconds.field.min_value }}"
+                                                    max="{{ cycle_form.expires_in_seconds.field.max_value }}">
                         </label>
                         <button class="button button--primary button--small"
                                 type="submit">Start cycle</button>
@@ -153,9 +153,9 @@
                              value="{{ row.current_address.generation }}">
                       <label>
                         Confirmation<input type="text"
-       name="confirmation"
-       autocomplete="off"
-       required>
+                                           name="confirmation"
+                                           autocomplete="off"
+                                           required>
                       </label>
                       <button class="button button--danger button--small"
                               type="submit">Retire tunnel</button>
