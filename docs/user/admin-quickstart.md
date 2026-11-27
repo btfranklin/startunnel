@@ -167,8 +167,8 @@ if the account needs API access.
 
 Use `accounts set-password` with `admin_id` and `password` to set browser access.
 Supply passwords through private JSON input from an approved secret store.
-Omit `password`, or set it to `null`, to remove browser access. This can remove
-the final browser access path.
+An empty string is invalid. Omit `password`, or set it to `null`, to remove
+browser access. This can remove the final browser access path.
 
 For your own key rotation, obtain your admin ID from `admin me`. Replace
 `ADMIN_ID` below with that ID, and use a new output file:

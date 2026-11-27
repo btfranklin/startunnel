@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
 from accounts.admin_access import issue_admin_key
+from accounts.managers import save_new_user
 from accounts.models import User
 from core.audit import record_event
 
@@ -40,7 +41,7 @@ class Command(BaseCommand):
             try:
                 with os.fdopen(descriptor, "w") as output, transaction.atomic():
                     user.set_unusable_password()
-                    user.save()
+                    self._save_account(user)
                     credential, secret = issue_admin_key(owner=user, name=str(options["key_name"]))
                     output.write(secret + "\n")
                     output.flush()
@@ -70,7 +71,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             user.set_password(password)
-            user.save()
+            self._save_account(user)
             record_event(
                 actor_user=user,
                 action="admin.bootstrap",
@@ -79,3 +80,10 @@ class Command(BaseCommand):
                 channel="server",
             )
         self.stdout.write(self.style.SUCCESS(f"Created local administrator {username}."))
+
+    @staticmethod
+    def _save_account(user: User) -> None:
+        try:
+            save_new_user(user)
+        except ValidationError as error:
+            raise CommandError(" ".join(error.messages)) from error

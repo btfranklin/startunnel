@@ -10,13 +10,14 @@ from contextvars import Token
 from ipaddress import ip_address, ip_network
 from typing import cast
 
-from asgiref.sync import iscoroutinefunction, markcoroutinefunction
+from asgiref.sync import iscoroutinefunction, markcoroutinefunction, sync_to_async
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 
 from .logging import request_id_var
 from .metrics import API_REQUEST_SECONDS, API_REQUESTS
 from .security import CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY
+from .views import health_ready
 
 SAFE_HTTP_METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
 logger = logging.getLogger("startunnel.request")
@@ -99,6 +100,31 @@ class TrustedProxyMiddleware(_DualModeMiddleware):
 
     async def __acall__(self, request: HttpRequest) -> HttpResponse:
         self._prepare_request(request)
+        return await self._async_response(request)
+
+
+class LocalReadinessMiddleware(_DualModeMiddleware):
+    """Serve a direct container readiness check before public HTTPS and host checks."""
+
+    @staticmethod
+    def _is_local_probe(request: HttpRequest) -> bool:
+        return (
+            request.method == "GET"
+            and request.path_info == "/health/ready"
+            and request.META.get("REMOTE_ADDR") == "127.0.0.1"
+            and request.META.get("HTTP_HOST") == "127.0.0.1:8000"
+        )
+
+    def __call__(self, request: HttpRequest) -> HttpResponse | Awaitable[HttpResponse]:
+        if self.async_mode:
+            return self.__acall__(request)
+        if self._is_local_probe(request):
+            return health_ready(request)
+        return self._sync_response(request)
+
+    async def __acall__(self, request: HttpRequest) -> HttpResponse:
+        if self._is_local_probe(request):
+            return await sync_to_async(health_ready)(request)
         return await self._async_response(request)
 
 

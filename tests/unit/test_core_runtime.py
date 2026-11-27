@@ -36,6 +36,43 @@ def test_health_endpoints_report_database_state(
     assert unavailable.json()["status"] == "not_ready"
 
 
+@pytest.mark.parametrize(
+    ("allowed_hosts", "trusted_proxies"),
+    [
+        (["public.example"], ["10.0.0.0/8"]),
+        (["internal.example"], ["127.0.0.0/8"]),
+    ],
+)
+def test_local_readiness_is_independent_of_the_public_origin_and_proxy(
+    client: Client,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    allowed_hosts: list[str],
+    trusted_proxies: list[str],
+) -> None:
+    settings.SECURE_SSL_REDIRECT = True
+    settings.SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    settings.STARTUNNEL_BASE_URL = "https://public.example"
+    settings.ALLOWED_HOSTS = allowed_hosts
+    settings.STARTUNNEL_TRUSTED_PROXY_CIDRS = trusted_proxies
+    host = "127.0.0.1:8000"
+    path = "/health/ready"
+
+    assert client.get(path, HTTP_HOST=host).status_code == 200
+    assert client.get("/health/live", HTTP_HOST=allowed_hosts[0]).status_code == 301
+    assert (
+        client.get(path, HTTP_HOST=host, secure=True, REMOTE_ADDR="192.0.2.10").status_code == 400
+    )
+
+    def unavailable_cursor() -> None:
+        raise RuntimeError("PostgreSQL is unavailable.")
+
+    monkeypatch.setattr(connections["default"], "cursor", unavailable_cursor)
+    response = client.get(path, HTTP_HOST=host)
+    assert response.status_code == 503
+    assert response.json() == {"status": "not_ready", "checks": {"postgres": "unavailable"}}
+
+
 def test_metrics_require_token_and_publish_maintenance_status(
     client: Client, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

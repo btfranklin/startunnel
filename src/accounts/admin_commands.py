@@ -40,6 +40,7 @@ from .admin_data import (
     key_resource,
     tunnel_resource,
 )
+from .managers import save_new_user
 from .models import AdminCredential, AdminReceipt, User
 
 
@@ -88,10 +89,10 @@ class AccountCreate(AdminCommand):
             account.full_clean(exclude={"password"})
             if self.password:
                 validate_password(self.password, user=account)
+            account.set_password(self.password or None)
+            save_new_user(account)
         except ValidationError as error:
             raise InvalidRequest(" ".join(error.messages)) from error
-        account.set_password(self.password or None)
-        account.save()
         resource = admin_resource(account)
         if not self.password:
             receipt.secret_kind = "admin_key"
@@ -135,12 +136,14 @@ class AccountPassword(AccountCommand):
 
     def perform(self, actor: User, receipt: AdminReceipt) -> tuple[AdminResourceData, str, UUID]:
         account = User.objects.get(pk=self.admin_id)
-        if self.password:
+        if self.password == "":
+            raise InvalidRequest("Supply a nonempty password.")
+        if self.password is not None:
             try:
                 validate_password(self.password, user=account)
             except ValidationError as error:
                 raise InvalidRequest(" ".join(error.messages)) from error
-        account.set_password(self.password or None)
+        account.set_password(self.password)
         account.save(update_fields=["password"])
         return admin_resource(account), "user", account.id
 

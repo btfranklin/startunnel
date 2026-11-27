@@ -39,6 +39,29 @@ def test_passwordless_admin_creation_downloads_first_key(
     assert secret.encode() not in client.get("/app/admins/").content
 
 
+@pytest.mark.parametrize("password_field", [{}, {"password": ""}])
+def test_set_password_requires_a_value_and_preserves_browser_access(
+    client: Client, user_factory: UserFactory, password_field: dict[str, str]
+) -> None:
+    actor = user_factory()
+    client.force_login(actor)
+    response = client.post(
+        "/app/admins/access/",
+        {
+            "action": "set-password",
+            "admin_id": actor.id,
+            "idempotency_key": str(uuid4()),
+            **password_field,
+        },
+        follow=True,
+    )
+    assert b"Supply a nonempty password." in response.content
+    actor.refresh_from_db()
+    assert actor.check_password("test-password-42")
+    assert client.get("/app/account/").status_code == 200
+    assert not actor.admin_receipts.exists()
+
+
 def test_browser_can_remove_final_password_and_session_expires(
     client: Client, user_factory: UserFactory
 ) -> None:

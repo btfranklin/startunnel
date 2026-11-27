@@ -8,10 +8,11 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+import time_machine
 from django.core.exceptions import PermissionDenied
 from django.db import connection
 from django.http import HttpRequest
-from django.test import Client
+from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from tests.factories import CredentialFactory, UserFactory
@@ -20,9 +21,10 @@ from accounts.models import User
 from agents.models import AgentCredential
 from core.errors import InvalidRequest, QuotaExceeded, TunnelUnavailable
 from site_app.views import _authenticated_user
-from tunnels.admin_actions import rollover_cycle_as_admin
+from tunnels.admin_actions import close_cycle_as_admin, rollover_cycle_as_admin
 from tunnels.cycles import create_tunnel
-from tunnels.models import Tunnel
+from tunnels.models import Cycle, Tunnel
+from tunnels.retention import delete_due_cycle_content
 
 pytestmark = pytest.mark.django_db
 
@@ -69,6 +71,54 @@ def test_cycle_history_escapes_message_session(
     assert page.status_code == 200
     assert b"Shared agent[&lt;img src=x onerror=alert(1)&gt;]" in page.content
     assert b"<img src=x onerror=alert(1)>" not in page.content
+
+
+@pytest.mark.parametrize("state", [Cycle.State.ACTIVE, Cycle.State.CLOSED])
+@override_settings(STARTUNNEL_HISTORY_RETENTION_SECONDS=60)
+def test_cycle_history_hides_message_details_at_retention_deadline(
+    client: Client, user_factory: UserFactory, credential_factory: CredentialFactory, state: str
+) -> None:
+    actor = user_factory()
+    credential, _ = credential_factory(user=actor, name="History agent")
+    created = create_tunnel(
+        credential=credential,
+        idempotency_key="site-history-retention",
+        root_content={"type": "text", "text": "Root"},
+        root_session="history-session",
+    )
+    if state == Cycle.State.CLOSED:
+        close_cycle_as_admin(
+            actor=actor, tunnel_id=created.tunnel.id, expected_cycle_id=created.cycle.id
+        )
+        created.cycle.refresh_from_db()
+        deadline = created.cycle.delete_after
+        assert deadline is not None
+    else:
+        deadline = created.cycle.expires_at + timedelta(seconds=60)
+    client.force_login(actor)
+
+    with time_machine.travel(deadline - timedelta(microseconds=1), tick=False):
+        before = client.get("/app/tunnels/")
+    with time_machine.travel(deadline, tick=False):
+        after = client.get("/app/tunnels/")
+
+    heading = f"Cycle 1 · {state}".encode()
+    assert before.status_code == after.status_code == 200
+    assert heading + " · 1 messages · Root by History agent[history-session]".encode() in (
+        before.content
+    )
+    assert heading + b"</li>" in after.content
+    assert b"Root by History agent" not in after.content
+    assert b"history-session" not in after.content
+    created.cycle.refresh_from_db()
+    assert created.cycle.state == state
+    assert created.cycle.message_count == 1
+
+    if state == Cycle.State.CLOSED:
+        assert delete_due_cycle_content(cycle_id=created.cycle.id, now=deadline)
+        deleted = client.get("/app/tunnels/")
+        assert deleted.status_code == 200
+        assert "Cycle 1 · deleted</li>".encode() in deleted.content
 
 
 def test_tunnel_board_reads_related_rows_with_a_fixed_query_count(
@@ -159,8 +209,8 @@ def test_tunnel_board_keeps_the_latest_ten_cycles_per_tunnel(
     for created in tunnels:
         row = rows[created.tunnel.id]
         assert row["cycle"].number == 12
-        assert [cycle.number for cycle in row["cycles"]] == list(range(12, 2, -1))
-        assert [cycle.root_message.session for cycle in row["cycles"]] == list(
+        assert [cycle["number"] for cycle in row["cycles"]] == list(range(12, 2, -1))
+        assert [cycle["content"].root_message.session for cycle in row["cycles"]] == list(
             reversed(expected_sessions[created.tunnel.id][1:])
         )
 

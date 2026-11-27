@@ -165,9 +165,11 @@ clients and no due application work:
 | PostgreSQL | Native writer, checkpoint, and vacuum scheduling | Durable writes and database upkeep |
 | Optional Caddy | Certificate renewal checks every 10 minutes, OCSP checks each hour, and storage cleanup each day | Automatic TLS upkeep |
 
-The web readiness probe uses the runtime image's built-in `wget`. With one web
-upstream, Caddy returns request failures directly. Docker health checks report
-readiness.
+The web readiness probe uses the runtime image's built-in `wget` to request
+`/health/ready` on `127.0.0.1:8000`. The local probe checks PostgreSQL without
+using forwarded headers or the public hostname. External readiness requests
+follow the configured HTTPS and host rules. With one web upstream, Caddy
+returns request failures directly.
 
 PostgreSQL defaults include 200 ms background-writer and WAL-writer delays, a
 60-second autovacuum interval per database, and a five-minute checkpoint

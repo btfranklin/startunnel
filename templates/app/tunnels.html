@@ -171,7 +171,16 @@
                           disabled>Address metadata unavailable</button>
                 </form>
               {% endif %}
-              {% if row.cycles %}<details><summary>Cycle history</summary><ol>{% for cycle in row.cycles %}<li>Cycle {{ cycle.number }} · {{ cycle.state }} · {{ cycle.message_count }} messages{% if cycle.root_message %} · Root by {{ cycle.root_message.sender_name }}{% if cycle.root_message.session %}[{{ cycle.root_message.session }}] (unverified session label){% endif %}{% endif %}</li>{% endfor %}</ol></details>{% endif %}
+              {% if row.cycles %}
+                <details>
+                  <summary>Cycle history</summary>
+                  <ol>
+                    {% for cycle in row.cycles %}
+                      <li>Cycle {{ cycle.number }} · {{ cycle.state }}{% if cycle.content %} · {{ cycle.content.message_count }} messages{% if cycle.content.root_message %} · Root by {{ cycle.content.root_message.sender_name }}{% if cycle.content.root_message.session %}[{{ cycle.content.root_message.session }}] (unverified session label){% endif %}{% endif %}{% endif %}</li>
+                    {% endfor %}
+                  </ol>
+                </details>
+              {% endif %}
             </li>
           {% endwith %}
         {% endfor %}

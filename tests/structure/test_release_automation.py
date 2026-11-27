@@ -242,65 +242,31 @@ def test_maintenance_healthcheck_uses_the_local_liveness_file() -> None:
     assert os.access(ROOT / "docker/app/maintenance-healthcheck.sh", os.X_OK)
 
 
-def _run_web_healthcheck(
-    command: str, directory: Path, *, base_url: str, exit_code: int
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
-    executable = directory / "wget"
-    executable.write_text(
-        """#!/bin/sh
-printf '%s\\n' "$@" > "$WGET_ARGUMENTS"
-exit "$WGET_EXIT_CODE"
-"""
-    )
-    executable.chmod(0o755)
-    output = directory / "wget-arguments"
-    environment = os.environ | {
-        "PATH": str(directory) + os.pathsep + os.defpath,
-        "STARTUNNEL_BASE_URL": base_url,
-        "WGET_ARGUMENTS": str(output),
-        "WGET_EXIT_CODE": str(exit_code),
-    }
-    result = subprocess.run(
-        ["/bin/sh", "-c", command.replace("$$", "$")],
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return result, output.read_text().splitlines()
-
-
-@pytest.mark.parametrize(
-    ("base_url", "expected_host"),
-    [
-        ("http://startunnel.internal", "startunnel.internal"),
-        ("https://startunnel.example", "startunnel.example"),
-        ("http://startunnel.internal:8000", "startunnel.internal:8000"),
-        ("https://startunnel.example:8443/", "startunnel.example:8443"),
-        ("http://[::1]:8000/", "[::1]:8000"),
-    ],
-)
-@pytest.mark.parametrize("exit_code", [0, 8])
-def test_web_healthcheck_uses_the_origin_and_preserves_failure(
-    executable_dir: Path, base_url: str, expected_host: str, exit_code: int
-) -> None:
+def test_web_healthcheck_uses_the_local_readiness_endpoint() -> None:
     services = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
-    kind, command = services["web"]["healthcheck"]["test"]
-    assert kind == "CMD-SHELL"
 
-    result, arguments = _run_web_healthcheck(
-        command, executable_dir, base_url=base_url, exit_code=exit_code
-    )
-
-    assert result.returncode == exit_code, result.stderr
-    assert arguments == [
+    assert services["web"]["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
         "-q",
         "-O",
         "/dev/null",
         "-T",
         "3",
-        "--header=Host: " + expected_host,
-        "--header=X-Forwarded-Proto: https",
+        "http://127.0.0.1:8000/health/ready",
+    ]
+    dev = yaml.safe_load((ROOT / "compose.dev.yaml").read_text())["services"]["web"]
+    assert dev["healthcheck"]["test"] == [
+        "CMD",
+        "curl",
+        "--noproxy",
+        "*",
+        "--fail",
+        "--silent",
+        "--max-time",
+        "3",
+        "--output",
+        "/dev/null",
         "http://127.0.0.1:8000/health/ready",
     ]
 
@@ -328,7 +294,6 @@ def test_web_healthcheck_uses_the_origin_and_preserves_failure(
     ],
 )
 def test_production_compose_uses_operator_origin_or_https_default(
-    executable_dir: Path,
     base_url: str | None,
     allowed_hosts: str | None,
     trusted_origins: str | None,
@@ -373,13 +338,6 @@ def test_production_compose_uses_operator_origin_or_https_default(
     assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)["services"]
     _assert_postgres_permission_tools_are_mounted(services)
-    healthcheck = services["web"]["healthcheck"]["test"][-1]
-    probe, arguments = _run_web_healthcheck(
-        healthcheck, executable_dir, base_url=expected_url, exit_code=0
-    )
-    assert probe.returncode == 0, probe.stderr
-    expected_host = "startunnel.internal:8000" if base_url else "startunnel.example.test"
-    assert "--header=Host: " + expected_host in arguments
     for name in ("migrate", "web", "maintenance"):
         assert services[name]["environment"]["STARTUNNEL_BASE_URL"] == expected_url
         assert services[name]["environment"]["STARTUNNEL_ALLOWED_HOSTS"] == expected_hosts

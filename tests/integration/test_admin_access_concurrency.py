@@ -31,7 +31,7 @@ from accounts.admin_data import AdminOperationResult, AgentResourceData, KeyReso
 from accounts.admin_services import execute_admin_operation
 from accounts.models import AdminCredential, AdminReceipt, User
 from agents.services import IssuedCredential, revoke_credential
-from core.errors import IdempotencyConflict, InvalidCredential, TunnelUnavailable
+from core.errors import IdempotencyConflict, InvalidCredential, InvalidRequest, TunnelUnavailable
 from core.models import AuditEvent
 from tunnels.admin_actions import close_cycle_as_admin, retirement_confirmation
 from tunnels.cycles import create_tunnel
@@ -196,6 +196,52 @@ def test_identical_concurrent_admin_keys_create_one_result_and_audit() -> None:
     assert User.objects.filter(username="created-once").count() == 1
     assert AdminReceipt.objects.filter(owner=actor).count() == 1
     assert AuditEvent.objects.filter(action="accounts.create").count() == 1
+
+
+@pytest.mark.parametrize("second_username", ["New-Operator", "new-operator"])
+def test_concurrent_account_creation_rejects_duplicate_username(
+    second_username: str, monkeypatch: pytest.MonkeyPatch, user_factory: UserFactory
+) -> None:
+    actor = user_factory()
+    validated = Barrier(2)
+    original_clean = User.full_clean
+
+    def clean_before_insert(user: User, *, exclude: set[str]) -> None:
+        original_clean(user, exclude=exclude)
+        validated.wait(timeout=15)
+
+    monkeypatch.setattr(User, "full_clean", clean_before_insert)
+
+    def create(index: int, username: str) -> str:
+        close_old_connections()
+        try:
+            data = {"username": username}
+            try:
+                execute_admin_operation(
+                    actor=actor,
+                    command=AccountCreate.model_validate(data),
+                    key=f"create-colliding-admin-{index}",
+                    request_data=data,
+                )
+            except InvalidRequest as error:
+                return str(error)
+            return "created"
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(create, 0, "New-Operator")
+        second = pool.submit(create, 1, second_username)
+        assert sorted([first.result(), second.result()]) == [
+            "That username already exists.",
+            "created",
+        ]
+
+    account = User.objects.exclude(pk=actor.pk).get()
+    assert account.username in {"New-Operator", second_username}
+    assert AdminCredential.objects.filter(owner=account).count() == 1
+    assert AdminReceipt.objects.filter(owner=actor).count() == 1
+    assert AuditEvent.objects.filter(action="accounts.create", target_id=account.pk).count() == 1
 
 
 def test_same_owner_agent_key_creations_both_complete(monkeypatch: pytest.MonkeyPatch) -> None:

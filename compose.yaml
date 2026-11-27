@@ -144,13 +144,14 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test:
-        - CMD-SHELL
-        - >-
-          origin="$${STARTUNNEL_BASE_URL#*://}";
-          exec wget -q -O /dev/null -T 3
-          --header="Host: $${origin%%/*}"
-          --header="X-Forwarded-Proto: https"
-          http://127.0.0.1:8000/health/ready
+        - CMD
+        - wget
+        - -q
+        - -O
+        - /dev/null
+        - -T
+        - "3"
+        - http://127.0.0.1:8000/health/ready
       interval: 60s
       start_interval: 2s
       timeout: 5s

@@ -11,11 +11,12 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Upper
 from django.utils import timezone
 
 from core.limits import MAX_CREDENTIAL_NAME_CHARACTERS
 
-from .managers import UserManager
+from .managers import CASE_INSENSITIVE_USERNAME_CONSTRAINT, USERNAME_EXISTS, UserManager
 
 
 class User(AbstractUser):
@@ -27,6 +28,9 @@ class User(AbstractUser):
 
     class Meta:
         ordering = ["username", "id"]
+        constraints = [
+            models.UniqueConstraint(Upper("username"), name=CASE_INSENSITIVE_USERNAME_CONSTRAINT)
+        ]
 
     def __str__(self) -> str:
         return self.username
@@ -38,7 +42,7 @@ class User(AbstractUser):
             if not self._state.adding:
                 duplicates = duplicates.exclude(pk=self.pk)
             if duplicates.exists():
-                raise ValidationError({"username": "That username already exists."})
+                raise ValidationError({"username": USERNAME_EXISTS})
 
 
 class AdminCredentialQuerySet(models.QuerySet["AdminCredential"]):

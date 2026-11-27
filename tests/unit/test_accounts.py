@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -132,6 +133,29 @@ def test_instance_admin_command_rejects_duplicate(
     )
     with pytest.raises(CommandError, match="already exists"):
         call_command("create_instance_admin", "OPERATOR")
+
+
+@pytest.mark.parametrize("entry_point", ["manager", "bootstrap"])
+def test_username_collision_after_validation_rolls_back_creation(
+    entry_point: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    original_clean = User.full_clean
+
+    def clean_before_competing_insert(user: User, *, exclude: set[str]) -> None:
+        original_clean(user, exclude=exclude)
+        User.objects.bulk_create([User(username="Existing-Operator")])
+
+    monkeypatch.setattr(User, "full_clean", clean_before_competing_insert)
+    path = tmp_path / "bootstrap-key"
+    if entry_point == "manager":
+        with pytest.raises(ValidationError, match="already exists"):
+            User.objects.create_user(username="existing-operator")
+    else:
+        with pytest.raises(CommandError, match="already exists"):
+            call_command("create_instance_admin", "existing-operator", key_file=str(path))
+        assert not path.exists()
+
+    assert User.objects.get().username == "Existing-Operator"
 
 
 def test_admin_pages_create_and_change_accounts(client: Client, user_factory: UserFactory) -> None:

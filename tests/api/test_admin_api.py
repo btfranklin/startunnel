@@ -187,6 +187,25 @@ def test_admin_reports_configured_credential_limit(
     assert capabilities.json()["limits"]["active_credentials"] == 75
 
 
+def test_empty_password_change_preserves_admin_access(
+    client: Client, user_factory: UserFactory
+) -> None:
+    actor = user_factory()
+    _, secret = issue_admin_key(owner=actor, name="admin")
+    response = client.post(
+        "/api/v1/admin/accounts/password",
+        data={"admin_id": str(actor.pk), "password": ""},
+        content_type="application/json",
+        HTTP_IDEMPOTENCY_KEY=str(uuid4()),
+        HTTP_AUTHORIZATION="Bearer " + secret,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    actor.refresh_from_db()
+    assert actor.check_password("test-password-42")
+    assert not actor.admin_receipts.exists()
+
+
 def test_last_admin_access_can_be_removed_and_server_recovery_restores_it(
     client: Client, user_factory: UserFactory, tmp_path: Path
 ) -> None:

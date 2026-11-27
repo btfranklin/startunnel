@@ -71,6 +71,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "core.middleware.TrustedProxyMiddleware",
+    "core.middleware.LocalReadinessMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "core.middleware.RequestIdMiddleware",
     "core.middleware.SecurityHeadersMiddleware",

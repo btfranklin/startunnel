@@ -13,6 +13,7 @@ from django.core.paginator import Paginator
 from django.db.models import Prefetch
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_POST, require_safe
 
@@ -33,6 +34,7 @@ from accounts.forms import AdminStateForm, InstanceAdminCreationForm
 from accounts.models import User
 from agents.models import AgentCredential, AgentCredentialQuerySet
 from core.errors import DomainError, InvalidRequest, TunnelUnavailable
+from tunnels.access import cycle_is_readable
 from tunnels.admin_actions import retirement_confirmation
 from tunnels.models import Cycle, Tunnel, TunnelAddress
 
@@ -85,6 +87,12 @@ class SiteTunnelPrefetchData(TypedDict):
     current_addresses: list[TunnelAddress]
     active_cycles: list[Cycle]
     history_cycles: list[Cycle]
+
+
+class SiteCycleHistoryRow(TypedDict):
+    number: int
+    state: str
+    content: Cycle | None
 
 
 if TYPE_CHECKING:
@@ -361,6 +369,9 @@ def tunnels(request: HttpRequest) -> HttpResponse:
                     "tunnel_id",
                     "number",
                     "state",
+                    "expires_at",
+                    "retention_seconds",
+                    "delete_after",
                     "message_count",
                     "root_message_id",
                     "root_message__sender_name",
@@ -373,10 +384,18 @@ def tunnels(request: HttpRequest) -> HttpResponse:
         200,
     ).get_page(request.GET.get("page"))
     tunnel_rows = []
+    now = timezone.now()
     for tunnel in tunnel_page:
         prefetched: SitePrefetchedTunnel = tunnel
         active_cycles: list[Cycle] = prefetched.active_cycles
-        history_cycles: list[Cycle] = prefetched.history_cycles
+        history_cycles: list[SiteCycleHistoryRow] = [
+            {
+                "number": cycle.number,
+                "state": cycle.state,
+                "content": cycle if cycle_is_readable(cycle, now=now) else None,
+            }
+            for cycle in prefetched.history_cycles
+        ]
         current_addresses: list[TunnelAddress] = prefetched.current_addresses
         tunnel_rows.append(
             {
