@@ -201,7 +201,9 @@ def test_failed_restart_restores_the_previous_pair(
         "database",
         *("check" for _index in range(4)),
         "restart",
+        *("check" for _index in range(4)),
         "database",
+        *("check" for _index in range(4)),
         "restart",
         *("check" for _index in range(4)),
         "inspect",
@@ -342,28 +344,98 @@ def test_database_child_reports_safe_failure_without_exception_text(
     assert "sensitive synthetic exception text" not in diagnostic
 
 
-def test_compose_restart_and_inspection_show_normal_diagnostics(
+def test_inspection_loads_mounted_secrets_without_touching_metrics(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     commands: list[list[str]] = []
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        assert "stdout" not in kwargs
-        assert "stderr" not in kwargs
-        print("safe Compose diagnostic", file=sys.stderr)
-        return subprocess.CompletedProcess(command, 1, "", "")
+        assert kwargs["stdout"] == subprocess.DEVNULL
+        assert kwargs["stderr"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 15
+        return subprocess.CompletedProcess(command, 0 if len(commands) == 2 else 1)
 
     monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(RotationError, match="did not restart cleanly"):
-        rotation.restart_database_clients(["safe-compose"])
-    with pytest.raises(RotationError, match="did not pass runtime inspection"):
-        rotation.inspect_runtime(["safe-compose"])
+    monkeypatch.setattr("scripts.rotate_postgres_passwords.time.sleep", lambda seconds: None)
+    rotation.inspect_runtime(["safe-compose"])
+    assert (
+        commands
+        == [
+            [
+                "safe-compose",
+                "exec",
+                "-T",
+                "web",
+                "env",
+                "-u",
+                "PROMETHEUS_MULTIPROC_DIR",
+                "/usr/local/bin/startunnel-entrypoint",
+                "/app/.venv/bin/python",
+                "manage.py",
+                "inspect_runtime",
+                "--require-ready",
+            ]
+        ]
+        * 2
+    )
 
-    assert "safe Compose diagnostic" in capsys.readouterr().err
-    assert commands[0][1] == "up"
-    assert commands[1][1] == "exec"
+
+@pytest.mark.parametrize(
+    "outcome", ["before-commit", "after-commit", "unreachable", "partial-file"]
+)
+def test_rotation_reconciles_failed_mutations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    old = PasswordPair(admin="old_admin", runtime="old_runtime")
+    new = PasswordPair(admin="new_admin", runtime="new_runtime")
+    directory = tmp_path / "secrets"
+    directory.mkdir(mode=0o700)
+    _production_secrets(directory, old)
+    _write_secret(tmp_path / "admin", new.admin)
+    _write_secret(tmp_path / "runtime", new.runtime)
+    state, _events, _checks = _install_database_simulation(monkeypatch, old)
+    apply = rotation.apply_database_passwords
+    replace = rotation.replace_secret_pair
+    attempted = False
+
+    def fail_apply(
+        command: list[str], *, authenticate_with: str, replacement: PasswordPair
+    ) -> None:
+        nonlocal attempted
+        if attempted or outcome in {"after-commit", "partial-file"}:
+            apply(command, authenticate_with=authenticate_with, replacement=replacement)
+        if not attempted and outcome != "partial-file":
+            attempted = True
+            raise RotationError("simulated lost response")
+
+    def fail_replace(path: Path, pair: PasswordPair) -> None:
+        if outcome == "partial-file" and pair == new:
+            _write_secret(path / rotation.ADMIN_SECRET_NAME, pair.admin)
+            raise OSError("simulated interruption")
+        replace(path, pair)
+
+    monkeypatch.setattr(rotation, "apply_database_passwords", fail_apply)
+    monkeypatch.setattr(rotation, "replace_secret_pair", fail_replace)
+    if outcome == "unreachable":
+
+        def unavailable(*args: object, **kwargs: object) -> bool:
+            raise RotationError("database unavailable")
+
+        monkeypatch.setattr(rotation, "credential_works", unavailable)
+
+    expected = "did not complete" if outcome == "unreachable" else "previous credentials are active"
+    with pytest.raises(RotationError, match=expected):
+        rotation.rotate(
+            directory=directory,
+            new_admin_file=tmp_path / "admin",
+            new_runtime_file=tmp_path / "runtime",
+            rollback_file=tmp_path / "rollback",
+            command=["safe-compose"],
+        )
+    assert state["pair"] == old
+    assert rotation.read_password_pair(directory) == old
+    assert (tmp_path / "rollback").is_file()
 
 
 def test_rollback_bundle_is_new_and_private_with_accessible_output_parent(tmp_path: Path) -> None:

@@ -114,10 +114,8 @@ client against the application and PostgreSQL.
 
 ## Async diagnostics
 
-The application requires Python 3.15. The locked Django release is 6.1.2.
-This combination passes through the same local and isolated checks as other
-runtime changes. Official Django support for Python 3.15 is planned for
-[Django 6.1.3](https://docs.djangoproject.com/en/dev/releases/6.1.3/).
+The application requires Python 3.15. See `pdm.lock` for the current Django
+release. The local and isolated runtime checks use the locked version.
 
 Use these tools with a local diagnostic process that runs the same Python
 minor version. Replace `PID` with that process ID:
@@ -244,6 +242,10 @@ pdm run python scripts/run_isolated_test_lane.py agents
 pdm run python scripts/run_isolated_test_lane.py browser
 pdm run python scripts/run_isolated_test_lane.py proxy
 ```
+
+The browser lane saves a screenshot if an admin layout overflows. Set
+`STARTUNNEL_BROWSER_SUCCESS_SCREENSHOTS=1` to also save screenshots for passing
+viewports. CI retains the failure screenshots with the browser job artifacts.
 
 The `postgres` lane proves real PostgreSQL constraints, transactions, rate-limit atomicity, `LISTEN`/`NOTIFY`, lifecycle concurrency, maintenance deadlines, and runtime-role restrictions.
 It first runs the integration tests and checks their critical-coverage report.

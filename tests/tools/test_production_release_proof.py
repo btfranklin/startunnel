@@ -93,7 +93,13 @@ def compose_model(secret_directory: Path, port: int = 45000) -> dict[str, object
         "maintenance": required - {"postgres_runtime_password"},
     }
     for name, mounts in secret_sets.items():
-        service: dict[str, object] = {"secrets": [{"source": item} for item in sorted(mounts)]}
+        service: dict[str, object] = {
+            "secrets": [
+                {"source": item, "target": f"/run/secrets/{item}"} for item in sorted(mounts)
+            ]
+        }
+        if name == "postgres":
+            service["image"] = "postgres@sha256:" + "a" * 64
         if name == "web":
             service["volumes"] = [
                 {
@@ -111,6 +117,7 @@ def compose_model(secret_directory: Path, port: int = 45000) -> dict[str, object
                     "environment": {
                         "DJANGO_SETTINGS_MODULE": "startunnel.settings.production",
                         "STARTUNNEL_ENV": "production",
+                        "STARTUNNEL_DATABASE_ROLE": "runtime" if name == "web" else "admin",
                     },
                 }
             )
@@ -157,6 +164,8 @@ def install_fake_run(
     )
     monkeypatch.setattr(proof, "health_ok", lambda _url: True)
     monkeypatch.setattr(proof, "metrics_inodes", lambda _stack: {"worker.db": 17})
+    monkeypatch.setattr(proof, "prove_recovery_operations", lambda *args: None)
+    monkeypatch.setattr(proof, "prove_installed_upgrade", lambda *args, **kwargs: None)
 
     class Download:
         status = 200
@@ -395,7 +404,7 @@ def test_rendered_compose_checks_production_platform_loopback_and_private_secret
     services = cast(dict[str, object], rendered["services"])
     web = cast(dict[str, object], services["web"])
     web["platform"] = "linux/arm64"
-    with pytest.raises(LaneError, match="configuration"):
+    with pytest.raises(LaneError, match="platform"):
         proof.verify_compose_model(
             rendered, image=IMAGE, port=45000, secret_directory=secret_directory
         )
@@ -410,7 +419,7 @@ def test_rendered_compose_checks_production_platform_loopback_and_private_secret
     web["ports"] = [{"target": 8000, "published": "45000", "host_ip": "127.0.0.1"}]
     secrets_config = cast(dict[str, object], rendered["secrets"])
     secrets_config["postgres_admin_password"] = {"file": str(tmp_path / "outside" / "password")}
-    with pytest.raises(LaneError, match="outside private storage"):
+    with pytest.raises(LaneError, match="wrong file source"):
         proof.verify_compose_model(
             rendered, image=IMAGE, port=45000, secret_directory=secret_directory
         )

@@ -104,6 +104,7 @@ def _parser() -> argparse.ArgumentParser:
 def _source_lane(report_directory: Path) -> None:
     _run("PDM lock validation", ["pdm", "lock", "--check"])
     _run("npm lock validation", ["npm", "ci", "--ignore-scripts"])
+    _run("Vendored browser asset validation", ["npm", "run", "vendor", "--", "--check"])
     _run(
         "Bandit",
         [
@@ -215,10 +216,8 @@ def _image_lane(report_directory: Path, image: str, *, skip_build: bool) -> None
 def _scan_reports(report_directory: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="startunnel-security-reports-") as temporary_name:
         temporary = Path(temporary_name)
-        report_copy = temporary / "current-security-reports"
-        shutil.copytree(report_directory, report_copy)
         report_scan = temporary / "report-secrets.json"
-        _scan_secrets(report_copy, report_scan)
+        _scan_secrets(report_directory, report_scan)
         shutil.copy2(report_scan, report_directory / "report-secrets.json")
 
 
@@ -227,22 +226,34 @@ def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     report_directory = ROOT / "artifacts" / "security" / timestamp
-    report_directory.mkdir(parents=True, mode=0o700)
-
+    stage = "security checks"
     try:
-        if arguments.lane == "source":
-            _source_lane(report_directory)
-        else:
-            _image_lane(report_directory, arguments.image, skip_build=arguments.skip_build)
-        _scan_reports(report_directory)
+        artifact_root = report_directory.parent.parent
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".security-", dir=artifact_root) as temporary:
+            reports = Path(temporary) / "reports"
+            reports.mkdir(mode=0o700)
+            if arguments.lane == "source":
+                _source_lane(reports)
+            else:
+                _image_lane(reports, arguments.image, skip_build=arguments.skip_build)
+                (reports / "validated-image.json").write_text(
+                    json.dumps({"status": "passed", "image": arguments.image}) + "\n",
+                    encoding="utf-8",
+                )
+            stage = "report screening"
+            _scan_reports(reports)
+            stage = "report publication"
+            report_directory.parent.mkdir(parents=True, exist_ok=True)
+            reports.rename(report_directory)
     except (OSError, SecurityGateError, subprocess.SubprocessError, ValueError) as error:
+        report_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (report_directory / "failure.json").write_text(
+            json.dumps({"status": "failed", "stage": stage}) + "\n", encoding="utf-8"
+        )
         print(f"Security release gate failed: {error}")
         return 1
 
-    if arguments.lane == "image":
-        (report_directory / "validated-image.json").write_text(
-            json.dumps({"status": "passed", "image": arguments.image}) + "\n", encoding="utf-8"
-        )
     print(f"Security {arguments.lane} gate passed. Reports: {report_directory}")
     return 0
 

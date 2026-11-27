@@ -6,9 +6,11 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 from collections.abc import Mapping
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,30 +29,34 @@ else:
 
 
 if TYPE_CHECKING or __package__:
+    from .production_lock import production_lock
     from .release_record import PLATFORM, VERSION, specification
     from .start_production import (
+        APP_SERVICES,
         ROOT,
         compose_command,
         production_secret_directory,
-        rendered_images,
+        render_model,
         validate_image_reference,
+        validate_production_model,
         validate_production_secret_files,
-        validate_rendered_images,
     )
 else:
+    from production_lock import production_lock
     from release_record import (
         PLATFORM,
         VERSION,
         specification,
     )
     from start_production import (
+        APP_SERVICES,
         ROOT,
         compose_command,
         production_secret_directory,
-        rendered_images,
+        render_model,
         validate_image_reference,
+        validate_production_model,
         validate_production_secret_files,
-        validate_rendered_images,
     )
 
 
@@ -113,17 +119,6 @@ def replace_image(text: str, image: str) -> str:
     return updated
 
 
-def rendered_web_image(command: list[str]) -> str:
-    model = json_object(json.loads(run([*command, "config", "--format", "json"], capture=True)))
-    try:
-        image = json_object(json_object(model["services"])["web"])["image"]
-    except (KeyError, TypeError) as error:
-        raise ValueError("The selected Compose model must define a web image.") from error
-    if not isinstance(image, str):
-        raise ValueError("The selected Compose model must define a web image.")
-    return image
-
-
 def validate_existing_web_images(command: list[str], configured_image: str) -> None:
     containers = run([*command, "ps", "--all", "--quiet", "web"], capture=True)
     for container in containers.splitlines():
@@ -161,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     writers_stopped = False
     temporary: Path | None = None
+    lock = ExitStack()
     try:
         record = json_object(json.loads(args.record.read_text()))
         validate_record(record)
@@ -173,14 +169,17 @@ def main(argv: list[str] | None = None) -> int:
         env_file = (ROOT / args.env_file).resolve(strict=True)
         if not env_file.is_file():
             raise ValueError("The selected env file must be a readable regular file.")
+        if args.apply:
+            lock.enter_context(production_lock(production_secret_directory()))
         text = env_file.read_text()
         old_image = validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
         if replace_image(text, old_image) != text:
             raise ValueError("Load the selected env file in this shell before running the helper.")
         validate_production_secret_files(production_secret_directory())
         command = compose_command(edge=False, env_file=env_file)
-        if rendered_web_image(command) != old_image:
-            raise ValueError("The selected Compose web image differs from the installed image.")
+        validate_production_model(
+            render_model(command), image=old_image, secret_directory=production_secret_directory()
+        )
         validate_existing_web_images(command, old_image)
         labels = (
             json.loads(
@@ -204,19 +203,22 @@ def main(argv: list[str] | None = None) -> int:
         new_text = replace_image(text, json_string(record["image"]))
         os.environ["STARTUNNEL_APP_IMAGE"] = json_string(record["image"])
         command = compose_command(edge=False, env_file=env_file)
-        run([*command, "config", "--quiet"])
-        validate_rendered_images(rendered_images(command))
-        if rendered_web_image(command) != json_string(record["image"]):
-            raise ValueError("The selected Compose web image differs from the candidate image.")
-        run(
-            [
-                "docker",
-                "pull",
-                "--platform",
-                json_string(record["platform"]),
-                json_string(record["image"]),
-            ]
+        platform = json_string(record["platform"])
+        images = validate_production_model(
+            render_model(command),
+            image=json_string(record["image"]),
+            secret_directory=production_secret_directory(),
+            platform=platform,
         )
+        pulls = {
+            (image, selected_platform or (platform if name in APP_SERVICES else ""))
+            for name, (image, selected_platform) in images.items()
+        }
+        for image, selected_platform in sorted(pulls):
+            pull = ["docker", "pull"]
+            if selected_platform:
+                pull.extend(["--platform", selected_platform])
+            run([*pull, image])
         revision = run(
             [
                 "docker",
@@ -243,6 +245,18 @@ def main(argv: list[str] | None = None) -> int:
                 "--plan",
             ]
         )
+        run(
+            [
+                *command,
+                "run",
+                "--rm",
+                "--no-deps",
+                "migrate",
+                "/app/.venv/bin/python",
+                "manage.py",
+                "check_admin_upgrade",
+            ]
+        )
         print(f"Upgrade {old_version or old_commit} -> {record['version']}")
         print(f"Source: {record['source_commit']}\nImage: {record['image']}")
         print(f"Database: {record['database']}\nRollback: {record['rollback']}")
@@ -257,14 +271,34 @@ def main(argv: list[str] | None = None) -> int:
         saved.write_text(text)
         print(f"Configuration snapshot: {saved}")
         temporary = create_private_sibling_file(env_file, prefix=f"{env_file.name}.upgrade.")
-        temporary.write_text(new_text)
+        installed = env_file.stat()
+        with temporary.open("w") as stream:
+            stream.write(new_text)
+            staged = os.fstat(stream.fileno())
+            if (staged.st_uid, staged.st_gid) != (installed.st_uid, installed.st_gid):
+                os.fchown(stream.fileno(), installed.st_uid, installed.st_gid)
+            os.fchmod(stream.fileno(), stat.S_IMODE(installed.st_mode))
+            stream.flush()
+            os.fsync(stream.fileno())
         run([*command, "stop", "web", "maintenance"])
         writers_stopped = True
         temporary.replace(env_file)
         temporary = None
         # Remove the completed old migration container so startup must rerun migrations.
         run([*command, "rm", "--force", "migrate"])
-        run([*command, "up", "-d", "--no-build", "--wait", "--wait-timeout", "180"])
+        run(
+            [
+                *command,
+                "up",
+                "-d",
+                "--no-build",
+                "--pull",
+                "never",
+                "--wait",
+                "--wait-timeout",
+                "180",
+            ]
+        )
         print("Services started. Repeat external access, login, and two-agent verification.")
         print("On each client machine, run startunnel update with this instance's URL.")
         print(
@@ -284,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Application writers may be stopped. Inspect migrations before recovery.")
             print("Do not switch images against a changed database without compatibility proof.")
         return 2
+    finally:
+        lock.close()
     return 0
 
 

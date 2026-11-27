@@ -20,7 +20,7 @@ if TYPE_CHECKING or __package__:
         json_string,
     )
     from .prove_production_release import validate_report as validate_production_report
-    from .release_record import candidate_version
+    from .release_record import candidate_version, specification
 else:
     from json_data import (
         JsonObject,
@@ -29,7 +29,7 @@ else:
         json_string,
     )
     from prove_production_release import validate_report as validate_production_report
-    from release_record import candidate_version
+    from release_record import candidate_version, specification
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +120,8 @@ def proof_inputs(kind: str, commit: str) -> ProofInputs:
                 "src",
                 "docker",
                 ".github",
+                "VERSION",
+                "releases/*.json",
             ],
             cwd=ROOT,
         )
@@ -190,7 +192,11 @@ def record_proof(
             reports["system"] = _one(directory, "system-proof-*.json")
             if image:
                 reports["production"] = _one(directory, "production-release-proof-*.json")
-            files = [*reports.values(), *directory.glob("proof-build-*.json")]
+            files = [
+                *reports.values(),
+                *directory.glob("proof-build-*.json"),
+                *directory.glob("predecessor-proof-*.json"),
+            ]
         else:
             reports["execution"] = _one(directory, "load-run-*.json")
             execution = read_object(reports["execution"])
@@ -220,6 +226,7 @@ def record_proof(
                 "system-proof-*.json",
                 "production-release-proof-*.json",
                 "proof-build-*.json",
+                "predecessor-proof-*.json",
             ),
             "load": (
                 "load-run-*.json",
@@ -240,6 +247,32 @@ def record_proof(
         json.dumps(record, indent=2, sort_keys=True) + "\n"
     )
     return record
+
+
+def validate_predecessors(
+    directory: Path, files: Mapping[str, object], *, commit: str, image: str
+) -> None:
+    versions = specification(candidate_version())["supported_from"]
+    expected = {f"predecessor-proof-{version}.json": version for version in versions}
+    actual = {name for name in files if Path(name).name.startswith("predecessor-proof-")}
+    on_disk = {path.name for path in directory.glob("predecessor-proof-*.json")}
+    if actual != expected.keys() or on_disk != expected.keys():
+        raise ValueError("The retained predecessor set differs from supported_from.")
+    for name, version in expected.items():
+        report = read_object(referenced_file(directory, name))
+        baseline = json_object(report.get("published_baseline", {}))
+        if (
+            baseline.get("version") != version
+            or not re.fullmatch(r"[0-9a-f]{40}", json_string(baseline.get("source_commit", "")))
+            or not re.fullmatch(r".+@sha256:[0-9a-f]{64}", json_string(baseline.get("image", "")))
+            or report.get("source_commit") != commit
+            or report.get("candidate_image") != image
+            or report.get("status") != "passed"
+            or report.get("restore") != "passed"
+            or report.get("upgrade") != "passed"
+            or report.get("disposable_volumes_removed") is not True
+        ):
+            raise ValueError(f"Predecessor {version} proof did not pass for the exact candidate.")
 
 
 def validate_proof(
@@ -331,6 +364,7 @@ def validate_proof(
             for service in ("web", "migrate", "maintenance")
         ):
             raise ValueError("Production and system proofs ran different runtime images.")
+        validate_predecessors(directory, files, commit=commit, image=image)
         return
     report = read_object(referenced_file(directory, reports["execution"]))
     workload = read_object(referenced_file(directory, reports["workload"]))

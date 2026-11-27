@@ -17,7 +17,8 @@ sql = sys.stdin.read()
 allowed = '--set=ON_ERROR_STOP=on' in sys.argv
 with open(os.environ['PROBE_COMMANDS'], 'a') as output:
     output.write(json.dumps({'args': sys.argv[1:], 'sql': sql,
-        'password_received': os.environ.get('PGPASSWORD') == os.environ['PROBE_PASSWORD']}) + '\\n')
+        'password_received': os.environ.get('PGPASSWORD') == os.environ['PROBE_PASSWORD'],
+        'tcp': os.environ.get('PGHOST') == '127.0.0.1'}) + '\\n')
 if allowed:
     raise SystemExit(int(os.environ.get('PROBE_ALLOWED_STATUS', '0')))
 sys.stdout.write(os.environ['PROBE_SQLSTATE'])
@@ -66,7 +67,7 @@ def test_runtime_role_probe_requires_permission_denial_and_normal_writes(
     assert result.stdout == ""
     assert password not in result.stderr
     calls = [json.loads(line) for line in commands.read_text().splitlines()]
-    assert all(call["password_received"] for call in calls)
+    assert all(call["password_received"] and call["tcp"] for call in calls)
     assert all(call["args"][-2:] == ["--dbname", "restored_database"] for call in calls)
     assert "--set=ON_ERROR_STOP=on" in calls[0]["args"]
     assert "INSERT INTO django_session" in calls[0]["sql"]

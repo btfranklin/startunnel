@@ -14,7 +14,7 @@ on:
         type: string
         default: ""
       run_live_agents:
-        description: Spend provider credit on the bounded live-agent proof.
+        description: Spend provider credit on the source-only live-agent diagnostic.
         required: true
         type: boolean
         default: false
@@ -31,6 +31,17 @@ env:
   PDM_CHECK_UPDATE: "false"
 
 jobs:
+  validation-inputs:
+    name: Check validation inputs
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live_agents
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject a candidate digest with the live-agent diagnostic
+        if: inputs.candidate_image != ''
+        run: |
+          echo "::error::Select either a candidate digest or the source-only live-agent diagnostic."
+          exit 2
+
   security:
     name: Security and supply chain
     runs-on: ubuntu-latest
@@ -155,6 +166,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -180,47 +192,20 @@ jobs:
       - name: Prove production installation with the exact image
         if: inputs.candidate_image != ''
         env:
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
         run: >-
           python3 scripts/prove_production_release.py
           --candidate-image "$CANDIDATE_IMAGE"
           --project-name stproof-install-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Prove exact-image upgrade and recovery from v0.2.0
+      - name: Prove declared upgrades with the exact image
         if: inputs.candidate_image != ''
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
-        run: |
-          git fetch --depth=1 origin refs/tags/v0.2.0:refs/tags/v0.2.0
-          gh release download v0.2.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.2.0"
-          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.2.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
-      - name: Prove exact-image upgrade and recovery from v0.3.0
-        if: inputs.candidate_image != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
-        run: |
-          git fetch --depth=1 origin refs/tags/v0.3.0:refs/tags/v0.3.0
-          gh release download v0.3.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.3.0"
-          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.3.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
-      - name: Prove exact-image upgrade and recovery from v0.4.0
-        if: inputs.candidate_image != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
-        run: |
-          git fetch --depth=1 origin refs/tags/v0.4.0:refs/tags/v0.4.0
-          gh release download v0.4.0 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.4.0"
-          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.4.0/release.json" --candidate-image "$CANDIDATE_IMAGE"
-      - name: Prove exact-image upgrade and recovery from v0.4.1
-        if: inputs.candidate_image != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
-        run: |
-          git fetch --depth=1 origin refs/tags/v0.4.1:refs/tags/v0.4.1
-          gh release download v0.4.1 --pattern release.json --dir "$RUNNER_TEMP/startunnel-v0.4.1"
-          python3 scripts/prove_published_upgrade.py --release-record "$RUNNER_TEMP/startunnel-v0.4.1/release.json" --candidate-image "$CANDIDATE_IMAGE"
+        run: >-
+          python3 scripts/prove_published_upgrade.py --supported-predecessors
+          --candidate-image "$CANDIDATE_IMAGE"
       - name: Record the system proof attempt
         if: always()
         env:
@@ -237,6 +222,7 @@ jobs:
           path: |
             artifacts/system-proof-*.json
             artifacts/production-release-proof-*.json
+            artifacts/predecessor-proof-*.json
             artifacts/proof-system.json
             artifacts/proof-build-*.json
             artifacts/proof-build-failure-*.log
@@ -301,9 +287,10 @@ jobs:
           retention-days: 90
 
   live-agents:
-    name: Opt-in live-agent proof
-    if: ${{ inputs.run_live_agents }}
+    name: Opt-in source live-agent diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live_agents && inputs.candidate_image == ''
     needs:
+      - validation-inputs
       - security
       - system
     runs-on: ubuntu-latest
@@ -318,7 +305,7 @@ jobs:
         with:
           python-version: ">=3.15.2"
           check-latest: true
-      - name: Run the isolated opt-in proof
+      - name: Run the isolated source diagnostic
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}

@@ -20,10 +20,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 if TYPE_CHECKING or __package__:
+    from .json_data import json_object, json_string
     from .proof_build import BuildProvenance, ProofBuildError
     from .proof_build import build_services as build_proof_services
     from .start_production import validate_image_reference
 else:
+    from json_data import json_object, json_string
     from proof_build import BuildProvenance, ProofBuildError
     from proof_build import build_services as build_proof_services
     from start_production import validate_image_reference
@@ -50,6 +52,7 @@ SAFE_ENVIRONMENT_NAMES = frozenset(
         "NO_COLOR",
         "PATH",
         "RUNNER_TEMP",
+        "STARTUNNEL_BROWSER_SUCCESS_SCREENSHOTS",
         "STARTUNNEL_LOAD_ACTIVITY_READERS",
         "STARTUNNEL_LOAD_CREDENTIALS",
         "STARTUNNEL_LOAD_DRAIN_SECONDS",
@@ -272,6 +275,25 @@ def assert_project_unused(project_name: str, environment: Mapping[str, str]) -> 
             )
 
 
+def remove_owned_image(tag: str, image_id: str, environment: Mapping[str, str]) -> None:
+    current = _run_process(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", tag],
+        environment=environment,
+        timeout_seconds=30,
+        capture_output=True,
+    )
+    if current.returncode or current.stdout.strip() != image_id:
+        raise IsolationError(f"Could not confirm ownership of image tag {tag}.")
+    result = _run_process(
+        ["docker", "image", "rm", tag],
+        environment=environment,
+        timeout_seconds=60,
+        capture_output=True,
+    )
+    if result.returncode:
+        raise IsolationError(f"Could not remove owned image tag {tag}.")
+
+
 def prune_disposable_images(environment: Mapping[str, str]) -> None:
     """Remove only untagged, unused images marked as StarTunnel test builds."""
 
@@ -331,6 +353,7 @@ class IsolatedComposeProject:
         include_openai: bool = False,
         source_environment: Mapping[str, str] | None = None,
         candidate_image: str | None = None,
+        reuse_current_images: bool = False,
     ) -> None:
         if candidate_image:
             try:
@@ -353,6 +376,11 @@ class IsolatedComposeProject:
         self._env_file: Path | None = None
         self._owned = False
         self.cleanup_complete = False
+        self._owned_images: dict[str, str] = {}
+        self._image_tag = f"{project_name}-{uuid4().hex[:12]}"
+        if not reuse_current_images:
+            self.environment["STARTUNNEL_PROOF_IMAGE_TAG"] = self._image_tag
+            self.environment["STARTUNNEL_APP_IMAGE"] = f"startunnel-app:{self._image_tag}"
 
     def __enter__(self) -> IsolatedComposeProject:
         assert_local_docker(self.environment)
@@ -462,6 +490,39 @@ class IsolatedComposeProject:
             raise LaneError(step, f"{step} did not finish inside its time limit.") from error
         if result.returncode:
             raise LaneError(step, f"{step} failed with exit code {result.returncode}.")
+        if self._owned_images and arguments and arguments[0] in {"run", "up"}:
+            self.verify_started_images()
+
+    def verify_started_images(self) -> None:
+        result = _run_process(
+            [
+                "docker",
+                "ps",
+                "--all",
+                "--quiet",
+                "--filter",
+                f"label=com.docker.compose.project={self.project_name}",
+            ],
+            environment=self.environment,
+            timeout_seconds=30,
+            capture_output=True,
+        )
+        if result.returncode:
+            raise LaneError("runtime image identity", "Could not read isolated containers.")
+        containers = result.stdout.splitlines()
+        if not containers:
+            return
+        actual = required_output(
+            ["docker", "inspect", "--format", "{{.Config.Image}} {{.Image}}", *containers],
+            environment=self.environment,
+            label="isolated runtime images",
+        )
+        for line in actual.splitlines():
+            tag, image_id = line.split()
+            if tag in self._owned_images and image_id != self._owned_images[tag]:
+                raise LaneError(
+                    "runtime image identity", f"Container did not use owned image {tag}."
+                )
 
     def capture(self, step: str, *arguments: str, timeout_seconds: int = 60) -> str:
         try:
@@ -498,7 +559,7 @@ class IsolatedComposeProject:
             if value := self.source_environment.get(name):
                 build_environment[name] = value
         try:
-            return build_proof_services(
+            provenance = build_proof_services(
                 services,
                 compose_model=model,
                 environment=build_environment,
@@ -507,6 +568,12 @@ class IsolatedComposeProject:
             )
         except ProofBuildError as error:
             raise LaneError("Build proof services", str(error)) from error
+        definitions = json_object(json_object(json.loads(model))["services"])
+        for service, image_id in provenance["image_ids"].items():
+            tag = json_string(json_object(definitions[service])["image"])
+            if tag.endswith(f":{self._image_tag}"):
+                self._owned_images[tag] = image_id
+        return provenance
 
     def pull_candidate(self) -> None:
         if not self.candidate_image:
@@ -618,5 +685,12 @@ class IsolatedComposeProject:
             ) from error
         if result.returncode:
             raise IsolationError("Could not remove the disposable Compose project and its volumes.")
+        errors: list[str] = []
+        for tag, image_id in self._owned_images.items():
+            try:
+                remove_owned_image(tag, image_id, self.environment)
+            except (OSError, subprocess.TimeoutExpired, IsolationError) as error:
+                errors.append(str(error))
+        if errors:
+            raise IsolationError(" ".join(errors))
         self.cleanup_complete = True
-        prune_disposable_images(self.environment)

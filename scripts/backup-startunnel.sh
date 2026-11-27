@@ -20,25 +20,44 @@ if [ ! -d "$destination_parent" ]; then
     echo "The backup parent directory does not exist." >&2
     exit 2
 fi
-if [ -e "$destination" ]; then
+if [ -e "$destination" ] || [ -L "$destination" ]; then
     echo "The backup destination already exists. Choose a new path." >&2
     exit 2
 fi
 
 project_root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
-temporary="${destination}.partial.$$"
 umask 077
 : "${COMPOSE_FILE:=compose.yaml:compose.dev.yaml}"
 export COMPOSE_FILE
 
+temporary="$(mktemp -d "${destination}.partial.XXXXXXXX")"
+published_directory=false
 cleanup() {
-    rm -rf -- "$temporary"
+    status="$?"
+    trap - EXIT
+    if ! rm -rf -- "$temporary"; then
+        echo "Could not remove partial backup $temporary." >&2
+        status=1
+    fi
+    if [ "$published_directory" = true ] && [ ! -f "$destination/manifest.sha256" ]; then
+        if ! rm -rf -- "$destination"; then
+            echo "Could not remove incomplete backup $destination." >&2
+            status=1
+        fi
+    fi
+    exit "$status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cd "$project_root"
-mkdir -m 700 -- "$temporary"
-docker compose exec -T postgres \
+set -- docker compose
+if [ -n "${STARTUNNEL_BACKUP_ENV_FILE:-}" ]; then
+    set -- "$@" --env-file "$STARTUNNEL_BACKUP_ENV_FILE"
+fi
+"$@" exec -T postgres \
     pg_dump \
     --username startunnel_admin \
     --dbname startunnel \
@@ -55,6 +74,10 @@ docker compose exec -T postgres \
         shasum -a 256 postgres.dump > manifest.sha256
     fi
 )
-mv -- "$temporary" "$destination"
-trap - EXIT HUP INT TERM
+# Claim the destination without replacing any existing path.
+mkdir -m 700 -- "$destination"
+published_directory=true
+mv -- "$temporary/postgres.dump" "$destination/postgres.dump"
+# The manifest marks a complete backup. Publish it last.
+mv -- "$temporary/manifest.sha256" "$destination/manifest.sha256"
 echo "Created the StarTunnel PostgreSQL backup: $destination"

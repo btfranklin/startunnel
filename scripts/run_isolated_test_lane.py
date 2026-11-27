@@ -181,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
                 project_name,
                 profiles=profiles,
                 include_openai=include_openai,
+                reuse_current_images=arguments.reuse_current_images,
                 **(
                     {"candidate_image": arguments.candidate_image}
                     if arguments.candidate_image
@@ -209,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 stack.run(
                     f"Run {arguments.lane} lane",
-                    *specification.command,
+                    *(argument for argument in specification.command if argument != "--rm"),
                     timeout_seconds=specification.timeout_seconds,
                 )
                 print(f"The {arguments.lane} lane passed.")

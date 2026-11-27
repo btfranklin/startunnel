@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import MutableMapping
 from pathlib import Path
 
 import pytest
 from scripts import prove_published_upgrade as proof
+from scripts import release_record as current_release
 
 
 def release_record(
@@ -90,3 +92,52 @@ def test_published_record_requires_an_object(tmp_path: Path) -> None:
     path.write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError, match="must be an object"):
         proof.published_record(path)
+
+
+def test_declared_predecessors_record_failure_and_continue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    versions = ["v0.2.0", "v0.3.0", "v0.4.0"]
+    image = "ghcr.io/btfranklin/startunnel@sha256:" + "e" * 64
+    commit = "c" * 40
+    fetched: list[str] = []
+    monkeypatch.setattr(current_release, "candidate_version", lambda: "v0.4.2")
+    monkeypatch.setattr(
+        current_release, "specification", lambda version: {"supported_from": versions}
+    )
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: commit)
+
+    def fetch(version: str, directory: Path) -> None:
+        fetched.append(version)
+        if version == versions[0]:
+            raise subprocess.CalledProcessError(1, ["gh", "release"])
+        directory.mkdir()
+        record_version = versions[0] if version == versions[1] else version
+        (directory / "release.json").write_text(
+            json.dumps(
+                {
+                    "version": record_version,
+                    "platform": "linux/amd64",
+                    "source_commit": commit,
+                    "image": image,
+                }
+            )
+        )
+
+    def upgrade(
+        baseline: dict[str, str], candidate: str, report: MutableMapping[str, object]
+    ) -> None:
+        assert baseline["version"] == versions[-1]
+        assert candidate == image
+        report.update(
+            status="passed", restore="passed", upgrade="passed", disposable_volumes_removed=True
+        )
+
+    monkeypatch.setattr(proof, "fetch_record", fetch)
+    monkeypatch.setattr(proof, "prove_upgrade", upgrade)
+    assert proof.prove_supported_predecessors(image, tmp_path) == 1
+    assert fetched == versions
+    assert {
+        version: json.loads((tmp_path / f"predecessor-proof-{version}.json").read_text())["status"]
+        for version in versions
+    } == dict(zip(versions, ("failed", "failed", "passed"), strict=True))

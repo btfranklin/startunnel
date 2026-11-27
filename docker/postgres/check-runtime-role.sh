@@ -7,6 +7,7 @@ if [ -r /run/secrets/postgres_runtime_password ]; then
 fi
 : "${STARTUNNEL_DB_RUNTIME_PASSWORD:?STARTUNNEL_DB_RUNTIME_PASSWORD is required}"
 export PGPASSWORD="$STARTUNNEL_DB_RUNTIME_PASSWORD"
+export PGHOST=127.0.0.1
 
 if ! psql -X --quiet --set=ON_ERROR_STOP=on --username startunnel --dbname "$database" \
     >/dev/null 2>&1 <<'SQL'

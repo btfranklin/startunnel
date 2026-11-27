@@ -185,67 +185,73 @@ def source_run(repository: str, commit: str) -> int:
     )
 
 
-def validated_run(repository: str, commit: str) -> int | None:
-    pages = github_pages(repository, "actions/artifacts?per_page=100")
-    for page in pages:
-        for artifact in object_array(page["artifacts"]):
-            source = json_object(artifact.get("workflow_run", {}))
-            if (
-                not re.fullmatch(
-                    r"release-candidate-[0-9]+-[12]", json_string(artifact.get("name", ""))
-                )
-                or artifact.get("expired") is not False
-                or source.get("head_sha") != commit
-                or source.get("head_branch") != "main"
-            ):
-                continue
-            run_id = json_integer(source["id"])
-            run = github_object(repository, f"actions/runs/{run_id}")
-            if successful_run(run, commit, "release-candidate.yml", events=("workflow_dispatch",)):
-                return run_id
+def candidate_runs(
+    repository: str,
+    commit: str,
+) -> list[JsonObject]:
+    pages = github_pages(
+        repository,
+        f"actions/workflows/release-candidate.yml/runs?branch=main&head_sha={commit}&per_page=100",
+    )
+    return [
+        run
+        for page in pages
+        for run in object_array(page["workflow_runs"])
+        if run.get("head_sha") == commit
+        and run.get("head_branch") == "main"
+        and run.get("path") == ".github/workflows/release-candidate.yml"
+        and run.get("event") == "workflow_dispatch"
+    ]
+
+
+def validated_artifact(
+    repository: str,
+    commit: str,
+    runs: list[JsonObject] | None = None,
+) -> tuple[int, JsonObject] | None:
+    if runs is None:
+        runs = candidate_runs(repository, commit)
+    for run in runs:
+        if not successful_run(run, commit, "release-candidate.yml", events=("workflow_dispatch",)):
+            continue
+        run_id = json_integer(run["id"])
+        artifacts = [
+            item
+            for page in github_pages(repository, f"actions/runs/{run_id}/artifacts?per_page=100")
+            for item in object_array(page["artifacts"])
+        ]
+        artifact = latest_candidate_artifact(artifacts, run_id)
+        if artifact is not None and artifact.get("expired") is False:
+            return run_id, artifact
     return None
 
 
+def latest_candidate_artifact[T: Mapping[str, object]](
+    artifacts: list[T],
+    run_id: int,
+) -> T | None:
+    retained: dict[str, T] = {}
+    for artifact in artifacts:
+        name = artifact.get("name")
+        if isinstance(name, str) and re.fullmatch(rf"release-candidate-{run_id}-[12]", name):
+            if name in retained:
+                raise ValueError("The workflow contains duplicate candidate artifact names.")
+            retained[name] = artifact
+    return retained[max(retained)] if retained else None
+
+
 def prepare(repository: str, commit: str, version: str) -> dict[str, int | str]:
-    run_id = validated_run(repository, commit)
-    if run_id is not None:
+    selected = validated_artifact(repository, commit)
+    if selected is not None:
+        run_id, artifact = selected
         with tempfile.TemporaryDirectory(prefix="startunnel-candidate-") as directory:
-            subprocess.run(
-                [
-                    "gh",
-                    "run",
-                    "download",
-                    str(run_id),
-                    "--repo",
-                    repository,
-                    "--name",
-                    json_string(retained_artifact(repository, run_id)["name"]),
-                    "--dir",
-                    directory,
-                ],
-                check=True,
-            )
+            _download(repository, run_id, artifact, Path(directory))
             verify_evidence(Path(directory), commit=commit, version=version)
         print(f"Reusing validated candidate: https://github.com/{repository}/actions/runs/{run_id}")
         return {"reuse_run_id": run_id, "source_run_id": ""}
     run_id = source_run(repository, commit)
     print(f"Reusing source CI: https://github.com/{repository}/actions/runs/{run_id}")
     return {"reuse_run_id": "", "source_run_id": run_id}
-
-
-def retained_artifact(repository: str, run_id: int) -> JsonObject:
-    artifacts = [
-        item
-        for page in github_pages(repository, f"actions/runs/{run_id}/artifacts?per_page=100")
-        for item in object_array(page["artifacts"])
-        if re.fullmatch(rf"release-candidate-{run_id}-[12]", json_string(item.get("name", "")))
-    ]
-    if not artifacts:
-        raise ValueError("The selected run has no retained candidate artifact.")
-    artifact = max(artifacts, key=lambda item: int(json_string(item["name"]).rsplit("-", 1)[1]))
-    if artifact.get("expired") is not False:
-        raise ValueError("Retained candidate evidence has expired.")
-    return artifact
 
 
 def _download(
@@ -519,14 +525,17 @@ def main() -> int:
             if args.prepare:
                 outputs = prepare(repository, commit, version)
             else:
-                run_id = validated_run(repository, commit)
-                if run_id is None:
+                selected = validated_artifact(repository, commit)
+                if selected is None:
                     raise ValueError(
-                        "No retained validated candidate exists for this exact commit."
+                        "No retained validated candidate exists for this exact commit. "
+                        "If an unpublished draft lost its evidence and main advanced, "
+                        "retire the draft and validate a new patch."
                     )
+                run_id, artifact = selected
                 outputs = {
                     "run_id": run_id,
-                    "artifact_name": json_string(retained_artifact(repository, run_id)["name"]),
+                    "artifact_name": json_string(artifact["name"]),
                 }
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as destination:
                 for name, value in outputs.items():

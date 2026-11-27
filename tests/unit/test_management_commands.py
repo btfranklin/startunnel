@@ -74,6 +74,8 @@ def test_runtime_inspection_handles_database_and_status_failures(
     document = json.loads(output.getvalue())
     assert document["migrations"] == "unavailable"
     assert document["maintenance"] == "unavailable"
+    with pytest.raises(CommandError, match="database=unavailable"):
+        call_command("inspect_runtime", require_ready=True, stdout=StringIO())
 
 
 def test_maintenance_once_outputs_safe_counts(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,7 +1,13 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) {
+  console.error("Usage: npm run vendor [-- --check]");
+  process.exit(2);
+}
+const check = args[0] === "--check";
 
 const assets = [
   ["node_modules/htmx.org/LICENSE", "static/vendor/htmx/LICENSE"],
@@ -51,16 +57,22 @@ const assets = [
 ];
 
 for (const [source, destination] of assets) {
-  const sourcePath = resolve(projectRoot, source);
+  const bytes = await readFile(resolve(projectRoot, source));
+  const expected = destination === "static/vendor/swagger-ui/swagger-ui.css"
+    ? Buffer.from(bytes.toString("utf8").replace(/\n?\/\*# sourceMappingURL=swagger-ui\.css\.map\*\//u, ""))
+    : bytes;
   const destinationPath = resolve(projectRoot, destination);
+  if (check) {
+    const actual = await readFile(destinationPath).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!actual?.equals(expected)) {
+      console.error(`Vendor asset differs from its source: ${destination}`);
+      process.exitCode = 1;
+    }
+    continue;
+  }
   await mkdir(resolve(destinationPath, ".."), { recursive: true });
-  await copyFile(sourcePath, destinationPath);
+  await writeFile(destinationPath, expected);
 }
-
-const swaggerCssPath = resolve(projectRoot, "static/vendor/swagger-ui/swagger-ui.css");
-const swaggerCss = await readFile(swaggerCssPath, "utf8");
-await writeFile(
-  swaggerCssPath,
-  swaggerCss.replace(/\n?\/\*# sourceMappingURL=swagger-ui\.css\.map\*\//u, ""),
-  "utf8",
-);

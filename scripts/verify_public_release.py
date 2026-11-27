@@ -20,13 +20,13 @@ if TYPE_CHECKING or __package__:
     from .compose_isolation import assert_local_docker, safe_environment
     from .json_data import json_object, json_string, object_array
     from .prove_production_release import image_metadata, validate_candidate_metadata
-    from .release_candidate import OFFICIAL_IMAGE
+    from .release_candidate import OFFICIAL_IMAGE, check_registry_digest
     from .release_record import ROOT, VERSION, candidate_version
 else:
     from compose_isolation import assert_local_docker, safe_environment
     from json_data import json_object, json_string, object_array
     from prove_production_release import image_metadata, validate_candidate_metadata
-    from release_candidate import OFFICIAL_IMAGE
+    from release_candidate import OFFICIAL_IMAGE, check_registry_digest
     from release_record import ROOT, VERSION, candidate_version
 
 REPOSITORY = "https://github.com/btfranklin/startunnel"
@@ -88,6 +88,21 @@ def anonymous_image(image: str, commit: str, version: str) -> None:
         environment.pop(name, None)
     with tempfile.TemporaryDirectory(prefix="startunnel-public-docker-") as directory:
         environment.update(DOCKER_CONFIG=directory, DOCKER_HOST=endpoint)
+        tag = f"{image.split('@', 1)[0]}:{version}"
+        try:
+            inspection = subprocess.run(  # nosec B603 B607
+                ["docker", "pull", "--platform", "linux/amd64", tag],
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            check_registry_digest(inspection.stdout, image)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            raise PublicVerificationError(
+                "The public version tag did not resolve to the recorded digest."
+            ) from error
         try:
             subprocess.run(  # nosec B603 B607
                 ["docker", "pull", "--platform", "linux/amd64", image],

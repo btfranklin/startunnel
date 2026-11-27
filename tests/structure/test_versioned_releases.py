@@ -313,8 +313,23 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         monkeypatch.delenv("COMPOSE_FILE", raising=False)
         monkeypatch.delenv("COMPOSE_PROFILES", raising=False)
     monkeypatch.setattr(upgrade, "validate_production_secret_files", lambda directory: None)
-    monkeypatch.setattr(upgrade, "rendered_images", lambda command: [candidate["image"]])
+    monkeypatch.setenv("STARTUNNEL_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.setattr(upgrade, "render_model", lambda command: {})
+    monkeypatch.setattr(
+        upgrade,
+        "validate_production_model",
+        lambda model, *, image, **kwargs: {"web": (image, "")},
+    )
     commands: list[list[str]] = []
+
+    def validate_model(
+        model: object, *, image: str, **kwargs: object
+    ) -> dict[str, tuple[str, str]]:
+        if mode == "wrong-compose-image" and image == candidate["image"]:
+            raise ValueError("Selected Compose web image differs.")
+        return {"web": (image, ""), "postgres": ("postgres@sha256:" + "f" * 64, "")}
+
+    monkeypatch.setattr(upgrade, "validate_production_model", validate_model)
 
     def run(command: list[str], **kwargs: object) -> str:
         commands.append(command)
@@ -334,6 +349,12 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
             if command[3] == old_image:
                 return json.dumps({"org.opencontainers.image.revision": "d" * 40})
             return "e" * 40 if mode == "bad-image" else str(candidate["source_commit"])
+        if (
+            command[:2] == ["docker", "pull"]
+            and "postgres@" in command[-1]
+            and mode == "base-image-failure"
+        ):
+            raise subprocess.CalledProcessError(1, command)
         if "up" in command and mode == "migration-failure":
             raise subprocess.CalledProcessError(1, command)
         if "--plan" in command:
@@ -405,7 +426,11 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
         ]
         assert "--rm" in migration_check
         assert "exec" not in migration_check
-        pull_index = next(index for index, command in enumerate(commands) if "pull" in command)
+        pull_index = next(
+            index
+            for index, command in enumerate(commands)
+            if "pull" in command and command[-1] == candidate["image"]
+        )
         assert commands[pull_index] == [
             "docker",
             "pull",
@@ -414,6 +439,10 @@ def test_upgrade_orchestration_preserves_data_and_stops_at_failures(
             candidate["image"],
         ]
         assert pull_index < commands.index(migration_check)
+        assert any(
+            command[:2] == ["docker", "pull"] and command[-1].startswith("postgres@")
+            for command in commands[: commands.index(migration_check)]
+        )
     else:
         assert not any("--plan" in command for command in commands)
     assert not any("--check" in command for command in commands)
@@ -449,8 +478,13 @@ def test_interrupted_upgrade_retry_preserves_snapshots_and_replaces_configuratio
     monkeypatch.delenv("COMPOSE_FILE", raising=False)
     monkeypatch.delenv("COMPOSE_PROFILES", raising=False)
     monkeypatch.setattr(upgrade, "validate_production_secret_files", lambda directory: None)
-    monkeypatch.setattr(upgrade, "rendered_images", lambda command: [candidate["image"]])
-    monkeypatch.setattr(upgrade, "validate_rendered_images", lambda images: None)
+    monkeypatch.setenv("STARTUNNEL_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.setattr(upgrade, "render_model", lambda command: {})
+    monkeypatch.setattr(
+        upgrade,
+        "validate_production_model",
+        lambda model, *, image, **kwargs: {"web": (image, "")},
+    )
 
     commands: list[list[str]] = []
     fail_stop = interrupt_at == "after-candidate"

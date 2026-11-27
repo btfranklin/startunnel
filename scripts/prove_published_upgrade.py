@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import MutableMapping
 from datetime import timedelta
 from pathlib import Path
 
@@ -222,19 +223,9 @@ def _assert_published_data_without_admin_key(snapshot_path: Path) -> None:
     assert Message.objects.filter(text_payload="New write after upgrade").exists()
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--release-record", required=True, type=Path, help="Published predecessor release.json"
-    )
-    parser.add_argument("--candidate-image", help="Optional immutable current candidate image")
-    arguments = parser.parse_args()
-    record = published_record(arguments.release_record)
-    candidate_image = None
-    if arguments.candidate_image:
-        from scripts.start_production import validate_image_reference
-
-        candidate_image = validate_image_reference(arguments.candidate_image)
+def prove_upgrade(
+    record: dict[str, str], candidate_image: str | None, report: MutableMapping[str, object]
+) -> None:
     sys.path.insert(0, str(ROOT))
     from scripts.compose_isolation import IsolatedComposeProject, generated_project_name
 
@@ -290,6 +281,10 @@ def main() -> int:
         class ProofProject(IsolatedComposeProject):
             def compose_files(self) -> tuple[str, ...]:
                 return (*super().compose_files(), str(overlay))
+
+            def cleanup(self) -> None:
+                super().cleanup()
+                report["disposable_volumes_removed"] = True
 
         with ProofProject(project) as stack:
             stack.run("Start isolated PostgreSQL", "up", "--wait", "postgres", timeout_seconds=180)
@@ -437,6 +432,7 @@ def main() -> int:
                 "/proof-data/snapshot.json",
                 timeout_seconds=120,
             )
+            report["restore"] = "passed"
             environment["TEST_DATABASE_URL"] = (
                 f"postgresql://startunnel_admin:startunnel_admin@127.0.0.1:{port}/published_restored"
             )
@@ -471,24 +467,112 @@ def main() -> int:
                     check=True,
                     timeout=180,
                 )
-    print(
-        json.dumps(
-            {
-                "status": "passed",
-                "published_baseline": record,
-                "checks": [
-                    "restored published account login",
-                    "existing agent and admin authentication",
-                    "retained message ancestry",
-                    "current-source migrations",
-                    "new tunnel write",
-                    "maintenance closes due cycle",
-                    "private admin recovery key",
-                ],
-                "disposable_volumes_removed": True,
-            }
-        )
+            report["upgrade"] = "passed"
+    report.update(
+        status="passed",
+        checks=[
+            "restored published account login",
+            "existing agent and admin authentication",
+            "retained message ancestry",
+            "current-source migrations",
+            "new tunnel write",
+            "maintenance closes due cycle",
+            "private admin recovery key",
+        ],
     )
+
+
+def run_proof(
+    record_path: Path,
+    candidate_image: str | None,
+    output: Path | None = None,
+    *,
+    predecessor: str | None = None,
+) -> None:
+    report: dict[str, object] = {
+        "status": "failed",
+        "source_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
+        "candidate_image": candidate_image,
+        "restore": "incomplete",
+        "upgrade": "incomplete",
+        "disposable_volumes_removed": False,
+    }
+    try:
+        if predecessor is not None:
+            report["requested_predecessor"] = predecessor
+            fetch_record(predecessor, record_path.parent)
+        record = published_record(record_path)
+        if predecessor is not None and record["version"] != predecessor:
+            raise ValueError("The release record identifies a different predecessor.")
+        report["published_baseline"] = record
+        prove_upgrade(record, candidate_image, report)
+    finally:
+        payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if output is not None:
+            output.write_text(payload, encoding="utf-8")
+        print(payload, end="")
+
+
+def fetch_record(version: str, directory: Path) -> None:
+    ref = f"refs/tags/{version}"
+    subprocess.run(["git", "fetch", "--depth=1", "origin", f"{ref}:{ref}"], cwd=ROOT, check=True)
+    subprocess.run(
+        [
+            "gh",
+            "release",
+            "download",
+            version,
+            "--pattern",
+            "release.json",
+            "--dir",
+            str(directory),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def prove_supported_predecessors(candidate_image: str | None, output: Path) -> int:
+    from scripts.release_record import candidate_version, specification
+
+    output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    failed = False
+    versions = specification(candidate_version())["supported_from"]
+    with tempfile.TemporaryDirectory(prefix="startunnel-published-records-") as directory:
+        for version in versions:
+            try:
+                run_proof(
+                    Path(directory) / version / "release.json",
+                    candidate_image,
+                    output / f"predecessor-proof-{version}.json",
+                    predecessor=version,
+                )
+            except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+                print(f"{version} proof failed ({type(error).__name__}).", file=sys.stderr)
+                failed = True
+    return int(failed)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--release-record", type=Path, help="Published predecessor release.json")
+    selection.add_argument("--supported-predecessors", action="store_true")
+    parser.add_argument("--candidate-image", help="Optional immutable current candidate image")
+    parser.add_argument("--output-directory", type=Path, default=ROOT / "artifacts")
+    arguments = parser.parse_args()
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.start_production import validate_image_reference
+
+    candidate_image = (
+        validate_image_reference(arguments.candidate_image) if arguments.candidate_image else None
+    )
+    if arguments.supported_predecessors:
+        return prove_supported_predecessors(candidate_image, arguments.output_directory)
+    run_proof(arguments.release_record, candidate_image)
     return 0
 
 

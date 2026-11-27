@@ -159,10 +159,10 @@ def test_invalid_origin_is_rejected_before_network(site: str) -> None:
         )
 
 
-@pytest.mark.parametrize("fail", [False, True])
+@pytest.mark.parametrize("failure", [None, "moved-tag", "pull"])
 def test_anonymous_pull_has_empty_config_explicit_engine_and_cleanup(
     monkeypatch: pytest.MonkeyPatch,
-    fail: bool,
+    failure: str | None,
 ) -> None:
     configurations: list[Path] = []
     monkeypatch.setenv("DOCKER_AUTH_CONFIG", "private-auth")
@@ -176,8 +176,13 @@ def test_anonymous_pull_has_empty_config_explicit_engine_and_cleanup(
         assert list(config.iterdir()) == []
         assert "DOCKER_AUTH_CONFIG" not in env
         assert env["DOCKER_HOST"] == "unix:///engine.sock"
+        if len(configurations) == 1:
+            tag = IMAGE.split("@")[0] + ":" + VERSION
+            assert list(command) == ["docker", "pull", "--platform", "linux/amd64", tag]
+            digest = "sha256:" + "f" * 64 if failure == "moved-tag" else IMAGE.split("@")[1]
+            return subprocess.CompletedProcess(command, 0, f"Digest: {digest}\n", "")
         assert list(command) == ["docker", "pull", "--platform", "linux/amd64", IMAGE]
-        if fail:
+        if failure == "pull":
             raise subprocess.CalledProcessError(1, command, stderr="private")
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -193,12 +198,15 @@ def test_anonymous_pull_has_empty_config_explicit_engine_and_cleanup(
             "linux/amd64",
         ),
     )
-    if fail:
-        with pytest.raises(ValueError, match="anonymous"):
+    if failure:
+        with pytest.raises(
+            ValueError, match="public version tag" if failure == "moved-tag" else "anonymous"
+        ):
             public.anonymous_image(IMAGE, COMMIT, VERSION)
     else:
         public.anonymous_image(IMAGE, COMMIT, VERSION)
-    assert configurations and not configurations[0].exists()
+    assert len(configurations) == (1 if failure == "moved-tag" else 2)
+    assert not configurations[0].exists()
 
 
 @pytest.mark.parametrize("condition", ["valid", "oversize", "http_redirect", "non_bytes"])

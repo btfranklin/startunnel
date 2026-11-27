@@ -63,9 +63,12 @@ module type checks. Keep new Python logic in `scripts/`.
 | `scripts/proof_pool_reader.py` | Observation runner; read approved multiprocess pool fields | `tests/tools/test_load_observations.py` |
 | `src/core/pool_metrics.py` and `src/core/metrics.py` | Opt-in worker pool samples and fixed database failure counters | `tests/unit/test_pool_metrics.py`, `tests/unit/test_dependency_metrics.py`, API contract and load observation tests |
 
-Source CI checks restored data from each published predecessor listed by its
-workflow. A version in `supported_from` also needs exact-image upgrade and
-recovery evidence. Do not infer that a source-only test proves a packaged image.
+Source CI checks restored data for each version in the release specification's
+`supported_from` list and runs the historical v0.1.0 admin reset proof.
+Candidate validation uses the same list with the exact candidate image. It
+retains one checksum-protected report per declared predecessor. Promotion
+checks the exact set, each image identity, restore and upgrade results, and
+disposable volume cleanup.
 
 ## Shared code and diagnostics
 
@@ -95,7 +98,9 @@ question. Preserve its source, inputs, limits, results, and cleanup.
 | `scripts/generate_production_secrets.py` | Create private independent secrets without replacement | `tests/tools/test_production_secrets.py`, production proof tests |
 | `scripts/rotate_postgres_passwords.py` | Rotate runtime and admin passwords with recovery checks | `tests/tools/test_postgres_password_rotation.py` |
 | `docker/app/entrypoint.sh` | Load mounted secrets and select the database role | `tests/tools/test_production_entrypoint.py`; production image proof |
+| `scripts/backup_production.py` and `scripts/production_lock.py` | Serialize installed maintenance operations and seal a consistent encrypted archive | Production recovery procedure |
 | `scripts/backup-startunnel.sh` and `scripts/verify-startunnel-restore.sh` | Coordinated backup and disposable restore | `tests/tools/test_backup_script.py`; system and restored-database proofs |
+| `scripts/restore-startunnel-replacement.sh` | Restore and switch databases on a fresh replacement host | `tests/tools/test_backup_script.py`; production replacement proof |
 | `scripts/container-status.sh` and `scripts/container-logs.sh` | Bounded operational inspection | No dedicated automated tests identified |
 
 Shell files and Compose definitions do not receive Python type checks. Their
@@ -114,6 +119,7 @@ checks. They must not be described as strictly typed Python.
 | `.github/workflows/capacity-diagnostic.yml` | Short fixed-budget capacity observation | `actionlint`, capacity diagnostic tests |
 | `.github/actions/proof-build/action.yml` | Host-side build cache credentials and Buildx setup | `actionlint`, release automation and build tests |
 | `.github/workflows/website.yml` | Independently publish the static site when enabled | `actionlint`, website publication structure tests and website build tests |
+| `.github/workflows/workflow-lint.yml` | Check changes to workflow and local action definitions | `actionlint` |
 
 The workflow tests use controlled inputs. They do not prove GitHub permissions,
 registry access, runner timing, or external service availability. A release

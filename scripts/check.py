@@ -59,6 +59,7 @@ GATES = [
             "manage.py",
             "check",
             "--deploy",
+            "--fail-level=WARNING",
             "--settings=startunnel.settings.production",
         ),
         "docs/operations.md",

@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
                         IsolatedComposeProject(
                             project_name,
                             profiles=("load",),
+                            reuse_current_images=arguments.reuse_current_images,
                             **(
                                 {"candidate_image": arguments.candidate_image}
                                 if arguments.candidate_image

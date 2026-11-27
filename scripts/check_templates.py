@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,23 +13,18 @@ TEMPLATE_ROOTS = (ROOT / "templates", ROOT / "website" / "templates")
 
 def main() -> int:
     template_paths = sorted(path for root in TEMPLATE_ROOTS for path in root.rglob("*.html"))
-    failures: list[Path] = []
-    for path in template_paths:
-        result = subprocess.run(
-            ["djlint", "--check", "--lint", str(path.relative_to(ROOT))],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode:
-            failures.append(path.relative_to(ROOT))
-    if failures:
+    if not template_paths:
+        print("No HTML templates found.", file=sys.stderr)
+        return 1
+    result = subprocess.run(
+        ["djlint", "--check", "--lint", *(str(path.relative_to(ROOT)) for path in template_paths)],
+        cwd=ROOT,
+        env={**os.environ, "PYTHON_CPU_COUNT": "1"},
+        check=False,
+    )
+    if result.returncode:
         print("Rule: Each Django template must pass the configured djLint format and lint checks.")
         print("Source of truth: docs/design.md")
-        print("Files that need formatting:", file=sys.stderr)
-        for path in failures:
-            print(f"- {path}", file=sys.stderr)
         print(
             "Recovery: Reformat the named templates, correct lint findings, and rerun "
             "`pdm run python scripts/check_templates.py`.",

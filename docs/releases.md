@@ -112,8 +112,9 @@ before tagging. Tag promotion reuses completed validation and the tested image.
 
 Candidate validation also runs through the manual release-validation workflow.
 Without a candidate argument, that manual workflow builds its own diagnostic
-images; those results do not produce a promotable CI artifact. Live-agent checks
-remain opt-in and do not receive provider credentials during candidate validation.
+images; those results do not produce a promotable CI artifact. The live-agent
+diagnostic is opt-in and uses a source build. A request with both the diagnostic
+and a candidate digest fails before the workflow can use provider credentials.
 
 ## Inspect time and retry a failed proof
 
@@ -220,10 +221,12 @@ migration compatibility.
 The workflow creates a **draft** GitHub release with `release.json`. Use manual
 dispatch with the existing tag to retry or recover a draft. Recovery uses the
 retained exact-commit CI evidence and does not rebuild. An existing draft must
-keep the same source commit and image digest. Published releases are never
-modified. If the retained candidate artifact has expired, promotion fails;
-prepare new successful evidence for that commit before retrying. Keep candidate images
-in the registry until promotion completes.
+keep the same source commit and image digest. If the retained candidate
+artifact has expired and main has advanced, retire the unpublished draft.
+Prepare a new patch release through the normal validation process. Keep the old
+Git and registry tags and all published releases. If main still points to the
+original commit, retry only with valid evidence for the draft's original digest.
+Keep candidate images in the registry until promotion completes.
 
 The official workflow writes a Linux amd64 record for its tested GHCR image.
 A custom deployment can write a record for another digest-pinned registry image
@@ -236,8 +239,9 @@ compatibility before it changes services.
 
 Review the draft notes, candidate evidence, image labels, and deployment record.
 Perform an installation/upgrade smoke check using the exact digest. Publish the
-draft after those checks pass, then verify pulling the public image and repeat
-external deployment verification. Record the version, source, digest, and results.
+draft after those checks pass. Resolve the public version tag, verify that it
+matches the recorded digest, and pull the image by that digest. Repeat external
+deployment verification. Record the version, source, digest, and results.
 
 Run the maintained public check after publication:
 

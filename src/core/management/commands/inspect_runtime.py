@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from argparse import ArgumentParser
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
@@ -15,6 +16,9 @@ from core.maintenance_status import read_maintenance_status
 
 class Command(BaseCommand):
     help = "Print a redacted runtime configuration summary."
+
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--require-ready", action="store_true")
 
     def handle(self, *args: object, **options: object) -> None:
         database = settings.DATABASES["default"]
@@ -67,4 +71,19 @@ class Command(BaseCommand):
             "static": {"root": str(settings.STATIC_ROOT), "url": settings.STATIC_URL},
             "secrets": "redacted",
         }
+        if options.get("require_ready"):
+            if (
+                connection.vendor != "postgresql"
+                or postgres_state != "ready"
+                or database_role != "startunnel"
+                or migration_state != "ready"
+                or maintenance_state != "ready"
+            ):
+                raise CommandError(
+                    "Runtime is not ready "
+                    f"(database={postgres_state}, runtime_role={database_role == 'startunnel'}, "
+                    f"migrations={migration_state}, maintenance={maintenance_state})."
+                )
+            self.stdout.write("Runtime is ready.")
+            return
         self.stdout.write(json.dumps(output, indent=2, sort_keys=True, default=str))

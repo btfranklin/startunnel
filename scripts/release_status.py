@@ -40,9 +40,12 @@ if TYPE_CHECKING or __package__:
         CandidateData,
         _download,
         candidate_data,
+        candidate_runs,
         git_commit,
         github_api,
+        latest_candidate_artifact,
         validate_candidate,
+        validated_artifact,
         verify_evidence,
     )
     from .release_record import ROOT, candidate_version
@@ -51,9 +54,12 @@ else:
         CandidateData,
         _download,
         candidate_data,
+        candidate_runs,
         git_commit,
         github_api,
+        latest_candidate_artifact,
         validate_candidate,
+        validated_artifact,
         verify_evidence,
     )
     from release_record import ROOT, candidate_version
@@ -122,6 +128,8 @@ class WorkflowStatus(TypedDict):
     artifacts: list[ArtifactSummary]
     branch: NotRequired[str | None]
     event: NotRequired[str | None]
+    tested_commit: NotRequired[str]
+    pull_request_head: NotRequired[str]
 
 
 class ReleaseReadiness(TypedDict):
@@ -148,6 +156,9 @@ class ReleaseStatus(TypedDict):
     proof_details: NotRequired[dict[str, ProofDetails]]
     promotion: NotRequired[WorkflowStatus]
     readiness: NotRequired[ReleaseReadiness]
+    latest_candidate_dispatch: NotRequired[int]
+    candidate_evidence_run: NotRequired[int]
+    candidate_evidence_attempt: NotRequired[int]
 
 
 def _optional_text(value: object) -> str | None:
@@ -388,11 +399,9 @@ def release_readiness(
     )
     retained_candidate = any(
         workflow["conclusion"] == "success"
-        and any(
-            re.fullmatch(rf"release-candidate-{workflow['run_id']}-[12]", artifact["name"] or "")
-            and artifact["expired"] is False
-            for artifact in workflow["artifacts"]
-        )
+        and (artifact := latest_candidate_artifact(workflow["artifacts"], workflow["run_id"]))
+        is not None
+        and artifact["expired"] is False
         for workflow in candidate_runs
     )
     if any(workflow["status"] != "completed" for workflow in candidate_runs):
@@ -457,24 +466,21 @@ def candidate_from_workflow(
     names = [item["name"] for item in artifacts]
     if len(names) != len(set(names)):
         raise ValueError("The workflow contains duplicate artifact names.")
-    retained = [
-        item
-        for item in artifacts
-        if re.fullmatch(rf"release-candidate-{run_id}-[12]", item["name"] or "")
-    ]
+    retained = latest_candidate_artifact(artifacts, run_id)
     images = [
         item
         for item in artifacts
         if re.fullmatch(rf"candidate-image-{run_id}-[12]", item["name"] or "")
     ]
     verified = (
-        workflow["status"] == "completed" and workflow["conclusion"] == "success" and bool(retained)
+        workflow["status"] == "completed"
+        and workflow["conclusion"] == "success"
+        and retained is not None
     )
-    choices = retained if verified else images
-    if not choices:
-        return None, False
-    artifact = max(choices, key=lambda item: int((item["name"] or "").rsplit("-", 1)[1]))
-    if artifact["expired"] is not False:
+    artifact = (
+        retained if verified else max(images, key=lambda item: item["name"] or "", default=None)
+    )
+    if artifact is None or artifact["expired"] is not False:
         return None, False
     with tempfile.TemporaryDirectory(prefix="startunnel-status-") as temporary:
         directory = Path(temporary)
@@ -489,8 +495,36 @@ def candidate_from_workflow(
     return candidate, verified
 
 
+def verify_workflow_checkout(workflow: WorkflowStatus, commit: str) -> None:
+    """Verify the tested checkout, including the synthetic PR merge commit."""
+
+    if workflow.get("event") == "pull_request" and os.getenv("GITHUB_EVENT_NAME") == "pull_request":
+        if (
+            workflow["workflow"] != ".github/workflows/ci.yml"
+            or str(workflow["run_id"]) != os.getenv("GITHUB_RUN_ID")
+            or commit != os.getenv("GITHUB_SHA")
+        ):
+            raise ValueError("Pull request timing does not match the workflow checkout.")
+        event = json_object(json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()))
+        pull = json_object(event["pull_request"])
+        head = json_string(json_object(pull["head"])["sha"])
+        if workflow["source_commit"] not in {head, commit}:
+            raise ValueError("Workflow status belongs to a different pull request head.")
+        workflow["pull_request_head"] = head
+    elif workflow["source_commit"] != commit:
+        raise ValueError("Workflow status belongs to a different source commit.")
+    workflow["tested_commit"] = commit
+
+
 def render_summary(status: ReleaseStatus) -> str:
     lines = [f"Release source: `{status['source_commit']}`", ""]
+    if "latest_candidate_dispatch" in status:
+        lines.append(f"Latest candidate dispatch: {status['latest_candidate_dispatch']}.")
+    if "candidate_evidence_run" in status:
+        lines.append(
+            f"Retained candidate bundle: run {status['candidate_evidence_run']}, "
+            f"attempt {status['candidate_evidence_attempt']}."
+        )
     if "readiness" in status:
         readiness = status["readiness"]
         lines += [
@@ -513,6 +547,11 @@ def render_summary(status: ReleaseStatus) -> str:
             f"{workflow['status']} / {workflow['conclusion'] or 'pending'}; "
             f"attempt {workflow['attempt']}."
         ]
+        if "pull_request_head" in workflow:
+            lines.append(
+                f"Tested checkout `{workflow['tested_commit']}`. "
+                f"Pull request head `{workflow['pull_request_head']}`."
+            )
         timing = workflow["timing"]
         elapsed = timing["elapsed_seconds"]
         if elapsed is not None:
@@ -580,17 +619,34 @@ def main() -> int:
     arguments = parser.parse_args()
     commit = git_commit()
     run_ids: list[int] = []
+    status: ReleaseStatus = {"source_commit": commit, "workflows": []}
+    evidence_verified = False
+    evidence_run_id: int | None = None
     if arguments.run_id:
         run_ids.append(arguments.run_id)
     else:
-        runs = _github_object(
-            arguments.repository,
-            f"actions/workflows/release-candidate.yml/runs?branch=main&head_sha={commit}&per_page=1",
-        )["workflow_runs"]
+        runs = candidate_runs(arguments.repository, commit)
         if runs:
-            run_ids.append(json_integer(json_object(json_array(runs)[0])["id"]))
-    status: ReleaseStatus = {"source_commit": commit, "workflows": []}
-    evidence_verified = False
+            dispatch_id = json_integer(runs[0]["id"])
+            status["latest_candidate_dispatch"] = dispatch_id
+            run_ids.append(dispatch_id)
+        selected = validated_artifact(arguments.repository, commit, runs)
+        if selected is not None:
+            evidence_run_id, artifact = selected
+            if evidence_run_id not in run_ids:
+                run_ids.append(evidence_run_id)
+            for run in runs:
+                run_id = json_integer(run["id"])
+                if run_id == evidence_run_id:
+                    break
+                if run.get("status") == "completed" and run.get("conclusion") != "success":
+                    if run_id not in run_ids:
+                        run_ids.append(run_id)
+                    break
+            status["candidate_evidence_run"] = evidence_run_id
+            status["candidate_evidence_attempt"] = int(
+                json_string(artifact["name"]).rsplit("-", 1)[1]
+            )
     if arguments.directory:
         evidence_verified = True
         candidate = verify_evidence(arguments.directory, commit=commit, version=candidate_version())
@@ -600,9 +656,12 @@ def main() -> int:
             run_ids.insert(0, source_id)
     status["workflows"] = [workflow_status(arguments.repository, run_id) for run_id in run_ids]
     if not status.get("candidate") and status["workflows"]:
-        latest = status["workflows"][-1]
+        selected_workflow = next(
+            (workflow for workflow in status["workflows"] if workflow["run_id"] == evidence_run_id),
+            status["workflows"][0],
+        )
         identity, evidence_verified = candidate_from_workflow(
-            arguments.repository, latest, commit=commit
+            arguments.repository, selected_workflow, commit=commit
         )
         if identity is not None:
             status["candidate"] = identity
@@ -649,8 +708,8 @@ def main() -> int:
                     phases.extend(object_array(report.get("phases", report.get("steps", []))))
             details[kind] = {"phases": phases, "builds": builds}
         status["proof_details"] = details
-    if any(workflow["source_commit"] != commit for workflow in status["workflows"]):
-        raise ValueError("Workflow status belongs to a different source commit.")
+    for workflow in status["workflows"]:
+        verify_workflow_checkout(workflow, commit)
     if arguments.promotion_run_id:
         promotion = workflow_status(arguments.repository, arguments.promotion_run_id)
         if promotion["workflow"] != ".github/workflows/release.yml":

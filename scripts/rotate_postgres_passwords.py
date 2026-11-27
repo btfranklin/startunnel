@@ -8,6 +8,7 @@ import os
 import secrets
 import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ else:
 
 
 if TYPE_CHECKING or __package__:
+    from .production_lock import production_lock
     from .start_production import (
         ROOT,
         compose_command,
@@ -33,6 +35,7 @@ if TYPE_CHECKING or __package__:
         validate_production_secret_files,
     )
 else:
+    from production_lock import production_lock
     from start_production import (
         ROOT,
         compose_command,
@@ -409,42 +412,80 @@ def restart_database_clients(command: list[str]) -> None:
 
 
 def inspect_runtime(command: list[str]) -> None:
-    result = subprocess.run(
-        [
-            *command,
-            "exec",
-            "-T",
-            "web",
-            "/app/.venv/bin/python",
-            "manage.py",
-            "inspect_runtime",
-        ],
-        cwd=ROOT,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RotationError("The restarted web service did not pass runtime inspection.")
+    deadline = time.monotonic() + 180
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            result = subprocess.run(
+                [
+                    *command,
+                    "exec",
+                    "-T",
+                    "web",
+                    "env",
+                    "-u",
+                    "PROMETHEUS_MULTIPROC_DIR",
+                    "/usr/local/bin/startunnel-entrypoint",
+                    "/app/.venv/bin/python",
+                    "manage.py",
+                    "inspect_runtime",
+                    "--require-ready",
+                ],
+                cwd=ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=min(15, remaining),
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    raise RotationError("The restarted web service did not become ready within 180 seconds.")
+
+
+def active_pair(command: list[str], *, first: PasswordPair, second: PasswordPair) -> PasswordPair:
+    def check(pair: PasswordPair) -> tuple[bool, bool]:
+        return (
+            credential_works(command, role="startunnel_admin", password=pair.admin),
+            credential_works(command, role="startunnel", password=pair.runtime),
+        )
+
+    first_checks = check(first)
+    second_checks = check(second)
+    if first_checks == (True, True) and second_checks == (False, False):
+        return first
+    if second_checks == (True, True) and first_checks == (False, False):
+        return second
+    raise RotationError("The rollback file does not match the active PostgreSQL roles.")
+
+
+def install_pair(
+    command: list[str], *, directory: Path, current: PasswordPair, rejected: PasswordPair
+) -> None:
+    replace_secret_pair(directory, current)
+    restart_database_clients(command)
+    verify_transition(command, previous=rejected, current=current)
+    if read_password_pair(directory) != current:
+        raise RotationError("The mounted password sources do not match the database credentials.")
+    inspect_runtime(command)
 
 
 def _automatic_restore(
-    command: list[str],
-    *,
-    authenticate_with: str,
-    restore: PasswordPair,
-    rejected: PasswordPair,
-    directory: Path,
+    command: list[str], *, restore: PasswordPair, rejected: PasswordPair, directory: Path
 ) -> bool:
     try:
-        apply_database_passwords(
-            command,
-            authenticate_with=authenticate_with,
-            replacement=restore,
-        )
-        replace_secret_pair(directory, restore)
-        restart_database_clients(command)
-        verify_transition(command, previous=rejected, current=restore)
-        inspect_runtime(command)
+        current = active_pair(command, first=restore, second=rejected)
+        if current != restore:
+            try:
+                apply_database_passwords(
+                    command, authenticate_with=current.admin, replacement=restore
+                )
+            except OSError, RotationError:
+                if active_pair(command, first=restore, second=rejected) != restore:
+                    return False
+            verify_transition(command, previous=rejected, current=restore)
+        install_pair(command, directory=directory, current=restore, rejected=rejected)
     except OSError, RotationError, ValueError:
         return False
     return True
@@ -464,24 +505,18 @@ def rotate(
     _require_fresh_replacement(current, replacement)
     write_rollback_bundle(rollback_file, current, replacement)
 
-    database_changed = False
     try:
         apply_database_passwords(
             command,
             authenticate_with=current.admin,
             replacement=replacement,
         )
-        database_changed = True
         verify_transition(command, previous=current, current=replacement)
-        replace_secret_pair(directory, replacement)
-        restart_database_clients(command)
-        verify_transition(command, previous=current, current=replacement)
-        inspect_runtime(command)
+        install_pair(command, directory=directory, current=replacement, rejected=current)
     except (OSError, RotationError, ValueError) as error:
         detail = f"{error} "
-        restored = not database_changed or _automatic_restore(
+        restored = _automatic_restore(
             command,
-            authenticate_with=replacement.admin,
             restore=current,
             rejected=replacement,
             directory=directory,
@@ -506,64 +541,28 @@ def rollback(
 ) -> None:
     validate_production_secret_files(directory)
     bundle = read_rollback_bundle(rollback_file)
-    replacement_active = credential_works(
-        command,
-        role="startunnel_admin",
-        password=bundle.replacement.admin,
-    ) and credential_works(
-        command,
-        role="startunnel",
-        password=bundle.replacement.runtime,
-    )
-    previous_active = credential_works(
-        command,
-        role="startunnel_admin",
-        password=bundle.previous.admin,
-    ) and credential_works(
-        command,
-        role="startunnel",
-        password=bundle.previous.runtime,
-    )
-    if replacement_active == previous_active:
-        raise ValueError("The rollback file does not match the active PostgreSQL roles.")
-
-    initial = bundle.replacement if replacement_active else bundle.previous
-    database_changed = False
-    mutation_started = False
     try:
-        if replacement_active:
+        initial = active_pair(command, first=bundle.replacement, second=bundle.previous)
+    except RotationError as error:
+        raise ValueError(str(error)) from error
+
+    rejected = bundle.previous if initial == bundle.replacement else bundle.replacement
+    try:
+        if initial == bundle.replacement:
             apply_database_passwords(
                 command,
-                authenticate_with=bundle.replacement.admin,
+                authenticate_with=initial.admin,
                 replacement=bundle.previous,
             )
-            database_changed = True
-            verify_transition(
-                command,
-                previous=bundle.replacement,
-                current=bundle.previous,
-            )
-        mutation_started = True
-        replace_secret_pair(directory, bundle.previous)
-        restart_database_clients(command)
-        verify_transition(
-            command,
-            previous=bundle.replacement,
-            current=bundle.previous,
+            verify_transition(command, previous=bundle.replacement, current=bundle.previous)
+        install_pair(
+            command, directory=directory, current=bundle.previous, rejected=bundle.replacement
         )
-        inspect_runtime(command)
     except (OSError, RotationError, ValueError) as error:
         detail = f"{error} "
-        restored = not database_changed and not mutation_started
-        if not restored:
-            authentication = bundle.previous.admin if database_changed else initial.admin
-            restored = _automatic_restore(
-                command,
-                authenticate_with=authentication,
-                restore=initial,
-                rejected=(bundle.previous if initial == bundle.replacement else bundle.replacement),
-                directory=directory,
-            )
+        restored = _automatic_restore(
+            command, restore=initial, rejected=rejected, directory=directory
+        )
         if restored:
             raise RotationError(
                 "PostgreSQL rollback failed. "
@@ -604,21 +603,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Runtime input: {runtime_file}")
         elif args.operation == "rotate":
             rollback_file = _require_absolute(args.rollback_file, label="Rollback file")
-            rotate(
-                directory=directory,
-                new_admin_file=_require_absolute(args.new_admin_file, label="New admin file"),
-                new_runtime_file=_require_absolute(
-                    args.new_runtime_file,
-                    label="New runtime file",
-                ),
-                rollback_file=rollback_file,
-                command=command,
-            )
+            with production_lock(directory):
+                rotate(
+                    directory=directory,
+                    new_admin_file=_require_absolute(args.new_admin_file, label="New admin file"),
+                    new_runtime_file=_require_absolute(
+                        args.new_runtime_file,
+                        label="New runtime file",
+                    ),
+                    rollback_file=rollback_file,
+                    command=command,
+                )
             print("PostgreSQL credentials rotated. The old credentials no longer authenticate.")
             print(f"Keep the mode-0600 rollback file secure until acceptance: {rollback_file}")
         else:
             rollback_file = _require_absolute(args.rollback_file, label="Rollback file")
-            rollback(directory=directory, rollback_file=rollback_file, command=command)
+            with production_lock(directory):
+                rollback(directory=directory, rollback_file=rollback_file, command=command)
             print("PostgreSQL credentials rolled back. The replacement credentials are inactive.")
     except (OSError, RotationError, ValueError) as error:
         print(str(error))

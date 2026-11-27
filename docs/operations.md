@@ -323,6 +323,8 @@ used by production and the isolated proxy proof.
 
 StarTunnel does not set HSTS. The operator can set the
 `Strict-Transport-Security` header at the reverse proxy for an HTTPS origin.
+The Django deployment check omits `security.W004` because the application
+cannot check the proxy's HSTS policy. Other warnings fail the aggregate check.
 Choose its lifetime and subdomain scope for the domains that you control.
 Removing the header does not clear an existing browser policy. To clear that
 policy, serve `Strict-Transport-Security: max-age=0` over HTTPS before you stop

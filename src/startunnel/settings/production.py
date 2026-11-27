@@ -74,3 +74,6 @@ SECURE_SSL_REDIRECT = env_bool("STARTUNNEL_SECURE_SSL_REDIRECT", https_origin)  
 SESSION_COOKIE_SECURE = https_origin
 CSRF_COOKIE_SECURE = https_origin
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# The operator controls HSTS at the proxy. Private HTTP instances are supported.
+SILENCED_SYSTEM_CHECKS = ["security.W004"]

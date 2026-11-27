@@ -61,7 +61,7 @@ services:
       labels: *test-build-labels
 
   web:
-    image: startunnel-test-web:local
+    image: startunnel-test-web:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       labels: *test-build-labels
       target: test-runtime
@@ -78,7 +78,7 @@ services:
 
   tests:
     <<: *test-service
-    image: startunnel-tests:local
+    image: startunnel-tests:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     command:
       - pdm
       - run
@@ -88,7 +88,7 @@ services:
     <<: *test-service
     profiles:
       - browser
-    image: startunnel-browser-tests:local
+    image: startunnel-browser-tests:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -105,6 +105,7 @@ services:
       STARTUNNEL_BROWSER_TESTS: "1"
       STARTUNNEL_BROWSERS: ${STARTUNNEL_BROWSERS:-chromium,firefox,webkit}
       STARTUNNEL_BROWSER_ARTIFACTS_DIR: /artifacts/browser
+      STARTUNNEL_BROWSER_SUCCESS_SCREENSHOTS: ${STARTUNNEL_BROWSER_SUCCESS_SCREENSHOTS:-0}
     volumes:
       - type: bind
         source: ./artifacts
@@ -128,7 +129,7 @@ services:
     <<: *test-service
     profiles:
       - examples
-    image: startunnel-example-tests:local
+    image: startunnel-example-tests:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     environment:
       <<: *test-environment
       STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
@@ -162,7 +163,7 @@ services:
     <<: *test-service
     profiles:
       - agents
-    image: startunnel-agent-e2e:local
+    image: startunnel-agent-e2e:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     environment:
       <<: *test-environment
       STARTUNNEL_API_KEY_PEPPER: ${STARTUNNEL_API_KEY_PEPPER:-local-development-api-key-pepper-000000000000000000000}
@@ -183,7 +184,7 @@ services:
     <<: *test-service
     profiles:
       - live-agents
-    image: startunnel-live-agent-e2e:local
+    image: startunnel-live-agent-e2e:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -214,7 +215,7 @@ services:
     <<: *test-service
     profiles:
       - load
-    image: startunnel-load-tests:local
+    image: startunnel-load-tests:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -272,7 +273,7 @@ services:
       service: web
     profiles: [proxy-proof]
     ports: !reset []
-    image: startunnel-test-web:local
+    image: startunnel-test-web:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       target: test-runtime
       labels: *test-build-labels
@@ -307,7 +308,7 @@ services:
   proxy-tests:
     extends:
       service: browser-tests
-    image: startunnel-proxy-tests:local
+    image: startunnel-proxy-tests:${STARTUNNEL_PROOF_IMAGE_TAG:-local}
     build:
       target: proxy-tests
     profiles: !override [proxy-proof]

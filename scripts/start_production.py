@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import stat
 import subprocess
+from collections.abc import Mapping
 from ipaddress import IPv4Network
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING or __package__:
+    from .json_data import json_array, json_object, json_string
+else:
+    from json_data import json_array, json_object, json_string
 
 ROOT = Path(__file__).resolve().parents[1]
 IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+(?:/[^\s@]+)*@sha256:[0-9a-f]{64}$")
@@ -21,6 +29,85 @@ PRODUCTION_SECRET_NAMES = (
     "postgres_runtime_password",
 )
 MAX_SECRET_FILE_BYTES = 8_192
+APP_SERVICES = ("web", "migrate", "maintenance")
+APP_PLATFORM = "linux/amd64"
+ADMIN_SECRET = "postgres_admin_password"
+RUNTIME_SECRET = "postgres_runtime_password"
+
+
+def render_model(command: list[str]) -> Mapping[str, object]:
+    result = subprocess.run(
+        [*command, "config", "--format", "json"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json_object(json.loads(result.stdout))
+
+
+def validate_production_model(
+    model: Mapping[str, object],
+    *,
+    image: str,
+    secret_directory: Path,
+    platform: str = APP_PLATFORM,
+) -> dict[str, tuple[str, str]]:
+    services = json_object(model.get("services"))
+    secrets = json_object(model.get("secrets"))
+    sources = set(PRODUCTION_SECRET_NAMES)
+    contracts = {
+        "postgres": {ADMIN_SECRET, RUNTIME_SECRET},
+        "web": sources - {ADMIN_SECRET},
+        "migrate": sources - {RUNTIME_SECRET},
+        "maintenance": sources - {RUNTIME_SECRET},
+    }
+    for name in PRODUCTION_SECRET_NAMES:
+        source = json_object(secrets.get(name)).get("file")
+        if (
+            not isinstance(source, str)
+            or Path(source).resolve() != (secret_directory / name).resolve()
+        ):
+            raise ValueError(f"Production secret {name!r} has the wrong file source.")
+    images: dict[str, tuple[str, str]] = {}
+    for name, value in services.items():
+        service = json_object(value)
+        reference = validate_image_reference(
+            json_string(service.get("image")), name=f"Image for {name!r}"
+        )
+        service_platform = json_string(service.get("platform", ""))
+        images[name] = reference, service_platform
+        if name not in contracts:
+            continue
+        if name in APP_SERVICES:
+            environment = json_object(service.get("environment"))
+            if (
+                reference != image
+                or service_platform not in {"", platform}
+                or service.get("build")
+                or environment.get("DJANGO_SETTINGS_MODULE") != "startunnel.settings.production"
+                or environment.get("STARTUNNEL_ENV") != "production"
+                or environment.get("DATABASE_URL", "")
+                or environment.get("DATABASE_ADMIN_URL", "")
+                or environment.get("STARTUNNEL_DATABASE_ROLE", "runtime")
+                != ("runtime" if name == "web" else "admin")
+            ):
+                raise ValueError(f"Invalid production settings, image, or platform for {name!r}.")
+        mounted: set[str] = set()
+        for item in json_array(service.get("secrets", [])):
+            if isinstance(item, str):
+                mounted.add(item)
+            else:
+                mount = json_object(item)
+                secret = json_string(mount.get("source"))
+                if mount.get("target", secret) not in (secret, f"/run/secrets/{secret}"):
+                    raise ValueError(f"Invalid production secret target for {name!r}.")
+                mounted.add(secret)
+        if mounted != contracts[name]:
+            raise ValueError(f"Invalid production secret mounts for {name!r}.")
+    if not contracts.keys() <= images.keys():
+        raise ValueError("Required production services are missing.")
+    return images
 
 
 def validate_proxy_prefix(value: str) -> str:
@@ -68,7 +155,7 @@ def validate_rendered_images(images: list[str]) -> None:
         validate_image_reference(image, name="Each enabled production service image")
 
 
-def production_secret_directory() -> Path:
+def production_secret_directory(*, root: Path = ROOT) -> Path:
     """Resolve the production secret directory as Compose resolves it."""
 
     configured = os.environ.get("STARTUNNEL_SECRETS_DIR")
@@ -77,9 +164,9 @@ def production_secret_directory() -> Path:
         return path
     compose_files = os.environ.get("COMPOSE_FILE")
     first_file = (
-        Path(compose_files.split(os.pathsep, 1)[0]) if compose_files else ROOT / "compose.yaml"
+        Path(compose_files.split(os.pathsep, 1)[0]) if compose_files else root / "compose.yaml"
     )
-    return (ROOT / first_file).parent / path
+    return (root / first_file).parent / path
 
 
 def read_validated_secret_file(path: Path, *, name: str | None = None) -> str:
@@ -139,10 +226,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         validate_proxy_prefix(os.environ.get("STARTUNNEL_PROXY_IPV4_PREFIX", "172.30.254"))
         validate_production_secret_files(production_secret_directory())
-        validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
-        subprocess.run([*command, "config", "--quiet"], cwd=ROOT, check=True)
-        validate_rendered_images(rendered_images(command))
-    except (subprocess.CalledProcessError, ValueError) as error:
+        image = validate_image_reference(os.environ.get("STARTUNNEL_APP_IMAGE", ""))
+        validate_production_model(
+            render_model(command), image=image, secret_directory=production_secret_directory()
+        )
+    except (subprocess.CalledProcessError, TypeError, ValueError) as error:
         print(str(error))
         return 2
 

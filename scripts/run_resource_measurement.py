@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
+from uuid import uuid4
 
 if TYPE_CHECKING or __package__:
     from .json_data import (
@@ -48,6 +49,8 @@ if TYPE_CHECKING or __package__:
         assert_project_unused,
         assert_safe_target,
         generated_project_name,
+        remove_owned_image,
+        required_output,
         safe_environment,
         termination_signals,
         validate_project_name,
@@ -61,6 +64,8 @@ else:
         assert_project_unused,
         assert_safe_target,
         generated_project_name,
+        remove_owned_image,
+        required_output,
         safe_environment,
         termination_signals,
         validate_project_name,
@@ -287,9 +292,10 @@ class MeasurementStack:
         self.project_name = validate_project_name(project_name)
         self.label = label
         self.environment = safe_environment()
+        tag = f"{project_name}-{uuid4().hex[:12]}"
         self.environment.update(
             {
-                "STARTUNNEL_APP_IMAGE": f"startunnel-resource-{label}:{project_name}",
+                "STARTUNNEL_APP_IMAGE": f"startunnel-resource-{label}:{tag}",
                 "STARTUNNEL_WEB_DATABASE_POOL_MAX_SIZE": "18",
                 "STARTUNNEL_MAINTENANCE_DATABASE_POOL_MAX_SIZE": "4",
                 "STARTUNNEL_WEB_WORKERS": "1",
@@ -300,6 +306,7 @@ class MeasurementStack:
         self.identifiers: dict[str, str] = {}
         self.started: dict[str, tuple[str, int]] = {}
         self.stats: DockerStats
+        self.image_id: str | None = None
 
     def __enter__(self) -> MeasurementStack:
         assert_safe_target(self.environment, self.project_name)
@@ -314,8 +321,9 @@ class MeasurementStack:
         self._env_file.chmod(0o600)
         return self
 
-    def __exit__(self, *arguments: object) -> None:
-        del arguments
+    def __exit__(
+        self, exception_type: object, exception: BaseException | None, traceback: object
+    ) -> None:
         try:
             self.run(
                 "Remove disposable resource stack",
@@ -326,11 +334,33 @@ class MeasurementStack:
                 "30",
                 timeout_seconds=180,
                 capture=True,
-                allow_failure=True,
             )
+            if self.image_id:
+                remove_owned_image(
+                    self.environment["STARTUNNEL_APP_IMAGE"], self.image_id, self.environment
+                )
+        except (OSError, IsolationError, LaneError) as error:
+            if exception is None:
+                raise
+            print(f"Resource stack cleanup failed: {error}", file=sys.stderr)
         finally:
             if self._temporary is not None:
                 self._temporary.cleanup()
+
+    def build_image(self) -> None:
+        self.run("build runtime image", "build", "web", timeout_seconds=2_400)
+        self.image_id = required_output(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                "{{.Id}}",
+                self.environment["STARTUNNEL_APP_IMAGE"],
+            ],
+            environment=self.environment,
+            label="resource measurement image ID",
+        )
 
     def command(self, *arguments: str) -> list[str]:
         if self._env_file is None:
@@ -640,7 +670,7 @@ def _measure_stack(
 ) -> StackMeasurement:
     with MeasurementStack(root, project_name, label) as stack:
         build_started = time.monotonic()
-        stack.run("build runtime image", "build", "web", timeout_seconds=2_400)
+        stack.build_image()
         build_seconds = time.monotonic() - build_started
         startup_started = time.monotonic()
         stack.run(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -106,10 +107,12 @@ def test_source_failure_stops_before_image_actions(
     image_actions: list[str] = []
 
     def run(label: str, command: list[str], *, output: Path | None = None) -> None:
-        del command, output
-        if label == "PDM lock validation":
-            raise run_security_release.SecurityGateError("lock mismatch")
-        image_actions.append(label)
+        del command
+        if label.startswith("Application image"):
+            image_actions.append(label)
+        if output:
+            output.write_text("private-report-test-marker")
+            raise run_security_release.SecurityGateError("early scanner failure")
 
     monkeypatch.setattr(run_security_release, "_run", run)
     monkeypatch.setattr(
@@ -118,7 +121,14 @@ def test_source_failure_stops_before_image_actions(
         lambda value: image_actions.append("runtime inspection"),
     )
     assert run_security_release.main(["source"]) == 1
-    assert "lock mismatch" in capsys.readouterr().out
+    assert "early scanner failure" in capsys.readouterr().out
+    upload_files = list((tmp_path / "artifacts" / "security").glob("*/*"))
+    assert [path.name for path in upload_files] == ["failure.json"]
+    assert json.loads(upload_files[0].read_text()) == {
+        "status": "failed",
+        "stage": "security checks",
+    }
+    assert "private-report-test-marker" not in upload_files[0].read_text()
     assert image_actions == []
 
 
@@ -136,7 +146,9 @@ def test_source_lane_scans_generated_reports_before_passing(
     def run(label: str, command: list[str], *, output: Path | None = None) -> None:
         del label, command
         if output:
-            output.write_text("Safe source report")
+            output.write_text(
+                "private-report-test-marker" if report_scan_fails else "Safe source report"
+            )
 
     def scan_secrets(source: Path, report: Path, *, archive_depth: int = 0) -> None:
         del source, archive_depth
@@ -153,8 +165,21 @@ def test_source_lane_scans_generated_reports_before_passing(
     output = capsys.readouterr().out
     if report_scan_fails:
         assert "generated report secret" in output
+        upload_files = list((tmp_path / "artifacts" / "security").glob("*/*"))
+        assert [path.name for path in upload_files] == ["failure.json"]
+        assert json.loads(upload_files[0].read_text()) == {
+            "status": "failed",
+            "stage": "report screening",
+        }
+        assert "private-report-test-marker" not in upload_files[0].read_text()
     else:
         assert "Security source gate passed" in output
+        reports = (tmp_path / "artifacts" / "security").glob("*/*")
+        assert {report.name for report in reports} == {
+            "candidate-secrets.json",
+            "npm-audit.json",
+            "report-secrets.json",
+        }
 
 
 @pytest.mark.parametrize(

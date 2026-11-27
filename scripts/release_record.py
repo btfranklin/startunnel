@@ -58,9 +58,13 @@ def specification(version: str) -> ReleaseSpecification:
     if data.get("version") != version:
         raise ValueError("Release specification version does not match the tag.")
     predecessors = data.get("supported_from")
-    if not isinstance(predecessors, list) or any(
-        not isinstance(item, str) or not VERSION.fullmatch(item) or item == version
-        for item in predecessors
+    if (
+        not isinstance(predecessors, list)
+        or any(
+            not isinstance(item, str) or not VERSION.fullmatch(item) or item == version
+            for item in predecessors
+        )
+        or len(set(predecessors)) != len(predecessors)
     ):
         raise ValueError("supported_from must list explicit previous release versions.")
     if not isinstance(data.get("configuration_changes"), list):

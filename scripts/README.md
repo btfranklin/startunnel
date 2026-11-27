@@ -42,6 +42,7 @@ Compose proofs must use disposable projects through the isolated runner.
 | [rotate_postgres_passwords.py](rotate_postgres_passwords.py) | Rotate database passwords with recovery checks |
 | [backup-startunnel.sh](backup-startunnel.sh) | Create a database backup |
 | [verify-startunnel-restore.sh](verify-startunnel-restore.sh) | Restore a backup into a disposable database and verify it |
+| [restore-startunnel-replacement.sh](restore-startunnel-replacement.sh) | Restore a verified database on a fresh replacement server |
 | [container-status.sh](container-status.sh) | Show bounded container status |
 | [container-logs.sh](container-logs.sh) | Read bounded service logs |
 

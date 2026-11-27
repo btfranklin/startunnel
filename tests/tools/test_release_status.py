@@ -7,9 +7,15 @@ from pathlib import Path
 
 import pytest
 from scripts import release_status
-from scripts.json_data import JsonObject, json_object
+from scripts.json_data import JsonObject, json_object, object_array
 from scripts.release_candidate import CandidateData
-from scripts.release_status import ReleaseStatus, job_timings, render_summary
+from scripts.release_status import (
+    ReleaseStatus,
+    WorkflowStatus,
+    job_timings,
+    render_summary,
+    verify_workflow_checkout,
+)
 from tests.json_values import json_at
 
 
@@ -48,6 +54,40 @@ def test_parallel_jobs_are_not_added_as_serial_time() -> None:
     assert result["longest_observed_dependency_path"] == ["build", "load", "evidence"]
     assert json_at(result, "jobs", "evidence", "dependency_ready_to_start_seconds") == 2
     assert json_at(result, "jobs", "system", "queue_seconds") is None
+
+
+def test_pull_request_timing_records_the_tested_merge_and_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    head = "a" * 40
+    merge = "b" * 40
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps({"pull_request": {"head": {"sha": head}}}))
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_SHA", merge)
+    workflow: WorkflowStatus = {
+        "run_id": 42,
+        "source_commit": head,
+        "event": "pull_request",
+        "url": "https://example.test/run",
+        "workflow": ".github/workflows/ci.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "attempt": 1,
+        "queue_seconds": None,
+        "timing": job_timings([], {}),
+        "artifacts": [],
+    }
+    verify_workflow_checkout(workflow, merge)
+    assert workflow["tested_commit"] == merge
+    assert workflow["pull_request_head"] == head
+    with pytest.raises(ValueError, match="does not match the workflow checkout"):
+        verify_workflow_checkout(workflow, head)
+    workflow["event"] = "push"
+    with pytest.raises(ValueError, match="different source commit"):
+        verify_workflow_checkout(workflow, merge)
 
 
 def test_rerun_uses_latest_proof_and_keeps_successful_earlier_jobs() -> None:
@@ -197,7 +237,13 @@ def test_dispatch_source_is_separate_only_for_promotion_timing(
     )
     monkeypatch.setattr(release_status, "git_commit", lambda: tagged_source)
     monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
-    monkeypatch.setattr(release_status, "github_api", lambda *args, **kwargs: {"workflow_runs": []})
+    monkeypatch.setattr(
+        release_status,
+        "github_api",
+        lambda *args, **kwargs: (
+            [{"workflow_runs": []}] if kwargs.get("paginate") else {"workflow_runs": []}
+        ),
+    )
     option = "--promotion-run-id" if promotion else "--run-id"
     monkeypatch.setattr(sys, "argv", ["release-status", option, "42", "--output", str(output)])
     if promotion:
@@ -232,7 +278,13 @@ def test_promotion_timing_rejects_an_unrelated_workflow(
     }
     monkeypatch.setattr(release_status, "git_commit", lambda: "a" * 40)
     monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
-    monkeypatch.setattr(release_status, "github_api", lambda *args, **kwargs: {"workflow_runs": []})
+    monkeypatch.setattr(
+        release_status,
+        "github_api",
+        lambda *args, **kwargs: (
+            [{"workflow_runs": []}] if kwargs.get("paginate") else {"workflow_runs": []}
+        ),
+    )
     monkeypatch.setattr(sys, "argv", ["release-status", "--promotion-run-id", "42"])
     with pytest.raises(ValueError, match="requires the release workflow"):
         release_status.main()
@@ -399,6 +451,67 @@ def test_status_downloads_complete_evidence_before_reporting_promotion_readiness
     monkeypatch.setattr(release_status, "verify_evidence", corrupt)
     with pytest.raises(ValueError, match="checksums"):
         release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40)
+
+
+def test_status_preserves_reuse_dispatch_failure_and_evidence_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fixture = status_fixture(candidate_result="success")
+    source, owner = fixture["workflows"]
+    failure: WorkflowStatus = {**owner, "run_id": 3, "conclusion": "failure", "artifacts": []}
+    reuse: WorkflowStatus = {**owner, "run_id": 4, "artifacts": []}
+    by_id = {run["run_id"]: run for run in (source, owner, failure, reuse)}
+    commit = fixture["source_commit"]
+    candidate: CandidateData = {
+        "source_commit": commit,
+        "version": "v0.4.1",
+        "platform": "linux/amd64",
+        "image": "ghcr.io/btfranklin/startunnel@sha256:" + "b" * 64,
+        "source_validation_run_id": source["run_id"],
+    }
+    output = tmp_path / "status.json"
+    monkeypatch.setattr(sys, "argv", ["release-status", "--output", str(output)])
+    monkeypatch.setattr(release_status, "git_commit", lambda: commit)
+    monkeypatch.setattr(
+        release_status,
+        "candidate_runs",
+        lambda *args: [
+            {"id": 4, "status": "completed", "conclusion": "success"},
+            {"id": 3, "status": "completed", "conclusion": "failure"},
+            {"id": 2, "status": "completed", "conclusion": "success"},
+        ],
+    )
+    monkeypatch.setattr(
+        release_status, "validated_artifact", lambda *args: (2, {"name": "release-candidate-2-1"})
+    )
+    monkeypatch.setattr(release_status, "workflow_status", lambda repo, run: by_id[run])
+    monkeypatch.setattr(
+        release_status,
+        "inspect_readiness",
+        lambda status, repo, *, evidence_verified: readiness_for(
+            status, verified=evidence_verified
+        ),
+    )
+
+    def load(
+        repository: str, workflow: WorkflowStatus, *, commit: str
+    ) -> tuple[CandidateData, bool]:
+        assert workflow["run_id"] == owner["run_id"]
+        return candidate, True
+
+    monkeypatch.setattr(release_status, "candidate_from_workflow", load)
+    assert release_status.main() == 0
+    result = json_object(json.loads(output.read_text()))
+    assert result["latest_candidate_dispatch"] == 4
+    assert result["candidate_evidence_run"] == 2
+    assert result["candidate_evidence_attempt"] == 1
+    assert json_at(result, "readiness", "can_promote") is True
+    assert [run["run_id"] for run in object_array(result["workflows"])] == [
+        1,
+        4,
+        2,
+        3,
+    ]
 
 
 def test_expired_or_duplicate_artifacts_cannot_produce_verified_status(

@@ -74,6 +74,48 @@ def test_failed_production_installation_report_is_retained(
 
 
 @pytest.mark.parametrize(
+    "failure", [None, "missing", "unexpected", "duplicate", "wrong-image", "cleanup", "checksum"]
+)
+def test_system_proof_checks_exact_predecessor_set(
+    failure: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence(tmp_path, monkeypatch)
+    directory = tmp_path / "proofs/system/1"
+    record = proof_evidence.read_object(directory / "proof-system.json")
+    spec = {"supported_from": ["v0.2.0"]}
+    monkeypatch.setattr(proof_evidence, "specification", lambda version: spec)
+    files = json_members(record["files"])
+    path = directory / "predecessor-proof-v0.2.0.json"
+    report = {
+        "status": "passed",
+        "published_baseline": {"version": "v0.2.0", "source_commit": "d" * 40, "image": IMAGE},
+        "source_commit": COMMIT,
+        "candidate_image": IMAGE if failure != "wrong-image" else IMAGE[:-1] + "f",
+        "restore": "passed",
+        "upgrade": "passed",
+        "disposable_volumes_removed": failure != "cleanup",
+    }
+    if failure != "missing":
+        path.write_text(json.dumps(report))
+        files[path.name] = proof_evidence.checksum(path)
+    if failure in {"duplicate", "unexpected"}:
+        extra = directory / "predecessor-proof-v0.3.0.json"
+        if failure == "unexpected":
+            report["published_baseline"] = {"version": "v0.3.0"}
+        extra.write_text(json.dumps(report))
+        files[extra.name] = proof_evidence.checksum(extra)
+    if failure == "checksum":
+        path.write_text("{}")
+    if failure:
+        with pytest.raises(ValueError, match=r"(?i)predecessor|checksums"):
+            proof_evidence.validate_proof(
+                record, directory, kind="system", commit=COMMIT, image=IMAGE
+            )
+    else:
+        proof_evidence.validate_proof(record, directory, kind="system", commit=COMMIT, image=IMAGE)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("source_commit", "d" * 40),

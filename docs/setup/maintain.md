@@ -111,9 +111,25 @@ after the server update; the download remains available to older clients.
    digest and its source revision label. Keep the old image available and plan
    a short maintenance window.
    Keep all existing secret files with the recovery copy.
-3. Run `git status --short` and resolve tracked changes. Run `umask 022`,
-   `git fetch --tags origin`, and `git checkout --detach COMMIT`, replacing
-   `COMMIT` with the full source commit from the release record. Run `umask 077`
+3. Keep the instance lock held from checkout through apply. With the selected
+   production environment loaded, fetch the reviewed release and make a
+   private copy of its lock tool. Replace `COMMIT` with the full source commit
+   from the release record. This also works if the installed checkout has no
+   lock tool.
+
+   ```shell
+   git fetch --tags origin
+   lock_tools="$(mktemp -d)"
+   git archive COMMIT scripts/production_lock.py scripts/start_production.py scripts/json_data.py |
+     tar -x -C "$lock_tools"
+   python3.15 -B "$lock_tools/scripts/production_lock.py" -- bash
+   rm -- "$lock_tools/scripts/production_lock.py" "$lock_tools/scripts/start_production.py" \
+     "$lock_tools/scripts/json_data.py"
+   rmdir "$lock_tools/scripts" "$lock_tools"
+   ```
+
+   In that shell, run `git status --short` and resolve tracked changes. Run
+   `umask 022` and `git checkout --detach COMMIT`. Run `umask 077`
    afterward. The checkout must match the new image; mounted files must remain
    readable by containers. Reload the selected config file as shown above.
 4. Preview the upgrade from that matching checkout:
@@ -128,7 +144,10 @@ after the server update; the download remains available to older clients.
    web containers, pulls the new image, verifies its source label, and shows
    its read-only database migration plan in a temporary container. Web does
    not need to be running; PostgreSQL must be available. The preview does not
-   change configuration, stored data, or running services.
+   change configuration, stored data, or running services. If it reports
+   usernames that differ only in case, rename the affected accounts in the
+   installed release so each has a distinct name. Run preview again before
+   stopping writers.
 
    Versioned installations must appear in `supported_from`. For an unversioned
    installation, use the v0.2.0 route above unless a direct upgrade has separate
@@ -146,7 +165,9 @@ after the server update; the download remains available to older clients.
    ```
 
    `--backup-verified` confirms that you restored a fresh backup and copied it
-   outside the server. The helper does not perform that check.
+   outside the server. The helper does not perform that check. Exit the
+   maintenance shell after apply or after restoring the original checkout
+   and configuration.
 
    The helper pulls and checks the new image before it stops writers. It saves
    the old configuration in a unique mode `0600` file and prints the path, then

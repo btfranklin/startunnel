@@ -310,7 +310,7 @@ def test_admin_pages_and_key_controls_work_without_javascript(
     )
     base_url = os.getenv("STARTUNNEL_BASE_URL", "http://web:8000").rstrip("/")
     artifact_dir = Path(os.getenv("STARTUNNEL_BROWSER_ARTIFACTS_DIR", str(tmp_path)))
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    capture_success = os.getenv("STARTUNNEL_BROWSER_SUCCESS_SCREENSHOTS") == "1"
     context = browser.new_context(java_script_enabled=False, accept_downloads=True)
     page = context.new_page()
     try:
@@ -346,17 +346,26 @@ def test_admin_pages_and_key_controls_work_without_javascript(
                 page.goto(base_url + route)
                 if label in {"admins", "account"}:
                     page.get_by_text("Manage access for " + username, exact=True).click()
-                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
-                    label,
-                    width,
+                fits = (
+                    page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                    is True
                 )
-                page.screenshot(
-                    path=str(
-                        artifact_dir / f"admin-{browser.browser_type.name}-{label}-{width}.jpg"
-                    ),
-                    full_page=True,
-                    type="jpeg",
-                )
+                if not fits or capture_success:
+                    content = page.content()
+                    safe_capture = key not in content and password not in content
+                    assert safe_capture, "The browser must not embed admin credentials."
+                    outcome = "layout-successes" if fits else "layout-failures"
+                    destination = artifact_dir / outcome
+                    destination.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(
+                        path=str(
+                            destination / f"admin-{browser.browser_type.name}-{label}-{width}.jpg"
+                        ),
+                        full_page=True,
+                        type="jpeg",
+                        mask=[page.locator("input, textarea")],
+                    )
+                assert fits, (label, width)
         page.goto(base_url + "/app/account/")
         page.get_by_text("Manage access for " + username, exact=True).click()
         page.get_by_role("button", name="Revoke admin key", exact=True).click()

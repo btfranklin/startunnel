@@ -142,6 +142,9 @@ def test_memory_gate_checks_services_even_when_total_memory_is_constant(
         def run(self, *args: object, **kwargs: object) -> None:
             pass
 
+        def build_image(self) -> None:
+            pass
+
         def cache_containers(self) -> None:
             pass
 

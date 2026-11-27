@@ -25,46 +25,58 @@ if TYPE_CHECKING or __package__:
     from .compose_isolation import (
         IsolatedComposeProject,
         LaneError,
-        available_proxy_prefix,
         generated_project_name,
         required_output,
         safe_environment,
         termination_signals,
         validate_project_name,
+    )
+    from .compose_isolation import (
+        available_proxy_prefix as available_proxy_prefix,
     )
     from .generate_production_secrets import random_urlsafe, write_secret
     from .json_data import JsonObject, json_integer, json_object
     from .proof_timing import PhaseRecord, PhaseTimings
     from .release_record import candidate_version
-    from .start_production import validate_image_reference
+    from .start_production import (
+        APP_PLATFORM,
+        PRODUCTION_SECRET_NAMES,
+        validate_image_reference,
+        validate_production_model,
+    )
+    from .start_production import (
+        APP_SERVICES as APP_SERVICES,
+    )
 else:
     from compose_isolation import (
         IsolatedComposeProject,
         LaneError,
-        available_proxy_prefix,
         generated_project_name,
         required_output,
         safe_environment,
         termination_signals,
         validate_project_name,
     )
+    from compose_isolation import (
+        available_proxy_prefix as available_proxy_prefix,
+    )
     from generate_production_secrets import random_urlsafe, write_secret
     from json_data import JsonObject, json_integer, json_object
     from proof_timing import PhaseRecord, PhaseTimings
     from release_record import candidate_version
-    from start_production import validate_image_reference
+    from start_production import (
+        APP_PLATFORM,
+        PRODUCTION_SECRET_NAMES,
+        validate_image_reference,
+        validate_production_model,
+    )
+    from start_production import (
+        APP_SERVICES as APP_SERVICES,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
-PLATFORM = "linux/amd64"
-APP_SERVICES = ("web", "migrate", "maintenance")
-SECRET_NAMES = (
-    "startunnel_secret_key",
-    "startunnel_api_key_pepper",
-    "startunnel_idempotency_secret",
-    "startunnel_metrics_token",
-    "postgres_admin_password",
-    "postgres_runtime_password",
-)
+PLATFORM = APP_PLATFORM
+SECRET_NAMES = PRODUCTION_SECRET_NAMES
 CHECK_NAMES = (
     "source_identity",
     "runtime_images",
@@ -77,6 +89,9 @@ CHECK_NAMES = (
     "health_live",
     "health_ready",
     "metrics_files_preserved",
+    "replacement_restore",
+    "password_rotation",
+    "installed_upgrade",
 )
 PHASE_NAMES = (
     "prepare",
@@ -353,48 +368,13 @@ def verify_compose_model(
     model: Mapping[str, object], *, image: str, port: int, secret_directory: Path
 ) -> None:
     services = object_value(model.get("services"), "render_compose")
-    configured_secrets = object_value(model.get("secrets"), "render_compose")
-    for name in SECRET_NAMES:
-        secret = object_value(configured_secrets.get(name), "render_compose")
-        file_path = secret.get("file")
-        if (
-            not isinstance(file_path, str)
-            or Path(file_path).resolve() != (secret_directory / name).resolve()
-        ):
-            raise LaneError("render_compose", "A secret file is outside private storage.")
-    for service_name in APP_SERVICES:
-        service = object_value(services.get(service_name), "render_compose")
-        environment = object_value(service.get("environment"), "render_compose")
-        if (
-            service.get("image") != image
-            or service.get("platform") != PLATFORM
-            or environment.get("DJANGO_SETTINGS_MODULE") != "startunnel.settings.production"
-            or environment.get("STARTUNNEL_ENV") != "production"
-        ):
-            raise LaneError("render_compose", "Production service configuration is invalid.")
-    contracts = {
-        "postgres": {"postgres_admin_password", "postgres_runtime_password"},
-        "migrate": set(SECRET_NAMES) - {"postgres_runtime_password"},
-        "web": set(SECRET_NAMES) - {"postgres_admin_password"},
-        "maintenance": set(SECRET_NAMES) - {"postgres_runtime_password"},
-    }
-    for service_name, expected in contracts.items():
-        service = object_value(services.get(service_name), "render_compose")
-        value = service.get("secrets")
-        if not isinstance(value, list):
-            raise LaneError("render_compose", "A production service has no secret mounts.")
-        mounted: set[str] = set()
-        for item in value:
-            source = (
-                item
-                if isinstance(item, str)
-                else object_value(item, "render_compose").get("source")
-            )
-            if not isinstance(source, str):
-                raise LaneError("render_compose", "A production secret mount has no source.")
-            mounted.add(source)
-        if mounted != expected:
-            raise LaneError("render_compose", "A production service has invalid secret mounts.")
+    try:
+        validate_production_model(model, image=image, secret_directory=secret_directory)
+    except (TypeError, ValueError) as error:
+        raise LaneError("render_compose", str(error)) from error
+    for name in APP_SERVICES:
+        if object_value(services.get(name), "render_compose").get("platform") != PLATFORM:
+            raise LaneError("render_compose", "Proof service platform is invalid.")
     web = object_value(services.get("web"), "render_compose")
     volumes = web.get("volumes")
     if not isinstance(volumes, list) or len(volumes) != 1:
@@ -749,11 +729,16 @@ def finish_report(
 
 
 def prepare_stack(
-    private_directory: Path, *, image: str, project_name: str
+    private_directory: Path,
+    *,
+    image: str,
+    project_name: str,
+    secret_directory: Path | None = None,
 ) -> tuple[ProductionComposeProject, str, Path, int]:
     """Create private inputs for one disposable production stack."""
-    secret_directory = private_directory / "secrets"
-    make_secrets(secret_directory)
+    if secret_directory is None:
+        secret_directory = private_directory / "secrets"
+        make_secrets(secret_directory)
     port = free_port()
     base_url = f"http://127.0.0.1:{port}"
     overlay = private_directory / "production-release.yaml"
@@ -788,6 +773,194 @@ def prepare_stack(
         smoke_overlay=overlay,
     )
     return stack, base_url, secret_directory, port
+
+
+def proof_operator_command(script: str, environment: Mapping[str, str]) -> list[str]:
+    command = [sys.executable, script]
+    if sys.platform == "linux" and os.getuid() != 0:
+        names = ",".join(sorted(environment))
+        return ["sudo", "-n", f"--preserve-env={names}", *command]
+    return command
+
+
+def prove_recovery_operations(
+    stack: ProductionComposeProject,
+    private_directory: Path,
+    base_url: str,
+    image: str,
+) -> None:
+    if TYPE_CHECKING or __package__:
+        from .prove_replacement_restore import prove_replacement_restore
+    else:
+        from prove_replacement_restore import prove_replacement_restore
+
+    prove_replacement_restore(stack, private_directory, base_url, image)
+    admin = private_directory / "replacement-admin"
+    runtime = private_directory / "replacement-runtime"
+    bundle = private_directory / "rotation-rollback.json"
+    for path in (admin, runtime):
+        write_private_file(path, random_urlsafe(48) + "\n")
+    environment = stack.environment | {
+        "COMPOSE_FILE": os.pathsep.join(stack.compose_files()),
+        "COMPOSE_PROJECT_NAME": stack.project_name,
+        "COMPOSE_DISABLE_ENV_FILE": "true",
+    }
+    rotation = proof_operator_command("scripts/rotate_postgres_passwords.py", environment)
+    run_process(
+        [
+            *rotation,
+            "rotate",
+            "--new-admin-file",
+            str(admin),
+            "--new-runtime-file",
+            str(runtime),
+            "--rollback-file",
+            str(bundle),
+        ],
+        environment=environment,
+        timeout=480,
+        step="password_rotation",
+    )
+    if not health_ok(f"{base_url}/health/ready"):
+        raise LaneError("password_rotation", "The rotated production stack was not ready.")
+    run_process(
+        [*rotation, "rollback", "--rollback-file", str(bundle)],
+        environment=environment,
+        timeout=480,
+        step="password_rotation",
+    )
+    if not health_ok(f"{base_url}/health/ready"):
+        raise LaneError("password_rotation", "The rolled-back production stack was not ready.")
+
+
+def prove_installed_upgrade(
+    private_directory: Path,
+    *,
+    image: str,
+    commit: str,
+    version: str,
+) -> None:
+    if TYPE_CHECKING or __package__:
+        from .prove_published_upgrade import fetch_record, published_record
+        from .prove_replacement_restore import run_backup_command
+        from .release_record import specification
+    else:
+        from prove_published_upgrade import fetch_record, published_record
+        from prove_replacement_restore import run_backup_command
+        from release_record import specification
+
+    spec = specification(version)
+    predecessors = spec["supported_from"]
+    if not predecessors:
+        return
+    predecessor = max(predecessors, key=lambda value: tuple(map(int, value[1:].split("."))))
+    upgrade_directory = private_directory / "installed-upgrade"
+    upgrade_directory.mkdir(mode=0o700)
+    fetch_record(predecessor, upgrade_directory)
+    baseline = published_record(upgrade_directory / "release.json")
+    stack, base_url, secret_directory, _ = prepare_stack(
+        upgrade_directory,
+        image=baseline["image"],
+        project_name=generated_project_name("installed-upgrade"),
+    )
+    with stack:
+        set_production_environment(
+            stack.environment,
+            image=baseline["image"],
+            base_url=base_url,
+            secret_directory=secret_directory,
+            proxy_prefix=available_proxy_prefix(stack.environment),
+        )
+        run_process(
+            ["docker", "pull", "--platform", PLATFORM, baseline["image"]],
+            environment=stack.environment,
+            timeout=600,
+            step="installed_upgrade",
+        )
+        set_secret_ownership(
+            secret_directory,
+            image=baseline["image"],
+            project_name=stack.project_name,
+            environment=stack.environment,
+        )
+        stack.run(
+            "Start published installation",
+            "up",
+            "--detach",
+            "--no-build",
+            "--wait",
+            "--wait-timeout",
+            "180",
+            "postgres",
+            *APP_SERVICES,
+            timeout_seconds=240,
+        )
+        admin_key = admin_key_from_stack(stack, upgrade_directory)
+        run_cli_proof(
+            upgrade_directory, admin_key, base_url, predecessor, baseline["source_commit"], {}
+        )
+        backup = upgrade_directory / "pre-upgrade.backup"
+        run_backup_command(stack, "backup-startunnel.sh", backup)
+        run_backup_command(stack, "verify-startunnel-restore.sh", backup)
+        environment = stack.environment | {
+            "COMPOSE_FILE": os.pathsep.join(stack.compose_files()),
+            "COMPOSE_PROJECT_NAME": stack.project_name,
+            "COMPOSE_DISABLE_ENV_FILE": "true",
+        }
+        config = upgrade_directory / "production.env"
+        write_private_file(config, f"STARTUNNEL_APP_IMAGE={baseline['image']}\n")
+        config.chmod(0o400)
+        record = upgrade_directory / "candidate.json"
+        write_private_file(
+            record,
+            json.dumps(
+                {
+                    **spec,
+                    "schema": 1,
+                    "source_commit": commit,
+                    "image": image,
+                    "platform": PLATFORM,
+                }
+            ),
+        )
+        apply = [
+            *proof_operator_command("scripts/upgrade_production.py", environment),
+            str(record),
+            "--env-file",
+            str(config),
+            "--apply",
+            "--backup-verified",
+        ]
+        run_process(apply, environment=environment, timeout=780, step="installed_upgrade")
+        if config.stat().st_mode & 0o777 != 0o400:
+            raise LaneError("installed_upgrade", "The upgrade changed the config file permissions.")
+        stack.environment["STARTUNNEL_APP_IMAGE"] = image
+        expectation = required_output(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+            environment=stack.environment,
+            label="upgraded candidate image ID",
+        )
+        verify_runtime_image_ids(expectation, runtime_image_ids(stack))
+        stack.run(
+            "Check upgraded runtime role over TCP",
+            "exec",
+            "-T",
+            "postgres",
+            "/usr/local/bin/startunnel-check-runtime-role",
+            timeout_seconds=30,
+        )
+        credentials = {
+            "STARTUNNEL_BASE_URL": base_url,
+            "STARTUNNEL_AGENT_KEY_FILE": str(upgrade_directory / "agent-one.key"),
+        }
+        command_json(
+            upgrade_directory / "star_tunnel.py",
+            ["create", "--idempotency-key", uuid4().hex],
+            credentials,
+            {"cycle": {"root": {"content": {"type": "text", "text": "Upgrade proof"}}}},
+        )
+    if not stack.cleanup_complete:
+        raise LaneError("installed_upgrade", "The installed-upgrade test did not clean up.")
 
 
 def run_proof(
@@ -918,6 +1091,17 @@ def run_proof(
                     commit,
                     report["checks"],
                 )
+            current_step = "recovery_operations"
+            with timings.phase("recovery_operations"):
+                prove_recovery_operations(stack, private_directory, base_url, image)
+                report["checks"]["replacement_restore"] = True
+                report["checks"]["password_rotation"] = True
+            current_step = "installed_upgrade"
+            with timings.phase("installed_upgrade"):
+                prove_installed_upgrade(
+                    private_directory, image=image, commit=commit, version=version
+                )
+                report["checks"]["installed_upgrade"] = True
     except BaseException as error:
         safe_failure(report, error, current_step)
     finally:

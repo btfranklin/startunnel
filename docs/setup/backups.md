@@ -57,30 +57,21 @@ cd /opt/startunnel
 set -a
 . /opt/startunnel/production.env
 set +a
-exec 9>/run/lock/startunnel-backup.lock
-flock -n 9 || exit 1
-backup_root=/srv/startunnel/backups
-work=$(mktemp -d "$backup_root/.work.XXXXXX")
-output="$backup_root/$(date -u +%Y%m%dT%H%M%SZ).tar.age"
-trap 'rm -rf -- "$work"' EXIT
-test ! -e "$output"
-scripts/backup-startunnel.sh "$work/database.backup"
-git rev-parse HEAD > "$work/source-commit"
-cp /opt/startunnel/production.env "$work/production.env"
-tar -C "$work" -cf - database.backup source-commit production.env \
-  -C /srv/startunnel secrets |
-  age -R /srv/startunnel/backup-recipients.txt > "$output.partial"
-mv "$output.partial" "$output"
-printf 'Created encrypted backup: %s\n' "$output"
+exec python3.15 scripts/backup_production.py \
+  --output-directory /srv/startunnel/backups \
+  --env-file /opt/startunnel/production.env \
+  --recipients /srv/startunnel/backup-recipients.txt
 SCRIPT
 chmod 700 /usr/local/sbin/startunnel-backup
 /usr/local/sbin/startunnel-backup
 ```
 
-Expect a completed encrypted backup path. Record that path. A `.partial` file
-is not a completed backup. If the command fails, correct the failure before
-retrying.
-Do not rotate secrets or update the application while a backup is running.
+Expect a completed encrypted backup path. Record that path. The archive
+contains the database dump, the active configuration and Compose files, the
+secret files, and an installation record with the running image identities.
+Keep the archive on encrypted storage. If another operation holds the instance
+lock, the backup exits without publishing a new archive. Check the date of the
+last verified off-host copy and retry after maintenance.
 
 ## 3. Copy it outside the server and test decryption
 
@@ -167,11 +158,19 @@ the check. Record the backup timestamp and the result. Also test the full
 replacement-server recovery below. Keep the restore check required before a
 destructive application upgrade; see [maintenance](maintain.md).
 
+After an off-host copy passes its restore check, record that verification on
+the server. A deferred backup uses the marker time to report the age of the
+last off-host verification.
+
+```shell
+touch /srv/startunnel/backups/.off-host-verified
+```
+
 ## Recover on a replacement server
 
-These steps restore into a **new, empty database**. Do not run them against the
-active database. Keep the old server stopped during final recovery so two
-instances cannot accept divergent writes under the same domain.
+Use these steps on a replacement server with a fresh PostgreSQL volume.
+Keep the old server stopped during final recovery so two instances cannot
+accept writes under the same domain.
 
 1. On the recovery workstation, decrypt the chosen archive as shown above.
    Read `source-commit` and the image reference in `production.env`. Keep secret
@@ -182,41 +181,89 @@ instances cannot accept divergent writes under the same domain.
 3. Complete installation steps 1–5 with the recorded source commit and image.
    Pull that image using installation step 6, but **skip secret generation**.
    Do not start `web`, `maintenance`, or `migrate` yet.
+   If the recorded checkout does not have the replacement restore command,
+   get the checkout that contains it. Set `STARTUNNEL_RECOVERY_TOOLS` to the
+   absolute path of that checkout. Keep the recorded checkout and image for
+   the application.
 4. Copy the decrypted `recovered.tar` over SSH to a private directory on the
    replacement server's encrypted disk. For example, create
    `/srv/startunnel/recovery-upload` with `install -d -o ubuntu -g ubuntu -m 700`
    on the server, then use `scp` from the workstation to that directory. Use
    the actual SSH account. Do not upload `recovery-key.txt`.
 
-In the replacement server's **production root shell**, run:
+In the replacement server's **production root shell**, extract the archive:
 
 ```shell
 set -euo pipefail
 install -d -m 700 /srv/startunnel/recovery
 tar -xf /srv/startunnel/recovery-upload/recovered.tar \
   -C /srv/startunnel/recovery --no-same-owner
-test ! -e /srv/startunnel/secrets
-cp -a /srv/startunnel/recovery/secrets /srv/startunnel/secrets
-chown 10001:10001 /srv/startunnel/secrets/*
-chmod 700 /srv/startunnel/secrets
-chmod 600 /srv/startunnel/secrets/*
-cd /srv/startunnel/recovery/database.backup
-sha256sum -c manifest.sha256
+```
+
+Use the archived `production.env` as the replacement configuration. If the
+archive contains `installation.json`, that file maps each selected Compose file's
+original path to its archive copy under `config/`. Preserve the file order,
+profiles, and image digests it records. Restore custom overrides in their
+original relative locations so Compose can resolve their references. If a
+host path changes, update the selected file list and the affected references.
+Keep files already supplied by the matching checkout. On a recovery drill,
+change the domain and any explicit base URL or host settings to the drill
+hostname. Use the provider guide to check the replacement host settings.
+
+Install the reviewed configuration and load it. Set
+`STARTUNNEL_SECRETS_DIR` in that file to the absolute secret directory on
+this server. In this example, the reviewed copy is
+`/srv/startunnel/recovery/production.env`.
+
+```shell
 cd /opt/startunnel
-docker compose up -d --no-build --wait --wait-timeout 180 postgres
-docker compose exec -T postgres pg_restore --exit-on-error \
-  --username startunnel_admin --dbname startunnel --no-owner --no-acl \
-  < /srv/startunnel/recovery/database.backup/postgres.dump
-docker compose exec -T postgres psql --set=ON_ERROR_STOP=1 \
-  --set=database_name=startunnel --username startunnel_admin --dbname startunnel \
-  --file /usr/local/share/startunnel/runtime-grants.sql
-python3.15 scripts/start_production.py --edge
+install -m 600 /srv/startunnel/recovery/production.env /opt/startunnel/production.env
+set -a
+. /opt/startunnel/production.env
+set +a
+test ! -e "$STARTUNNEL_SECRETS_DIR"
+test ! -L "$STARTUNNEL_SECRETS_DIR"
+cp -a /srv/startunnel/recovery/secrets "$STARTUNNEL_SECRETS_DIR"
+chown 10001:10001 "$STARTUNNEL_SECRETS_DIR"/*
+chmod 700 "$STARTUNNEL_SECRETS_DIR"
+chmod 600 "$STARTUNNEL_SECRETS_DIR"/*
+recovery_tools="${STARTUNNEL_RECOVERY_TOOLS:-$PWD}"
+python3.15 "$recovery_tools/scripts/production_lock.py" -- \
+  "$recovery_tools/scripts/restore-startunnel-replacement.sh" \
+  /srv/startunnel/recovery/database.backup
+python3.15 scripts/start_production.py
 docker compose up -d --no-build --wait --wait-timeout 180
 ```
 
-Stop at any error. In particular, do not continue if the secret directory
-already exists or the database is not empty. Point the selected hostname at
-the replacement IP before the HTTPS check. For a drill, use only the test
+Stop at any error. The command checks the dump and restores it into an empty
+temporary database. It verifies the restricted database role over TCP before
+it exchanges database names in one transaction. It keeps the bootstrap
+database under the name it prints.
+
+If the switch stops without a confirmation, keep the application stopped.
+Use the names from the command output to check which transaction result
+PostgreSQL has:
+
+```shell
+docker compose exec -T postgres psql -X --username startunnel_admin \
+  --dbname postgres --command 'SELECT datname FROM pg_database ORDER BY datname;'
+```
+
+- If `startunnel` and the printed `startunnel_restore_...` database exist,
+  the switch did not commit. Resolve the error and repeat the restore
+  command. The prior staged database can remain until verification.
+- If `startunnel` and the printed `startunnel_bootstrap_...` database exist,
+  the switch committed. With the writers still stopped, run the TCP role
+  probe below. Start the application only after the probe passes.
+- For any other result, keep the writers stopped and inspect the selected
+  Compose project and databases. Preserve the encrypted archive.
+
+```shell
+docker compose exec -T -e PGHOST=127.0.0.1 postgres \
+  /usr/local/bin/startunnel-check-runtime-role startunnel
+```
+
+Point the selected hostname at the replacement IP before the HTTPS check. For a drill, use only the test
 hostname. Complete [external verification](verify.md) and confirm an existing
 agent key still works. Then establish the backup schedule on this host.
 Remove the decrypted recovery files after verification. Keep the encrypted

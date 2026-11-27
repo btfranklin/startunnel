@@ -869,7 +869,16 @@ def test_load_runner_uses_isolated_project_and_safe_provenance(
 
         environment = {"PATH": "/safe/bin"}
 
-        def __init__(self, project_name: str, *, profiles: Sequence[str]) -> None:
+        def __init__(
+            self,
+            project_name: str,
+            *,
+            profiles: Sequence[str],
+            reuse_current_images: bool,
+            candidate_image: str | None = None,
+        ) -> None:
+            assert not reuse_current_images
+            assert candidate_image is None
             events.append(("init", (project_name, tuple(profiles))))
 
         def __enter__(self) -> FakeStack:
@@ -993,8 +1002,17 @@ def test_load_runner_can_reuse_verified_current_images(
         cleanup_complete = False
         environment = {"PATH": "/safe/bin"}
 
-        def __init__(self, project_name: str, *, profiles: Sequence[str]) -> None:
+        def __init__(
+            self,
+            project_name: str,
+            *,
+            profiles: Sequence[str],
+            reuse_current_images: bool,
+            candidate_image: str | None = None,
+        ) -> None:
             del project_name, profiles
+            assert reuse_current_images
+            assert candidate_image is None
 
         def __enter__(self) -> FakeStack:
             return self
@@ -1158,8 +1176,10 @@ def test_system_report_is_written_only_after_volume_cleanup(
             *,
             profiles: Sequence[str],
             include_openai: bool,
+            reuse_current_images: bool,
         ) -> None:
             del project_name, include_openai
+            assert not reuse_current_images
             assert tuple(profiles) == ("examples", "agents", "proxy-proof")
             events.append("init")
 
@@ -1216,8 +1236,10 @@ def test_system_failure_writes_partial_report_after_failed_cleanup(
             *,
             profiles: Sequence[str],
             include_openai: bool,
+            reuse_current_images: bool,
         ) -> None:
             del project_name, profiles, include_openai
+            assert not reuse_current_images
 
         def __enter__(self) -> FakeStack:
             return self
@@ -1283,8 +1305,10 @@ def test_system_reuse_mode_is_explicit_and_not_release_evidence(
             *,
             profiles: Sequence[str],
             include_openai: bool,
+            reuse_current_images: bool,
         ) -> None:
             del project_name, profiles, include_openai
+            assert reuse_current_images
 
         def __enter__(self) -> FakeStack:
             return self
@@ -1705,50 +1729,25 @@ def test_source_scan_failure_blocks_service_builds() -> None:
         assert jobs[job]["needs"] == "canonical"
 
 
-@pytest.mark.parametrize(
-    ("version", "script", "option"),
-    [
-        ("v0.1.0", "prove_admin_upgrade.py", "--baseline-record"),
-        ("v0.2.0", "prove_published_upgrade.py", "--release-record"),
-        ("v0.3.0", "prove_published_upgrade.py", "--release-record"),
-        ("v0.4.0", "prove_published_upgrade.py", "--release-record"),
-        ("v0.4.1", "prove_published_upgrade.py", "--release-record"),
-    ],
-)
-def test_ci_checks_each_published_upgrade_with_its_own_record(
-    version: str, script: str, option: str
-) -> None:
+def test_ci_proves_historical_admin_reset_and_declared_predecessors() -> None:
     job = load_workflow("ci.yml")["jobs"]["postgres"]
-    steps = [
-        step
-        for step in job["steps"]
-        if script in step.get("run", "")
-        and option in step["run"]
-        and f"startunnel-{version}/" in step["run"]
-    ]
-    assert len(steps) == 1
-    step = steps[0]
-    assert step["if"] == "github.event_name != 'pull_request'"
-    assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    for command in (
+        'prove_admin_upgrade.py --baseline-record "$RUNNER_TEMP/startunnel-v0.1.0/release.json"',
+        "prove_published_upgrade.py --supported-predecessors",
+    ):
+        steps = [step for step in job["steps"] if command in step.get("run", "")]
+        assert len(steps) == 1
+        step = steps[0]
+        assert step["if"] == "github.event_name != 'pull_request'"
+        assert step["env"] == {"GH_TOKEN": "${{ github.token }}"}
+        assert not step.get("continue-on-error")
     assert "GH_TOKEN" not in job.get("env", {})
-    assert not step.get("continue-on-error")
-    directory = f'"$RUNNER_TEMP/startunnel-{version}"'
-    record = f'"$RUNNER_TEMP/startunnel-{version}/release.json"'
-    assert step["run"].splitlines() == [
-        f"git fetch --depth=1 origin refs/tags/{version}:refs/tags/{version}",
-        f"gh release download {version} --pattern release.json --dir {directory}",
-        f"pdm run python scripts/{script} {option} {record}",
-    ]
 
 
-@pytest.mark.parametrize("version", ["v0.2.0", "v0.3.0", "v0.4.0", "v0.4.1"])
-def test_candidate_checks_published_upgrades_with_the_exact_image(version: str) -> None:
+def test_candidate_checks_declared_predecessors_with_the_exact_image() -> None:
     job = load_workflow("release-validation.yml")["jobs"]["system"]
     step = next(
-        step
-        for step in job["steps"]
-        if "prove_published_upgrade.py" in step.get("run", "")
-        and f"startunnel-{version}/" in step["run"]
+        step for step in job["steps"] if "prove_published_upgrade.py" in step.get("run", "")
     )
     assert step["if"] == "inputs.candidate_image != ''"
     assert not step.get("continue-on-error")
@@ -1756,10 +1755,12 @@ def test_candidate_checks_published_upgrades_with_the_exact_image(version: str) 
         "GH_TOKEN": "${{ github.token }}",
         "CANDIDATE_IMAGE": "${{ inputs.candidate_image }}",
     }
-    assert f"refs/tags/{version}:refs/tags/{version}" in step["run"]
-    assert f"gh release download {version} --pattern release.json" in step["run"]
-    assert f'--release-record "$RUNNER_TEMP/startunnel-{version}/release.json"' in step["run"]
+    assert "prove_published_upgrade.py --supported-predecessors" in step["run"]
     assert '--candidate-image "$CANDIDATE_IMAGE"' in step["run"]
+    upload = next(
+        step for step in job["steps"] if step.get("name") == "Upload the safe system report"
+    )
+    assert "artifacts/predecessor-proof-*.json" in upload["with"]["path"]
 
 
 def test_website_publication_is_separate_and_opt_in() -> None:
@@ -1793,8 +1794,15 @@ def test_manual_release_workflow_limits_provider_settings_to_live_proof_step() -
     workflow = load_workflow("release-validation.yml")
     assert workflow["on"]["workflow_dispatch"]["inputs"]["run_live_agents"]["default"] == "false"
     live = workflow["jobs"]["live-agents"]
-    assert live["if"] == "${{ inputs.run_live_agents }}"
-    assert set(live["needs"]) == {"security", "system"}
+    assert live["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.run_live_agents && "
+        "inputs.candidate_image == ''"
+    )
+    assert set(live["needs"]) == {"validation-inputs", "security", "system"}
+    guard = workflow["jobs"]["validation-inputs"]
+    assert guard["if"] == "github.event_name == 'workflow_dispatch' && inputs.run_live_agents"
+    assert guard["steps"][0]["if"] == "inputs.candidate_image != ''"
+    assert "exit 2" in guard["steps"][0]["run"]
     provider_steps = [
         (job_id, step)
         for job_id, job in workflow["jobs"].items()

@@ -74,6 +74,7 @@ def test_production_installation_is_recorded_in_the_system_attempt() -> None:
     record = next(step for step in steps if "--proof system" in step.get("run", ""))
     assert production["if"] == "inputs.candidate_image != ''"
     assert '--candidate-image "$CANDIDATE_IMAGE"' in production["run"]
+    assert production["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert steps.index(production) < steps.index(record)
     assert record["if"] == "always()"
     upload = next(
@@ -511,20 +512,19 @@ def test_promotion_finds_retained_candidate_across_artifact_pages(
 
     def github(command: list[str], **kwargs: object) -> str:
         calls.append(command)
-        if command[2] == "repos/owner/repository/actions/artifacts?per_page=100":
+        if command[2] == (
+            "repos/owner/repository/actions/workflows/release-candidate.yml/runs"
+            f"?branch=main&head_sha={COMMIT}&per_page=100"
+        ):
             assert command[-2:] == ["--paginate", "--slurp"]
-            wrong = {
-                **artifact(name="release-candidate-42-1"),
-                "workflow_run": {"head_sha": "other"},
-            }
             return json.dumps(
                 [
-                    {"artifacts": [artifact(name="release-candidate-42-1", expired=True), wrong]},
-                    {"artifacts": [artifact(name="release-candidate-42-1")]},
+                    {"workflow_runs": [{**run_record(), "id": 43}]},
+                    {"workflow_runs": [run_record()]},
                 ]
             )
-        if command[2] == "repos/owner/repository/actions/runs/42":
-            return json.dumps(run_record())
+        if command[2] == "repos/owner/repository/actions/runs/43/artifacts?per_page=100":
+            return json.dumps([{"artifacts": []}])
         if command[2] == "repos/owner/repository/actions/runs/42/artifacts?per_page=100":
             return json.dumps([{"artifacts": [artifact(name="release-candidate-42-1")]}])
         raise AssertionError(command)
@@ -552,12 +552,11 @@ def test_retained_artifact_cannot_make_an_unrelated_or_failed_run_eligible(
     value: str,
 ) -> None:
     def github(repository: str, path: str, **kwargs: object) -> object:
-        if path.startswith("actions/artifacts?"):
-            return [{"artifacts": [artifact()]}]
-        return {**run_record(), field: value}
+        assert path.startswith("actions/workflows/release-candidate.yml/runs?")
+        return [{"workflow_runs": [{**run_record(), field: value}]}]
 
     monkeypatch.setattr(candidate, "github_api", github)
-    assert candidate.validated_run("owner/repository", COMMIT) is None
+    assert candidate.validated_artifact("owner/repository", COMMIT) is None
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
@@ -566,7 +565,9 @@ def test_prepare_reuses_completed_source_ci_without_running_tests(
     event: str,
 ) -> None:
     def github(repository: str, path: str, **kwargs: object) -> object:
-        if path.startswith("actions/artifacts?"):
+        if path.startswith("actions/workflows/release-candidate.yml/runs?"):
+            return [{"workflow_runs": [run_record()]}]
+        if path.startswith("actions/runs/42/artifacts?"):
             return [{"artifacts": [artifact(expired=True)]}]
         return {"workflow_runs": [run_record(workflow="ci.yml", event=event)]}
 
@@ -613,7 +614,7 @@ def test_candidate_reuse_verifies_downloaded_evidence_before_skipping_work(
     monkeypatch: pytest.MonkeyPatch,
     tampered: bool,
 ) -> None:
-    monkeypatch.setattr(candidate, "validated_run", lambda *args: 42)
+    monkeypatch.setattr(candidate, "validated_artifact", lambda *args: (42, artifact()))
     monkeypatch.setattr(candidate, "source_run", lambda *args: pytest.fail("source CI repeated"))
 
     def download(command: list[str], **kwargs: object) -> None:
