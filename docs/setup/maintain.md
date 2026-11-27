@@ -84,25 +84,28 @@ not recover deployment secrets or a lost database. Use the
 
 ## Update the application
 
-These steps update the server and its team's clients to v0.4.2. Use the
+These steps update the server and its team's clients to v0.4.3. Use the
 published release's `release.json` and matching tagged guides. The supported
-published predecessors are v0.2.0, v0.3.0, v0.4.0, and v0.4.1. For v0.1.0 or older installations, first use
-the [tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
+published predecessors are v0.2.0, v0.3.0, v0.4.0, v0.4.1, and v0.4.2. For
+v0.1.0 or older installations, first use the
+[tagged v0.2.0 update guide](https://github.com/btfranklin/startunnel/blob/v0.2.0/docs/setup/maintain.md#update-the-application).
 Custom or unversioned deployments must check their installed source and
 migration history as described below.
 
-There are no new migrations after v0.4.0. Upgrades from v0.2.0 or v0.3.0
-also apply `tunnels.0011`, which adds runtime-role history and retry guards.
-Data and credentials are preserved without a tunnel reset. The migration has
-no reverse operation; rollback needs the verified pre-upgrade database backup.
-Read the [release notes](https://github.com/btfranklin/startunnel/blob/v0.4.2/releases/v0.4.2.md)
-for the Python 3.15 host requirement and the earlier credential-cap and proxy
-instructions. The server still requires
-official CLI v0.3.0 or later. Older copies
-receive a clear update error before an API operation runs. Update each client
-after the server update; the download remains available to older clients.
+This release makes admin usernames unique without regard to case. Upgrade
+preview checks for conflicting names. Give each of those accounts a distinct
+username on the installed release, then run preview again. The migration
+also checks for conflicting names before it adds the constraint.
 
-1. Select v0.4.2 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.4.2).
+Upgrades from v0.2.0 or v0.3.0 also apply `tunnels.0011`, which adds runtime-role
+history and retry guards. It has no reverse operation. Keep the verified
+pre-upgrade database backup. Read the
+[release notes](https://github.com/btfranklin/startunnel/blob/v0.4.3/releases/v0.4.3.md)
+for host requirements and recovery instructions. The server requires official
+CLI v0.3.0 or later. Update each client from the instance after the server
+upgrade.
+
+1. Select v0.4.3 from [GitHub Releases](https://github.com/btfranklin/startunnel/releases/tag/v0.4.3).
    Read its notes, configuration changes, database compatibility, and rollback
    instructions. Download its attached `release.json` outside the checkout.
    Keep the source commit and immutable image digest together.

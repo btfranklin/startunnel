@@ -1,0 +1,17 @@
+{
+  "version": "v0.4.3",
+  "supported_from": [
+    "v0.2.0",
+    "v0.3.0",
+    "v0.4.0",
+    "v0.4.1",
+    "v0.4.2"
+  ],
+  "configuration_changes": [
+    "Host tools require Python 3.15.2 or later. Production helpers validate the effective Compose configuration before starting services or applying an upgrade. Keep the selected production environment and its matching override files.",
+    "Backups and maintenance commands share an instance lock. Use the updated backup, recovery, and upgrade guides. For upgrades from v0.2.0 or v0.3.0, also follow the v0.4.0 credential-cap and trusted-proxy instructions.",
+    "The minimum official CLI version stays at v0.3.0. Update each client from the upgraded instance and verify authentication."
+  ],
+  "database": "PostgreSQL remains on major version 18. Migration accounts.0005 makes admin usernames unique without regard to case. If existing usernames differ only in case, rename those accounts on the installed release before applying the upgrade. Preview checks for these conflicts before stopping writers. Existing accounts, credentials, messages, and tunnel addresses are preserved. Upgrades from v0.2.0 or v0.3.0 also apply the forward-only tunnels.0011 migration. Follow the tagged v0.2.0 guide first for v0.1.0 and older installations.",
+  "rollback": "Keep a fresh verified off-server backup with matching secrets, source, configuration, and immutable image references. To recover after a migrated upgrade, stop writers and restore those inputs together. A database restore removes writes made after the backup. Use the replacement-host recovery instructions and verify an existing agent credential before resuming service."
+}
