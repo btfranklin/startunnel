@@ -237,6 +237,7 @@ def test_dispatch_source_is_separate_only_for_promotion_timing(
     )
     monkeypatch.setattr(release_status, "git_commit", lambda: tagged_source)
     monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
+    monkeypatch.setattr(release_status, "candidate_runs", lambda *_args: [])
     monkeypatch.setattr(
         release_status,
         "github_api",
@@ -278,6 +279,7 @@ def test_promotion_timing_rejects_an_unrelated_workflow(
     }
     monkeypatch.setattr(release_status, "git_commit", lambda: "a" * 40)
     monkeypatch.setattr(release_status, "workflow_status", lambda *args: workflow)
+    monkeypatch.setattr(release_status, "candidate_runs", lambda *_args: [])
     monkeypatch.setattr(
         release_status,
         "github_api",

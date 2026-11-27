@@ -1,0 +1,33 @@
+name: CI comparison (template lint)
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  template-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out the candidate
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: '>=3.15.2'
+        check-latest: true
+    - name: Set up Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+      with:
+        node-version: '24'
+        package-manager-cache: false
+    - name: Install PDM and locked dependencies
+      run: 'python -m pip install --no-cache-dir --disable-pip-version-check "pdm>=2.29.5"
+
+        pdm install --frozen-lockfile --no-self
+
+        '
+    - name: Compare template lint on the same checkout
+      shell: bash
+      run: "git show 27a1411:scripts/check_templates.py > scripts/.check_templates_control.py\ntrap 'rm -f scripts/.check_templates_control.py' EXIT\npdm run python - <<'PYTHON'\nimport statistics\nimport subprocess\nimport sys\nimport time\nsamples = {\"control\": [], \"batched\": []}\nfor trial in range(3):\n    order = list(samples) if trial % 2 == 0 else list(reversed(samples))\n    for mode in order:\n        script = \"scripts/.check_templates_control.py\" if mode == \"control\" else \"scripts/check_templates.py\"\n        start = time.perf_counter()\n        subprocess.run([sys.executable, script], check=True)\n        samples[mode].append(round(time.perf_counter() - start, 3))\nfor mode, values in samples.items():\n    print(mode, values, \"median\", statistics.median(values))\nPYTHON\n"
