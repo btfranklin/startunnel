@@ -60,6 +60,44 @@ jobs:
         run: |
           python -m pip install --no-cache-dir --disable-pip-version-check "pdm>=2.29.5"
           pdm install --frozen-lockfile --no-self
+      - name: Install Perfect Doc
+        run: |
+          tool_dir="$RUNNER_TEMP/perfect-doc"
+          mkdir -p "$tool_dir"
+          cd "$tool_dir"
+          archive=perfect-doc-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+          base=https://github.com/btfranklin/perfect-doc/releases/download/v0.1.0
+          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
+          curl --fail --location --silent --show-error "$base/SHA256SUMS" --output SHA256SUMS
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$archive"
+          echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      - name: Run the canonical gate
+        run: pdm run check
+
+  source-security:
+    name: Source security gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ">=3.15.2"
+          check-latest: true
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install PDM and locked dependencies
+        run: |
+          python -m pip install --no-cache-dir --disable-pip-version-check "pdm>=2.29.5"
+          pdm install --frozen-lockfile --no-self
       - name: Install the source secret scanner
         run: |
           tool_dir="$RUNNER_TEMP/gitleaks"
@@ -82,24 +120,10 @@ jobs:
           path: artifacts/security/
           if-no-files-found: warn
           retention-days: 90
-      - name: Install Perfect Doc
-        run: |
-          tool_dir="$RUNNER_TEMP/perfect-doc"
-          mkdir -p "$tool_dir"
-          cd "$tool_dir"
-          archive=perfect-doc-0.1.0-x86_64-unknown-linux-gnu.tar.gz
-          base=https://github.com/btfranklin/perfect-doc/releases/download/v0.1.0
-          curl --fail --location --silent --show-error "$base/$archive" --output "$archive"
-          curl --fail --location --silent --show-error "$base/SHA256SUMS" --output SHA256SUMS
-          sha256sum --check --ignore-missing SHA256SUMS
-          tar -xzf "$archive"
-          echo "$tool_dir/perfect-doc-0.1.0-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
-      - name: Run the canonical gate
-        run: pdm run check
 
   postgres:
     name: PostgreSQL
-    needs: canonical
+    needs: source-security
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -154,7 +178,7 @@ jobs:
 
   external-proofs:
     name: ${{ matrix.lane }} proof
-    needs: canonical
+    needs: source-security
     runs-on: ubuntu-latest
     timeout-minutes: 50
     strategy:
@@ -191,7 +215,7 @@ jobs:
 
   browser:
     name: Chromium, Firefox, and WebKit
-    needs: canonical
+    needs: source-security
     runs-on: ubuntu-latest
     timeout-minutes: 80
     steps:
@@ -224,7 +248,7 @@ jobs:
   timing:
     name: Workflow timing
     if: always()
-    needs: [standalone-cli, canonical, postgres, external-proofs, browser]
+    needs: [standalone-cli, canonical, source-security, postgres, external-proofs, browser]
     runs-on: ubuntu-latest
     permissions:
       actions: read

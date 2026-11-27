@@ -1720,13 +1720,17 @@ def test_ci_checks_both_fresh_docker_bootstrap_paths_before_service_proofs() -> 
 
 def test_source_scan_failure_blocks_service_builds() -> None:
     jobs = load_workflow("ci.yml")["jobs"]
-    steps = jobs["canonical"]["steps"]
-    source = next(step for step in steps if step.get("run") == "pdm run security-release source")
-    checks = next(step for step in steps if step.get("run") == "pdm run check")
-    assert steps.index(source) < steps.index(checks)
+    security = jobs["source-security"]
+    source = next(
+        step for step in security["steps"] if step.get("run") == "pdm run security-release source"
+    )
+    assert not security.get("needs")
     assert not source.get("continue-on-error")
+    assert not jobs["canonical"].get("needs")
+    assert any(step.get("run") == "pdm run check" for step in jobs["canonical"]["steps"])
     for job in ("postgres", "external-proofs", "browser"):
-        assert jobs[job]["needs"] == "canonical"
+        assert jobs[job]["needs"] == "source-security"
+    assert {"source-security", "canonical"} <= set(jobs["timing"]["needs"])
 
 
 def test_ci_proves_historical_admin_reset_and_declared_predecessors() -> None:

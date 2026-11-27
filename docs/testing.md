@@ -39,7 +39,11 @@ their fixture data with `transaction=True`.
 `pdm run check` runs formatting, lint, types, repository checks, migration checks, OpenAPI checks, and the fast test suite.
 Release and release-tooling changes also require `pdm run security-release source`
 before a push. This separate lane checks locked inputs, source secrets, Bandit,
-and npm dependencies before CI starts service builds. It requires Gitleaks,
+and npm dependencies before CI starts service builds. CI runs the source
+security and canonical gates in parallel. A successful source security gate
+starts the service lanes. CI still requires the canonical gate for overall
+success. If that gate fails after a service lane starts, the lane can finish.
+The source security gate requires Gitleaks,
 Node.js/npm, and the locked PDM tools. The [CI tool setup](../.github/workflows/ci.yml)
 owns their installation commands. See the
 [dependency and build input policy](operations.md#dependency-and-build-inputs)

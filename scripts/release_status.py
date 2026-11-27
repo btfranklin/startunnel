@@ -282,8 +282,11 @@ def _dependencies(jobs: Sequence[Mapping[str, object]], workflow: str) -> dict[s
     names = {json_string(job["name"]) for job in jobs}
     result: dict[str, list[str]] = {}
     if workflow == "ci.yml":
-        canonical = next((name for name in names if name == "Canonical locked gate"), None)
-        if canonical:
+        service_gate = next(
+            (name for name in ("Source security gate", "Canonical locked gate") if name in names),
+            None,
+        )
+        if service_gate:
             for name in names:
                 if name in {
                     "PostgreSQL",
@@ -291,7 +294,7 @@ def _dependencies(jobs: Sequence[Mapping[str, object]], workflow: str) -> dict[s
                     "agents proof",
                     "Chromium, Firefox, and WebKit",
                 }:
-                    result[name] = [canonical]
+                    result[name] = [service_gate]
         result["Workflow timing"] = [name for name in names if name != "Workflow timing"]
     elif workflow == "release-candidate.yml":
         prepare, build, evidence = (

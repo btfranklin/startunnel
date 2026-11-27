@@ -533,6 +533,24 @@ def test_expired_or_duplicate_artifacts_cannot_produce_verified_status(
         release_status.candidate_from_workflow("owner/repo", workflow, commit="a" * 40)
 
 
+def test_source_timing_uses_the_service_start_gate() -> None:
+    names = [
+        "Canonical locked gate",
+        "PostgreSQL",
+        "examples proof",
+        "agents proof",
+        "Chromium, Firefox, and WebKit",
+        "Workflow timing",
+    ]
+    historical = release_status._dependencies([{"name": name} for name in names], "ci.yml")
+    assert historical["PostgreSQL"] == ["Canonical locked gate"]
+    names.append("Source security gate")
+    current = release_status._dependencies([{"name": name} for name in names], "ci.yml")
+    for name in names[1:5]:
+        assert current[name] == ["Source security gate"]
+    assert {"Canonical locked gate", "Source security gate"} <= set(current["Workflow timing"])
+
+
 def test_candidate_timing_includes_the_early_production_preflight() -> None:
     prepare = "Reuse completed validation"
     build = "Build one release image"
